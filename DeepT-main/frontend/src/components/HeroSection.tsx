@@ -332,7 +332,7 @@ const InteractiveHero: React.FC = () => {
                newDots.push({
                    x,
                    y,
-                   baseColor: `rgba(13, 148, 136, ${BASE_OPACITY_MAX})`,
+                   baseColor: `rgba(255, 255, 255, ${BASE_OPACITY_MAX})`,
                    targetOpacity: baseOpacity,
                    currentOpacity: baseOpacity,
                    opacitySpeed: (Math.random() * 0.005) + 0.002,
@@ -482,24 +482,18 @@ const InteractiveHero: React.FC = () => {
     };
 
     const designedForItems = [
-        "Federal employees",
-        "Government workflows",
-        "Human review",
-        "Safe AI use",
-        "Cross-entity sharing",
+        "Instructors",
+        "Curriculum designers",
+        "Academic teams",
+        "Program leads",
+        "Learning designers",
     ];
 
   return (
-    <div
-        className="relative text-slate-600 min-h-screen flex flex-col overflow-x-hidden"
-        style={{
-            background:
-                'radial-gradient(720px 380px at 5% 0%, rgba(18,120,118,0.18), transparent 60%), radial-gradient(640px 380px at 100% 8%, rgba(30,79,176,0.16), transparent 60%), radial-gradient(620px 420px at 85% 118%, rgba(11,87,64,0.12), transparent 60%), linear-gradient(160deg, #E6EEED 0%, #F1F4F2 50%, #E3EBEA 100%)'
-        }}
-    >
+    <div className="relative bg-[#111111] text-gray-300 min-h-screen flex flex-col overflow-x-hidden">
         <canvas ref={canvasRef} className="absolute inset-0 z-0 pointer-events-none opacity-80" />
         <div className="absolute inset-0 z-1 pointer-events-none" style={{
-            background: 'linear-gradient(to bottom, transparent 0%, rgba(227,235,234,0.85) 92%), radial-gradient(ellipse at center, transparent 45%, rgba(227,235,234,0.6) 95%)'
+            background: 'linear-gradient(to bottom, transparent 0%, #111111 90%), radial-gradient(ellipse at center, transparent 40%, #111111 95%)'
         }}></div>
 
         <main className="flex-grow flex flex-col items-center justify-start text-center px-4 pt-20 sm:pt-28 pb-16 relative z-10">
@@ -510,26 +504,26 @@ const InteractiveHero: React.FC = () => {
                 animate="visible"
                 className="mb-6"
             >
-                <ShinyText text="Federal Agent Library" className="bg-white/70 border border-slate-300 text-[#0D9488] px-4 py-1 rounded-full text-xs sm:text-sm font-medium cursor-pointer hover:border-[#0D9488]/50 transition-colors" />
+                <ShinyText text="Curriculum Intelligence System" className="bg-white/5 border border-white/10 text-gray-300 px-4 py-1 rounded-full text-xs sm:text-sm font-medium cursor-pointer hover:border-white/20 transition-colors" />
             </motion.div>
 
             <motion.h1
                 variants={headlineVariants}
                 initial="hidden"
                 animate="visible"
-                className="text-4xl sm:text-5xl lg:text-[64px] font-semibold text-slate-900 leading-tight max-w-4xl mb-4"
+                className="text-4xl sm:text-5xl lg:text-[64px] font-semibold text-white leading-tight max-w-4xl mb-4"
             >
                 Build the next generation of<br />{' '}
                 <span className="inline-block align-bottom">
                     <RotatingText
                         texts={[
-                            'smarter public services',
-                            'AI contributions for the UAE',
-                            'practical agents for real work',
-                            'ideas that serve the nation',
-                            'government work agents',
+                            'intelligent curricula',
+                            'data-driven courses',
+                            'adaptive learning paths',
+                            'smarter course design',
+                            'curriculum intelligence',
                         ]}
-                        mainClassName="text-[#0D9488] mx-1"
+                        mainClassName="text-indigo-400 mx-1"
                         staggerFrom={"first"}
                         initial={{ y: "-100%", opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
@@ -548,9 +542,9 @@ const InteractiveHero: React.FC = () => {
                 variants={subHeadlineVariants}
                 initial="hidden"
                 animate="visible"
-                className="text-base sm:text-lg lg:text-xl text-slate-600 max-w-2xl mx-auto mb-8"
+                className="text-base sm:text-lg lg:text-xl text-gray-400 max-w-2xl mx-auto mb-8"
             >
-                Turn your everyday work experience into practical AI-powered agents that support better workflows, safer decisions, and smarter government services — created by federal employees, for federal government work.
+                Design, analyze, and improve your courses with an AI copilot that understands learning outcomes, content gaps, and student needs — so you can build better curricula, faster.
             </motion.p>
 
             <motion.div
@@ -561,21 +555,21 @@ const InteractiveHero: React.FC = () => {
             >
                 <motion.a
                     href="/courses/new"
-                    className="w-full sm:w-auto bg-[#0D9488] text-white px-6 py-2.5 rounded-md text-sm font-semibold hover:bg-[#0B7E73] transition-colors duration-200 whitespace-nowrap shadow-sm hover:shadow-md text-center"
+                    className="w-full sm:w-auto bg-indigo-500 text-white px-6 py-2.5 rounded-md text-sm font-semibold hover:bg-indigo-600 transition-colors duration-200 whitespace-nowrap shadow-sm hover:shadow-md text-center"
                     whileHover={{ scale: 1.03, y: -1 }}
                     whileTap={{ scale: 0.97 }}
                     transition={{ type: "spring", stiffness: 400, damping: 15 }}
                 >
-                    Create My First Agent
+                    Create a new course
                 </motion.a>
                 <motion.a
                     href="/dashboard"
-                    className="w-full sm:w-auto bg-white/70 text-slate-800 border border-slate-300 px-6 py-2.5 rounded-md text-sm font-semibold hover:bg-white hover:border-slate-400 transition-colors duration-200 whitespace-nowrap text-center"
+                    className="w-full sm:w-auto bg-white/5 text-gray-200 border border-white/15 px-6 py-2.5 rounded-md text-sm font-semibold hover:bg-white/10 hover:border-white/25 transition-colors duration-200 whitespace-nowrap text-center"
                     whileHover={{ scale: 1.03, y: -1 }}
                     whileTap={{ scale: 0.97 }}
                     transition={{ type: "spring", stiffness: 400, damping: 15 }}
                 >
-                    Explore the Agent Library
+                    Go to dashboard
                 </motion.a>
             </motion.div>
 
@@ -585,12 +579,12 @@ const InteractiveHero: React.FC = () => {
                 animate="visible"
                 className="flex flex-col items-center justify-center space-y-3 mb-10"
             >
-                <span className="text-xs uppercase text-slate-500 tracking-wider font-medium">Designed for</span>
+                <span className="text-xs uppercase text-gray-500 tracking-wider font-medium">Designed for</span>
                 <div className="flex flex-wrap items-center justify-center gap-2">
                     {designedForItems.map((item) => (
                         <span
                             key={item}
-                            className="whitespace-nowrap rounded-full border border-slate-300 bg-white/70 px-3 py-1 text-xs sm:text-sm text-slate-700"
+                            className="whitespace-nowrap rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs sm:text-sm text-gray-300"
                         >
                             {item}
                         </span>
