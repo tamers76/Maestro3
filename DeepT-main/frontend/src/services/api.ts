@@ -1,0 +1,2145 @@
+const API_BASE = '/api';
+
+// Types
+export interface CourseListItem {
+  course_code: string;
+  title: string;
+  current_stage: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CLO {
+  clo_id: string;
+  clo_text: string;
+  capability_statement: string;
+  conditions_of_performance: string;
+  evidence_of_mastery: string;
+  bloom_level: string;
+  knowledge_type: string;
+  risk_level: string;
+}
+
+// Canonical Node Types (Stage 2)
+export type NodeType = 'concept' | 'principle' | 'procedure' | 'application' | 'metacognitive' | 'transfer';
+export const CANONICAL_NODE_TYPES: NodeType[] = ['concept', 'principle', 'procedure', 'application', 'metacognitive', 'transfer'];
+
+// Skipping eligibility
+export type SkippingEligibility = 'non_skippable' | 'conditionally_skippable' | 'skippable' | 'not_applicable';
+export type RequiredStatus = 'mandatory' | 'optional';
+
+export interface LearningNode {
+  node_id: string;
+  clo_id: string;
+  topic_id: string;
+  topic_title?: string;
+  node_type: string;
+  learning_intent: string;
+  prerequisite_nodes: string[];
+  risk_level: string;
+  mandatory: boolean;
+  skippable: boolean;
+  required_status: RequiredStatus;
+  skipping_eligibility: SkippingEligibility;
+  skip_conditions: string;
+  failure_meaning: string;
+  diagnostic_intent: string;
+  // Stage 3 assessment intelligence
+  stage3_logic_json?: string;
+  stage3_preknowledge_eligible?: boolean;
+  stage3_gate_strictness?: 'strict' | 'flexible';
+  content_path?: string;
+  // UI position (Stage 2.5 editor)
+  ui_x?: number;
+  ui_y?: number;
+}
+
+// ============================================================================
+// STAGE 3 — Assessment Intelligence Types
+// ============================================================================
+
+export type GateStrictness = 'strict' | 'flexible';
+
+export interface FailureType {
+  id: string;
+  description: string;
+  misconception_category: string;
+  severity: 'low' | 'medium' | 'high';
+}
+
+export interface ObservableSignal {
+  id: string;
+  description: string;
+  failure_type_ids: string[];
+  signal_type: string;
+}
+
+export interface RemediationPath {
+  id: string;
+  failure_type_id: string;
+  strategy: string;
+  description: string;
+  target_node_id?: string;
+}
+
+export interface ProgressionRules {
+  mastery_definition: string;
+  mastery_threshold: 'full' | 'partial' | 'flexible';
+  gate_strictness: GateStrictness;
+  blocks_downstream: boolean;
+  rationale: string;
+}
+
+export interface PreknowledgeCheckLogic {
+  eligible: boolean;
+  reasoning_based: boolean;
+  check_description: string;
+  high_risk_override: boolean;
+  explainability_note: string;
+}
+
+export interface Stage3NodeLogic {
+  node_id: string;
+  diagnostic_intent: string;
+  failure_types: FailureType[];
+  observable_signals: ObservableSignal[];
+  remediation_paths: RemediationPath[];
+  progression_rules: ProgressionRules;
+  preknowledge_check_logic: PreknowledgeCheckLogic;
+  required_status: RequiredStatus;
+  skipping_eligibility: SkippingEligibility;
+  skip_conditions: string;
+}
+
+export interface Stage3Snapshot {
+  course_code: string;
+  generated_at: string;
+  node_count: number;
+  nodes: Stage3NodeLogic[];
+  summary: {
+    total_nodes: number;
+    mandatory_count: number;
+    optional_count: number;
+    strict_gate_count: number;
+    flexible_gate_count: number;
+    preknowledge_eligible_count: number;
+    failure_types_total: number;
+    remediation_paths_total: number;
+  };
+}
+
+// Stage 3 Incomplete Report — nodes missing one or more A–F elements
+export interface Stage3IncompleteNode {
+  node_id: string;
+  missing_elements: string[];
+}
+
+export interface Stage3IncompleteReport {
+  course_code: string;
+  generated_at: string;
+  incomplete_count: number;
+  nodes: Stage3IncompleteNode[];
+}
+
+// Learning Node Upsert (for Stage 2.5 editing)
+export interface LearningNodeUpsert {
+  node_id?: string; // If omitted, server generates a new ID
+  node_type: string;
+  learning_intent: string;
+  risk_level: string;
+  failure_meaning?: string;
+  diagnostic_intent?: string;
+  topic_id?: string;
+  ui_x?: number;
+  ui_y?: number;
+}
+
+// Weekly plan item with CLO mapping
+export interface WeeklyPlanItem {
+  week: number;
+  topic: string;
+  description: string;
+  readings?: string;
+  clo_ids?: string[];
+}
+
+// CLO Distribution statistics
+export interface CLODistributionStat {
+  clo_id: string;
+  clo_text: string;
+  weeks_covered: number[];
+  count: number;
+  is_fair: boolean;
+}
+
+export interface CLODistribution {
+  total_weeks: number;
+  total_clos: number;
+  ideal_weeks_per_clo: number;
+  min_acceptable: number;
+  max_acceptable: number;
+  per_clo: CLODistributionStat[];
+  overall_is_fair: boolean;
+  mapped_weeks: number;
+  unmapped_weeks: number[];
+  computed_at: string;
+}
+
+// AI-suggested weekly plan types (from deep textbook research) — LEGACY, kept for migration
+export interface ResolvedTextbook {
+  title?: string;
+  authors?: string[];
+  edition?: string;
+  isbn?: string;
+}
+
+export interface SuggestedWeeklyPlanItem {
+  week: number;
+  topic: string;
+  description: string;
+  readings: string;
+  clo_ids: string[];
+  rationale: string;
+}
+
+export interface SuggestedWeeklyPlan {
+  generated_at: string;
+  provider: 'openai';
+  model: string;
+  textbook: ResolvedTextbook | null;
+  weekly_plan: SuggestedWeeklyPlanItem[];
+  web_sources: Array<{ title: string; url: string }>;
+  stale?: boolean;
+  stale_reason?: string;
+}
+
+// ============================================================================
+// TOPIC-PER-CLO MODEL (replaces week-centric planning)
+// ============================================================================
+
+// A single self-paced topic that a learner completes toward a CLO
+export interface TopicItem {
+  topic_id: string;
+  title: string;
+  description: string;
+  readings?: string;
+  rationale?: string;
+}
+
+// Topics grouped by CLO
+export interface CloTopicGroup {
+  clo_id: string;
+  topics: TopicItem[];
+}
+
+export type CloTopics = CloTopicGroup[];
+
+// AI-suggested topic for a CLO (from deep research)
+export interface SuggestedTopicItem {
+  title: string;
+  description: string;
+  readings: string;
+  rationale: string;
+}
+
+// AI-suggested topics grouped by CLO
+export interface SuggestedCloTopicGroup {
+  clo_id: string;
+  topics: SuggestedTopicItem[];
+}
+
+// AI-suggested topics (generated by deep textbook research)
+export interface SuggestedCloTopics {
+  generated_at: string;
+  provider: 'openai';
+  model: string;
+  textbook: ResolvedTextbook | null;
+  topics_by_clo: SuggestedCloTopicGroup[];
+  web_sources: Array<{ title: string; url: string }>;
+  stale?: boolean;
+  stale_reason?: string;
+}
+
+// CLO Topic Coverage statistics
+export interface CloTopicCoverageStat {
+  clo_id: string;
+  clo_text: string;
+  topic_count: number;
+  has_topics: boolean;
+}
+
+export interface CloTopicCoverage {
+  total_clos: number;
+  total_topics: number;
+  per_clo: CloTopicCoverageStat[];
+  all_clos_covered: boolean;
+  computed_at: string;
+}
+
+// Stage 1 Layer 2 — CLO refinement
+export type SmeRefinementDecision =
+  | 'pending'
+  | 'keep_official'
+  | 'accept_ai_refinement'
+  | 'custom_wording';
+
+export type CloApprovalStatus = 'pending' | 'approved' | 'needs_revision';
+
+export interface CouncilFeedbackSummary {
+  strengths?: string;
+  risks_limitations?: string;
+  adaptive_readiness_notes?: string;
+  evidence_of_mastery_direction?: string;
+  chairman_recommendation?: string;
+}
+
+export interface FullCouncilAnalysis {
+  learning_outcome_quality?: string;
+  curriculum_coherence?: string;
+  adaptive_readiness?: string;
+  assessment_evidence?: string;
+  discipline_context?: string;
+  chairman_synthesis?: string;
+  council_disagreement?: string;
+}
+
+export interface SuggestedCloRefinement {
+  clo_id: string;
+  official_clo: string;
+  council_feedback_summary: CouncilFeedbackSummary;
+  full_council_analysis: FullCouncilAnalysis;
+  ai_suggested_refined_clo: string;
+  refinement_rationale: string[];
+}
+
+export interface CloRefinementItem {
+  clo_id: string;
+  official_clo: string;
+  council_feedback_summary: CouncilFeedbackSummary;
+  full_council_analysis: FullCouncilAnalysis;
+  ai_suggested_refined_clo: string;
+  refinement_rationale: string[];
+  sme_decision: SmeRefinementDecision;
+  final_clo_for_adaptive_design: string;
+  sme_internal_note?: string;
+  approval_status: CloApprovalStatus;
+}
+
+export interface CloRefinementReviewSummary {
+  total_clos: number;
+  pending_count: number;
+  approved_count: number;
+  needs_revision_count: number;
+  all_approved: boolean;
+}
+
+export interface CloRefinementsResponse {
+  clos: CLO[];
+  suggestions: SuggestedCloRefinement[];
+  refinements: CloRefinementItem[];
+  summary: CloRefinementReviewSummary;
+  layer2GeneratedAt?: string;
+}
+
+// ---- Layer 3: Assessment Redesign ----
+export type AssessmentSmeDecision =
+  | 'pending'
+  | 'keep_original'
+  | 'accept_ai_redesign'
+  | 'custom_redesign';
+
+export interface OriginalAssessment {
+  title: string;
+  description: string;
+  type_or_format: string;
+  weight: string;
+}
+
+export interface CouncilAssessmentSummary {
+  what_works_well?: string;
+  what_may_limit_the_assessment?: string;
+  why_contribution_redesign_helps?: string;
+  recommendation?: string;
+}
+
+export interface AiSuggestedRedesign {
+  redesigned_title: string;
+  redesigned_description: string;
+  contribution_purpose: string;
+  refined_clo_alignment: string[];
+  fixed_academic_core: string;
+  personalized_context_variables: string[];
+  required_artifact: string;
+  output_format_options: string[];
+  suggested_evaluation_criteria: string[];
+  readiness_gate_needs: string[];
+  ai_integrity_features: string[];
+  publication_potential: string;
+}
+
+export interface FullAssessmentCouncilAnalysis {
+  clo_alignment_reasoning?: string;
+  authentic_contribution_reasoning?: string;
+  personalization_fairness_reasoning?: string;
+  rubric_validity_reasoning?: string;
+  ai_integrity_reasoning?: string;
+  publication_impact_reasoning?: string;
+  council_disagreements?: string;
+  chairman_synthesis?: string;
+  sme_risks_to_review: string[];
+  sme_questions: string[];
+}
+
+export interface FinalAssessmentForMaestro {
+  title: string;
+  description: string;
+  refined_clo_alignment: string[];
+  required_artifact: string;
+  output_format_options: string[];
+  fixed_academic_core: string;
+  personalized_context_variables: string[];
+  suggested_evaluation_criteria: string[];
+  readiness_gate_needs: string[];
+  ai_integrity_features: string[];
+  publication_potential: string;
+}
+
+export interface SuggestedAssessmentRedesign {
+  assessment_id: string;
+  original_assessment: OriginalAssessment;
+  council_summary: CouncilAssessmentSummary;
+  ai_suggested_redesign: AiSuggestedRedesign;
+  full_council_analysis: FullAssessmentCouncilAnalysis;
+  redesign_rationale: string[];
+}
+
+export interface AssessmentRedesignItem extends SuggestedAssessmentRedesign {
+  sme_decision: AssessmentSmeDecision;
+  final_assessment_for_maestro: FinalAssessmentForMaestro;
+  sme_internal_note?: string;
+  approval_status: CloApprovalStatus;
+}
+
+export interface AssessmentRedesignReviewSummary {
+  total_assessments: number;
+  pending_count: number;
+  approved_count: number;
+  needs_revision_count: number;
+  all_approved: boolean;
+}
+
+export interface AssessmentRedesignsResponse {
+  suggestions: SuggestedAssessmentRedesign[];
+  redesigns: AssessmentRedesignItem[];
+  summary: AssessmentRedesignReviewSummary;
+  layer3GeneratedAt?: string;
+}
+
+// ---- Layer 4: Assessment Structure, Weighting and Rubric ----
+export type WeightDecision =
+  | 'pending'
+  | 'keep_current'
+  | 'approve_proposed'
+  | 'custom_weights';
+
+export type WeightChangeType = 'no_change' | 'increased' | 'decreased';
+
+export type RubricDecision = 'pending' | 'approve' | 'edit' | 'needs_revision';
+
+export type AssessmentStructureDecision =
+  | 'pending'
+  | 'approve'
+  | 'edit'
+  | 'needs_revision';
+
+export type ProcessEvidenceStatus =
+  | 'required'
+  | 'graded'
+  | 'integrity_evidence_only'
+  | 'optional'
+  | 'not_required';
+
+export interface AssessmentProgressionItem {
+  assessment_id: string;
+  role_in_progression: string;
+}
+
+export interface WeightEntry {
+  assessment_id: string;
+  current_weight: string;
+  proposed_weight: string;
+  selected_weight: string;
+  approved_weight?: string | null;
+  change_type: WeightChangeType;
+}
+
+export interface CourseLevelWeightingSummary {
+  current_total_weight: string;
+  proposed_total_weight: string;
+  selected_total_weight: string;
+  weight_decision: WeightDecision;
+  step_1_approved: boolean;
+  weights_valid: boolean;
+  approved_at?: string | null;
+  weighting_rationale: string;
+  assessment_progression_overview: AssessmentProgressionItem[];
+  weights: WeightEntry[];
+}
+
+export interface AnalyticRubricCriterion {
+  rubric_criterion: string;
+  criterion_weight: string;
+  exceeds_standard: string;
+  meets_standard: string;
+  developing: string;
+  not_yet_evident: string;
+  evidence_required: string;
+  ai_scoring_guidance: string;
+}
+
+export interface ProcessEvidenceItem {
+  evidence_item: string;
+  status: ProcessEvidenceStatus;
+}
+
+export interface Layer4FinalAssessmentRef {
+  title: string;
+  description: string;
+  required_artifact: string;
+  refined_clo_alignment: string[];
+  suggested_evaluation_criteria: string[];
+}
+
+export interface AssessmentStructureReview {
+  assessment_id: string;
+  selected_weight_from_step_1: string;
+  final_assessment_from_layer_3: Layer4FinalAssessmentRef;
+  ai_assisted_analytic_rubric: AnalyticRubricCriterion[];
+  rubric_decision: RubricDecision;
+  process_evidence_requirements: ProcessEvidenceItem[];
+  ai_use_disclosure_rule: string;
+  revision_policy: string;
+  grading_policy: string;
+  assessment_structure_decision: AssessmentStructureDecision;
+  sme_internal_note?: string;
+  approval_status: CloApprovalStatus;
+}
+
+export interface WeightingRubricReviewSummary {
+  total_assessments: number;
+  pending_count: number;
+  approved_count: number;
+  needs_revision_count: number;
+  all_approved: boolean;
+  weighting_decided: boolean;
+  assessment_cards_unlocked: boolean;
+  selected_weight_total: number;
+  weights_balanced: boolean;
+}
+
+export interface WeightingRubricResponse {
+  course_level_weighting_summary: CourseLevelWeightingSummary;
+  assessment_structure_reviews: AssessmentStructureReview[];
+  full_assessment_structure_report?: string;
+  summary: WeightingRubricReviewSummary;
+  layer4GeneratedAt?: string;
+}
+
+export interface SaveWeightingRubricResult {
+  course_level_weighting_summary: CourseLevelWeightingSummary;
+  assessment_structure_reviews: AssessmentStructureReview[];
+  summary: WeightingRubricReviewSummary;
+}
+
+// Layer 5 — Assessment Integrity and Active AI Use
+export type AiUseAllowedStatus = 'allowed' | 'allowed_with_caution' | 'not_acceptable';
+export type PassiveAiRiskLevel = 'very_low' | 'low' | 'medium' | 'high';
+export type OwnershipRequiredStatus = 'required' | 'optional' | 'not_required';
+export type OwnershipUseStatus = 'graded' | 'integrity_evidence' | 'support_only';
+export type ReflectionDefenseRequirement =
+  | 'none'
+  | 'written_reflection'
+  | 'video_audio_explanation'
+  | 'oral_defense_if_flagged'
+  | 'sme_review_for_publication';
+export type IntegrityDecision = 'pending' | 'approve' | 'edit' | 'needs_revision';
+
+export interface AiUseFrameworkItem {
+  ai_use_category: string;
+  meaning: string;
+  allowed_status: AiUseAllowedStatus;
+  disclosure_required: boolean;
+}
+
+export interface CourseLevelIntegritySummary {
+  overall_integrity_position: string;
+  main_strengths: string[];
+  main_risks: string[];
+  sme_attention_points: string[];
+  ai_use_framework: AiUseFrameworkItem[];
+  full_integrity_report: string;
+}
+
+export interface IntegrityFinalAssessmentRef {
+  title: string;
+  required_artifact: string;
+  refined_clo_alignment: string[];
+  selected_weight: string;
+  rubric_summary: string[];
+}
+
+export interface PassiveAiRiskSummary {
+  risk_level: PassiveAiRiskLevel;
+  why_passive_ai_could_happen: string;
+  why_assessment_resists_passive_ai: string;
+  what_must_be_protected: string[];
+}
+
+export interface LearnerOwnershipEvidenceItem {
+  evidence_item: string;
+  purpose: string;
+  required_status: OwnershipRequiredStatus;
+  use_status: OwnershipUseStatus;
+}
+
+export interface AiUseDisclosureField {
+  field: string;
+  learner_must_explain: string;
+}
+
+export interface ContextVerificationItem {
+  check_item: string;
+  required: boolean;
+}
+
+export interface AssessmentIntegrityReview {
+  assessment_id: string;
+  final_assessment_reference: IntegrityFinalAssessmentRef;
+  passive_ai_risk_summary: PassiveAiRiskSummary;
+  learner_ownership_evidence: LearnerOwnershipEvidenceItem[];
+  ai_use_disclosure_requirements: AiUseDisclosureField[];
+  context_verification_requirements: ContextVerificationItem[];
+  reflection_or_defense_requirement: ReflectionDefenseRequirement;
+  integrity_flags: string[];
+  sme_decision: IntegrityDecision;
+  sme_internal_note?: string;
+  approval_status: CloApprovalStatus;
+}
+
+export interface IntegrityReviewReviewSummary {
+  total_assessments: number;
+  pending_count: number;
+  approved_count: number;
+  needs_revision_count: number;
+  all_approved: boolean;
+}
+
+export interface IntegrityReviewResponse {
+  course_level_integrity_summary: CourseLevelIntegritySummary;
+  assessment_integrity_reviews: AssessmentIntegrityReview[];
+  summary: IntegrityReviewReviewSummary;
+  layer5GeneratedAt?: string;
+}
+
+export interface SaveIntegrityReviewResult {
+  course_level_integrity_summary: CourseLevelIntegritySummary;
+  assessment_integrity_reviews: AssessmentIntegrityReview[];
+  summary: IntegrityReviewReviewSummary;
+}
+
+// ----------------------------------------------------------------------------
+// Stage 1 Layer 6 — Self-Paced Subtopic Architecture
+// ----------------------------------------------------------------------------
+
+export type SubtopicLearningFunction =
+  | 'foundational'
+  | 'applied'
+  | 'integrative'
+  | 'bridge'
+  | 'assessment_preparation';
+
+export type SubtopicEffort = 'low' | 'moderate' | 'high';
+
+export type SubtopicRecommendation = 'keep' | 'merge' | 'split' | 'move' | 'remove';
+
+export type SubtopicDecision =
+  | 'pending'
+  | 'approved'
+  | 'edited'
+  | 'rejected'
+  | 'needs_regeneration';
+
+export interface SubtopicCrossCloLink {
+  linked_clo_id: string;
+  reason: string;
+}
+
+export interface ArchitectureSubtopic {
+  subtopic_id: string;
+  proposed_subtopic: string;
+  purpose: string;
+  clo_alignment: string;
+  assessment_connection: string[];
+  learning_function: SubtopicLearningFunction;
+  expected_learning: string;
+  possible_node_families: string[];
+  cross_clo_links: SubtopicCrossCloLink[];
+  adaptive_value: string;
+  estimated_learning_effort: SubtopicEffort;
+  source_evidence: string[];
+  recommendation: SubtopicRecommendation;
+  sme_decision: SubtopicDecision;
+  sme_internal_note?: string;
+  approval_status: CloApprovalStatus;
+}
+
+export interface SubtopicCloSection {
+  clo_id: string;
+  refined_clo: string;
+  bloom_level: string;
+  related_assessments: string[];
+  clo_learning_journey_summary: string;
+  reference_readings: string[];
+  subtopics: ArchitectureSubtopic[];
+}
+
+export interface SubtopicArchitectureCourseSummary {
+  course_title: string;
+  total_refined_clos: number;
+  total_subtopics: number;
+  architecture_summary: string;
+  source_evidence_note: string;
+  full_report: string;
+}
+
+export interface SubtopicArchitectureReviewSummary {
+  total_clos: number;
+  total_subtopics: number;
+  pending_count: number;
+  approved_count: number;
+  needs_revision_count: number;
+  all_approved: boolean;
+}
+
+export interface SubtopicArchitectureResponse {
+  course_summary: SubtopicArchitectureCourseSummary;
+  clo_sections: SubtopicCloSection[];
+  summary: SubtopicArchitectureReviewSummary;
+  layer6GeneratedAt?: string;
+}
+
+export interface SaveSubtopicArchitectureResult {
+  course_summary: SubtopicArchitectureCourseSummary;
+  clo_sections: SubtopicCloSection[];
+  summary: SubtopicArchitectureReviewSummary;
+}
+
+// Course confirmation gates
+export interface CourseConfirmations {
+  weekly_plan_confirmed_at?: string; // LEGACY
+  weekly_plan_summary?: string; // LEGACY
+  clo_topics_confirmed_at?: string; // New: confirms CLO topic coverage
+  clo_topics_summary?: string;
+  node_graph_confirmed_at?: string; // Stage 2.5: user edited node graph
+  node_graph_summary?: string;
+  graph_confirmed_at?: string; // Stage 3: adaptive logic graph confirmation
+  graph_summary?: string;
+}
+
+export interface CourseDetail {
+  course_code: string;
+  title: string;
+  description: string;
+  credit_hours: number;
+  current_stage: number;
+  created_at: string;
+  updated_at: string;
+  clos: CLO[];
+  nodes: LearningNode[];
+  contract?: {
+    course_metadata: {
+      credits: number;
+      hours: number;
+      accreditation_tags: string[];
+    };
+    assessment_strategy: string;
+  };
+  snapshot?: {
+    weekly_plan: WeeklyPlanItem[]; // LEGACY
+    assessments: Array<{ name: string; type: string; weight: number; description: string }>;
+    references: string[];
+    clo_distribution?: CLODistribution; // LEGACY
+    suggested_weekly_plan?: SuggestedWeeklyPlan; // LEGACY
+    // New topic-per-CLO model
+    clo_topics?: CloTopics;
+    suggested_clo_topics?: SuggestedCloTopics;
+    clo_topic_coverage?: CloTopicCoverage;
+  };
+  confirmations?: CourseConfirmations;
+}
+
+export interface GraphData {
+  nodes: Array<{
+    id: string;
+    type: string;
+    label: string;
+    data: Record<string, unknown>;
+  }>;
+  edges: Array<{
+    id: string;
+    source: string;
+    target: string;
+    type: string;
+  }>;
+}
+
+export interface StageResult {
+  success: boolean;
+  stage: number;
+  message: string;
+  data?: unknown;
+  error?: string;
+}
+
+// Council execution info for progress tracking
+export interface CouncilInfo {
+  mode: 'single' | 'council';
+  memberCount: number;
+  models: string[];
+  chairmanModel: string;
+  phase?: 'deliberating' | 'synthesizing' | 'consensus';
+  activeModel?: string;
+  completedModels?: string[];
+}
+
+// Progress tracking types
+export interface ProgressUpdate {
+  courseCode: string;
+  stage: number;
+  status: 'idle' | 'running' | 'completed' | 'error';
+  step: string;
+  current?: number;
+  total?: number;
+  itemId?: string;
+  message?: string;
+  error?: string;
+  // Council execution details
+  council?: CouncilInfo;
+}
+
+export type AIProvider = 'openrouter' | 'ollama' | 'openai';
+export type StageExecutionMode = 'single' | 'council';
+
+// Per-stage model configuration
+export interface StageModelConfig {
+  mode: StageExecutionMode;
+  singleModel: string;
+  councilModels: string[];
+  chairmanModel: string;
+  // Per-stage council prompts (used when mode is 'council')
+  memberSystemPrompt?: string;
+  chairmanSystemPrompt?: string;
+  // Task prompts (used in both single and council modes)
+  taskPrompt?: string;
+  taskPrompt2?: string; // For Stage 1's CLO Analysis prompt (only used by stage1)
+}
+
+// All stages configuration
+export interface StageConfigs {
+  stage1: StageModelConfig;
+  stage2: StageModelConfig;
+  stage3: StageModelConfig;
+  stage4: StageModelConfig;
+  stage5: StageModelConfig;
+}
+
+// Global council settings (prompts - shared across all stages)
+export interface CouncilSettings {
+  memberSystemPrompt: string;
+  chairmanSystemPrompt: string;
+}
+
+// Legacy interfaces kept for backward compatibility
+export interface CouncilConfig {
+  councilModels: string[];
+  chairmanModel: string;
+  memberSystemPrompt: string;
+  chairmanSystemPrompt: string;
+}
+
+// Per-stage execution settings (legacy)
+export interface StageExecution {
+  stage1: StageExecutionMode;
+  stage2: StageExecutionMode;
+  stage3: StageExecutionMode;
+  stage4: StageExecutionMode;
+  stage5: StageExecutionMode;
+}
+
+export interface Settings {
+  aiProvider: AIProvider;
+  openrouter: {
+    apiKey: string;
+    baseUrl: string;
+  };
+  openai: {
+    apiKey: string;
+    baseUrl: string;
+  };
+  ollama: {
+    baseUrl: string;
+    options?: {
+      temperature?: number;
+      numCtx?: number;
+    };
+  };
+  models: {
+    stage1: string;
+    stage2: string;
+    stage3: string;
+    stage4: string;
+    stage5: string;
+  };
+  neo4j: {
+    uri: string;
+    user: string;
+    password: string;
+  };
+  // New per-stage model configuration
+  stageConfigs: StageConfigs;
+  // Global council settings (temperature, prompts)
+  councilSettings: CouncilSettings;
+  // Legacy fields (kept for backward compatibility)
+  council: CouncilConfig;
+  stageExecution: StageExecution;
+  stage1Layers?: Stage1LayerConfig[];
+}
+
+export type Stage1LayerStatus =
+  | 'not_started'
+  | 'locked'
+  | 'running'
+  | 'generated'
+  | 'needs_review'
+  | 'approved'
+  | 'needs_revision'
+  | 'blocked';
+
+export interface Stage1LayerConfig extends StageModelConfig {
+  id: string;
+  name: string;
+  description: string;
+  parentStage: number;
+  order: number;
+  productOutput: string;
+  outputFields: string[];
+  approvalRequired: boolean;
+  regenerateEnabled: boolean;
+  editEnabled: boolean;
+  lockNextUntilApproval: boolean;
+}
+
+export interface Stage1LayerState {
+  layerId: string;
+  status: Stage1LayerStatus;
+  reportMarkdown?: string;
+  outputJson?: unknown;
+  generatedAt?: string;
+  approvedAt?: string;
+  editedAt?: string;
+  error?: string;
+}
+
+export interface Stage1LayerStateView extends Stage1LayerState {
+  config: Stage1LayerConfig;
+  canRun: boolean;
+  canApprove: boolean;
+  canEdit: boolean;
+  canRegenerate: boolean;
+}
+
+export interface Stage1LayersResponse {
+  layers: Stage1LayerStateView[];
+  allApproved: boolean;
+  stage1Complete: boolean;
+}
+
+// API Functions
+export async function fetchCourses(): Promise<CourseListItem[]> {
+  const response = await fetch(`${API_BASE}/courses`);
+  if (!response.ok) throw new Error('Failed to fetch courses');
+  return response.json();
+}
+
+export async function fetchCourse(code: string): Promise<CourseDetail> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}`);
+  if (!response.ok) throw new Error('Failed to fetch course');
+  return response.json();
+}
+
+export async function createCourse(file: File): Promise<StageResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  const response = await fetch(`${API_BASE}/courses`, {
+    method: 'POST',
+    body: formData,
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to create course');
+  }
+  return response.json();
+}
+
+export async function createCourseFromForm(data: {
+  course_code: string;
+  title: string;
+  description: string;
+  credit_hours: number;
+  clos: string[];
+  assessments?: Array<{ name: string; type: string; weight: number; description: string }>;
+  references?: string[];
+}): Promise<StageResult> {
+  const response = await fetch(`${API_BASE}/courses/form`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to create course');
+  }
+  return response.json();
+}
+
+export async function deleteCourse(code: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) throw new Error('Failed to delete course');
+}
+
+export async function runStage(
+  code: string, 
+  stage: number, 
+  executionOverride?: StageExecutionMode
+): Promise<StageResult> {
+  const body = executionOverride ? { execution: executionOverride } : undefined;
+  
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/stage/${stage}`, {
+    method: 'POST',
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to run stage');
+  }
+  return response.json();
+}
+
+export async function fetchGraphData(code: string): Promise<GraphData> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/graph`);
+  if (!response.ok) throw new Error('Failed to fetch graph data');
+  return response.json();
+}
+
+export async function fetchNodeContent(code: string, nodeId: string): Promise<{ node_id: string; content: string }> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/nodes/${encodeURIComponent(nodeId)}/content`);
+  if (!response.ok) throw new Error('Failed to fetch node content');
+  return response.json();
+}
+
+export function getDownloadUrl(code: string, type: 'pdf' | 'zip' = 'pdf'): string {
+  return `${API_BASE}/courses/${encodeURIComponent(code)}/download${type === 'zip' ? '/zip' : ''}`;
+}
+
+// Settings API
+export async function fetchSettings(): Promise<Settings> {
+  const response = await fetch(`${API_BASE}/settings`);
+  if (!response.ok) throw new Error('Failed to fetch settings');
+  return response.json();
+}
+
+export async function fetchRawSettings(): Promise<Settings> {
+  const response = await fetch(`${API_BASE}/settings/raw`);
+  if (!response.ok) throw new Error('Failed to fetch settings');
+  return response.json();
+}
+
+export async function updateSettings(settings: Partial<Settings>): Promise<{ message: string; settings: Settings }> {
+  const response = await fetch(`${API_BASE}/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to update settings');
+  }
+  return response.json();
+}
+
+export async function testNeo4jConnection(): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE}/settings/test-neo4j`, { method: 'POST' });
+  return response.json();
+}
+
+export async function testOpenRouterConnection(): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE}/settings/test-openrouter`, { method: 'POST' });
+  return response.json();
+}
+
+export async function testOllamaConnection(): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE}/settings/test-ollama`, { method: 'POST' });
+  return response.json();
+}
+
+export async function testOpenAIConnection(): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE}/settings/test-openai`, { method: 'POST' });
+  return response.json();
+}
+
+// Recommended prompts interface (from backend defaults)
+export interface RecommendedPrompts {
+  global: {
+    memberSystemPrompt: string;
+    chairmanSystemPrompt: string;
+  };
+  stages: {
+    [key: string]: {
+      memberSystemPrompt: string;
+      chairmanSystemPrompt: string;
+      taskPrompt?: string;
+      taskPrompt2?: string; // Only for stage1 (CLO Analysis prompt)
+    };
+  };
+}
+
+// Fetch recommended system prompts from the backend
+export async function fetchRecommendedPrompts(): Promise<RecommendedPrompts> {
+  const response = await fetch(`${API_BASE}/settings/recommended-prompts`);
+  if (!response.ok) throw new Error('Failed to fetch recommended prompts');
+  const data = await response.json();
+  return data.data;
+}
+
+// Unified model interface (works for both OpenRouter and Ollama)
+export interface AIModel {
+  id: string;
+  name: string;
+  shortName?: string;
+  description: string;
+  contextLength: number;
+  maxOutput: number;
+  promptPrice: number;
+  completionPrice: number;
+  isFree: boolean;
+  provider: string;
+  modality: string;
+}
+
+// Legacy alias for backward compatibility
+export type OpenRouterModel = AIModel;
+
+export async function fetchOpenRouterModels(): Promise<AIModel[]> {
+  const response = await fetch(`${API_BASE}/settings/models`);
+  if (!response.ok) throw new Error('Failed to fetch OpenRouter models');
+  return response.json();
+}
+
+export async function fetchOllamaModels(): Promise<AIModel[]> {
+  const response = await fetch(`${API_BASE}/settings/models/ollama`);
+  if (!response.ok) throw new Error('Failed to fetch Ollama models');
+  return response.json();
+}
+
+export async function fetchOpenAIModels(): Promise<AIModel[]> {
+  const response = await fetch(`${API_BASE}/settings/models/openai`);
+  if (!response.ok) throw new Error('Failed to fetch OpenAI models');
+  return response.json();
+}
+
+// Fetch models based on current provider
+export async function fetchAvailableModels(provider: AIProvider = 'openrouter'): Promise<AIModel[]> {
+  if (provider === 'ollama') {
+    return fetchOllamaModels();
+  }
+  if (provider === 'openai') {
+    return fetchOpenAIModels();
+  }
+  return fetchOpenRouterModels();
+}
+
+// Progress tracking API
+
+/**
+ * Fetch current progress for a course (polling fallback)
+ */
+export async function fetchProgress(code: string): Promise<ProgressUpdate> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/progress`);
+  if (!response.ok) throw new Error('Failed to fetch progress');
+  return response.json();
+}
+
+// ============================================================================
+// Weekly Plan Mapping API
+// ============================================================================
+
+export interface WeeklyPlanMappingUpdate {
+  week: number
+  clo_ids: string[]
+}
+
+/**
+ * Save user-edited CLO-to-week mappings
+ */
+export async function saveWeeklyPlanMapping(
+  code: string, 
+  mappings: WeeklyPlanMappingUpdate[]
+): Promise<{
+  message: string
+  weekly_plan: WeeklyPlanItem[]
+  clo_distribution: CLODistribution
+}> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/weekly-plan/mapping`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mappings }),
+  })
+  if (!response.ok) {
+    // Try to parse as JSON, fallback to status text if not JSON
+    const contentType = response.headers.get('content-type')
+    if (contentType && contentType.includes('application/json')) {
+      const error = await response.json()
+      throw new Error(error.error || 'Failed to save weekly plan mapping')
+    } else {
+      throw new Error(`Server error: ${response.status} ${response.statusText}`)
+    }
+  }
+  return response.json()
+}
+
+// ============================================================================
+// CLO Week Suggestions API (Deep Research) — LEGACY
+// ============================================================================
+
+/**
+ * Generate AI-powered CLO week suggestions using OpenAI deep research
+ * Returns immediately; progress is tracked via SSE
+ * @deprecated Use generateSuggestedCloTopics instead
+ */
+export async function generateSuggestedWeeklyPlan(
+  code: string
+): Promise<{ message: string; status: string }> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/weekly-plan/suggest-clo-weeks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type')
+    if (contentType && contentType.includes('application/json')) {
+      const error = await response.json()
+      throw new Error(error.error || 'Failed to generate suggested weekly plan')
+    } else {
+      throw new Error(`Server error: ${response.status} ${response.statusText}`)
+    }
+  }
+  return response.json()
+}
+
+// ============================================================================
+// CLO Topics API (replaces weekly plan mapping)
+// ============================================================================
+
+/**
+ * Save user-edited CLO topics
+ */
+export async function saveCloTopics(
+  code: string,
+  cloTopics: CloTopics
+): Promise<{
+  message: string
+  clo_topics: CloTopics
+  clo_topic_coverage: CloTopicCoverage
+}> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/clo-topics`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clo_topics: cloTopics }),
+  })
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type')
+    if (contentType && contentType.includes('application/json')) {
+      const error = await response.json()
+      throw new Error(error.error || 'Failed to save CLO topics')
+    } else {
+      throw new Error(`Server error: ${response.status} ${response.statusText}`)
+    }
+  }
+  return response.json()
+}
+
+/**
+ * Generate AI-powered CLO topic suggestions using OpenAI deep research
+ * Returns immediately; progress is tracked via SSE
+ */
+export async function generateSuggestedCloTopics(
+  code: string
+): Promise<{ message: string; status: string }> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/clo-topics/suggest`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type')
+    if (contentType && contentType.includes('application/json')) {
+      const error = await response.json()
+      throw new Error(error.error || 'Failed to generate suggested CLO topics')
+    } else {
+      throw new Error(`Server error: ${response.status} ${response.statusText}`)
+    }
+  }
+  return response.json()
+}
+
+/**
+ * Confirm CLO topic coverage to unlock Stage 2
+ */
+export async function fetchStage1Layers(code: string): Promise<Stage1LayersResponse> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/stage1/layers`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch Stage 1 layers');
+  }
+  return response.json();
+}
+
+export async function runStage1Layer(
+  code: string,
+  layerId: string,
+  execution?: StageExecutionMode
+): Promise<{ success: boolean; layers: Stage1LayerStateView[]; layer: Stage1LayerState }> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/stage1/layers/${encodeURIComponent(layerId)}/run`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(execution ? { execution } : {}),
+    }
+  );
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Failed to run layer');
+  return data;
+}
+
+export async function approveStage1Layer(
+  code: string,
+  layerId: string
+): Promise<{ layers: Stage1LayerStateView[]; allApproved: boolean }> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/stage1/layers/${encodeURIComponent(layerId)}/approve`,
+    { method: 'POST' }
+  );
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Failed to approve layer');
+  return data;
+}
+
+export async function rejectStage1Layer(
+  code: string,
+  layerId: string
+): Promise<{ layers: Stage1LayerStateView[] }> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/stage1/layers/${encodeURIComponent(layerId)}/reject`,
+    { method: 'POST' }
+  );
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Failed to reject layer');
+  return data;
+}
+
+export async function fetchCloRefinements(code: string): Promise<CloRefinementsResponse> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/stage1/clo-refinements`
+  );
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch CLO refinements');
+  }
+  return response.json();
+}
+
+export async function saveCloRefinements(
+  code: string,
+  items: CloRefinementItem[]
+): Promise<{ refinements: CloRefinementItem[]; summary: CloRefinementReviewSummary }> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/stage1/clo-refinements`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    }
+  );
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to save CLO refinements');
+  }
+  return response.json();
+}
+
+export async function fetchAssessmentRedesigns(
+  code: string
+): Promise<AssessmentRedesignsResponse> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/stage1/assessment-redesigns`
+  );
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch assessment redesigns');
+  }
+  return response.json();
+}
+
+export async function saveAssessmentRedesigns(
+  code: string,
+  items: AssessmentRedesignItem[]
+): Promise<{ redesigns: AssessmentRedesignItem[]; summary: AssessmentRedesignReviewSummary }> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/stage1/assessment-redesigns`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    }
+  );
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to save assessment redesigns');
+  }
+  return response.json();
+}
+
+export async function saveCourseReferences(
+  code: string,
+  references: string[]
+): Promise<{ references: string[] }> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/references`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ references }),
+    }
+  )
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.error || 'Failed to save references')
+  }
+  return response.json()
+}
+
+export async function fetchWeightingRubric(
+  code: string
+): Promise<WeightingRubricResponse> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/stage1/weighting-rubric`
+  );
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch weighting rubric');
+  }
+  return response.json();
+}
+
+export async function saveWeightingRubric(
+  code: string,
+  payload: {
+    courseLevelWeightingSummary: CourseLevelWeightingSummary;
+    assessmentStructureReviews: AssessmentStructureReview[];
+    fullAssessmentStructureReport?: string;
+  }
+): Promise<SaveWeightingRubricResult> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/stage1/weighting-rubric`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to save weighting rubric');
+  }
+  return response.json();
+}
+
+export async function fetchIntegrityReview(
+  code: string
+): Promise<IntegrityReviewResponse> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/stage1/integrity-review`
+  );
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch integrity review');
+  }
+  return response.json();
+}
+
+export async function saveIntegrityReview(
+  code: string,
+  payload: {
+    courseLevelIntegritySummary: CourseLevelIntegritySummary;
+    assessmentIntegrityReviews: AssessmentIntegrityReview[];
+  }
+): Promise<SaveIntegrityReviewResult> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/stage1/integrity-review`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to save integrity review');
+  }
+  return response.json();
+}
+
+export async function fetchSubtopicArchitecture(
+  code: string
+): Promise<SubtopicArchitectureResponse> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/stage1/subtopic-architecture`
+  );
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch subtopic architecture');
+  }
+  return response.json();
+}
+
+export async function saveSubtopicArchitecture(
+  code: string,
+  payload: {
+    courseSummary: SubtopicArchitectureCourseSummary;
+    cloSections: SubtopicCloSection[];
+  }
+): Promise<SaveSubtopicArchitectureResult> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/stage1/subtopic-architecture`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to save subtopic architecture');
+  }
+  return response.json();
+}
+
+export async function saveStage1LayerOutput(
+  code: string,
+  layerId: string,
+  reportMarkdown: string
+): Promise<{ layers: Stage1LayerStateView[] }> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/stage1/layers/${encodeURIComponent(layerId)}/output`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reportMarkdown }),
+    }
+  );
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Failed to save layer output');
+  return data;
+}
+
+export async function confirmCloTopics(code: string): Promise<{ message: string; confirmations: CourseConfirmations }> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/confirm/clo-topics`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to confirm CLO topics');
+  }
+  return response.json();
+}
+
+// Confirmation API calls
+
+/**
+ * Confirm weekly plan distribution to unlock Stage 2
+ */
+export async function confirmWeeklyPlan(code: string): Promise<{ message: string; confirmations: CourseConfirmations }> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/confirm/weekly-plan`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to confirm weekly plan');
+  }
+  return response.json();
+}
+
+/**
+ * Confirm graph structure to unlock Stage 4
+ */
+export async function confirmGraph(code: string): Promise<{ message: string; confirmations: CourseConfirmations }> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/confirm/graph`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to confirm graph');
+  }
+  return response.json();
+}
+
+// ============================================================================
+// STAGE 3: Assessment Intelligence API
+// ============================================================================
+
+/**
+ * Fetch Stage 3 assessment intelligence snapshot
+ */
+export async function fetchStage3Snapshot(code: string): Promise<Stage3Snapshot> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/stage/3/snapshot`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch Stage 3 snapshot');
+  }
+  return response.json();
+}
+
+/**
+ * Fetch Stage 3 incomplete nodes report
+ */
+export async function fetchStage3IncompleteReport(code: string): Promise<Stage3IncompleteReport> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/stage/3/incomplete-report`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch Stage 3 incomplete report');
+  }
+  return response.json();
+}
+
+// ============================================================================
+// STAGE 2.5: CLO Graph Editing API
+// ============================================================================
+
+/**
+ * Get learning nodes for a specific CLO
+ */
+export async function fetchCloNodes(code: string, cloId: string): Promise<{
+  clo_id: string;
+  nodes: LearningNode[];
+  node_count: number;
+}> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/clos/${encodeURIComponent(cloId)}/nodes`
+  );
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch CLO nodes');
+  }
+  return response.json();
+}
+
+/**
+ * Upsert/delete nodes for a CLO (Stage 2.5)
+ */
+export async function saveCloNodes(
+  code: string,
+  cloId: string,
+  payload: {
+    upserts?: LearningNodeUpsert[];
+    deletes?: string[];
+  }
+): Promise<{
+  message: string;
+  clo_id: string;
+  created: Record<string, string>;
+  deleted: string[];
+}> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/clos/${encodeURIComponent(cloId)}/nodes`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to save CLO nodes');
+    }
+    throw new Error(`Server error (${response.status}): Backend may not be running. Please check that the server is started.`);
+  }
+  return response.json();
+}
+
+/**
+ * Save prerequisites for a CLO (Stage 2.5)
+ */
+export async function saveCloPrerequisites(
+  code: string,
+  cloId: string,
+  edges: Array<{ source_node_id: string; target_node_id: string }>
+): Promise<{
+  message: string;
+  clo_id: string;
+  edge_count: number;
+}> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/clos/${encodeURIComponent(cloId)}/prerequisites`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ edges }),
+    }
+  );
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to save prerequisites');
+    }
+    throw new Error(`Server error (${response.status}): Backend may not be running. Please check that the server is started.`);
+  }
+  return response.json();
+}
+
+/**
+ * Confirm node graph structure to unlock Stage 3
+ */
+export async function confirmNodeGraph(code: string): Promise<{
+  message: string;
+  confirmations: CourseConfirmations;
+  summary: {
+    total_nodes: number;
+    clo_count: number;
+    edge_count: number;
+    nodes_per_clo: Record<string, number>;
+  };
+}> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/confirm/node-graph`,
+    { method: 'POST' }
+  );
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to confirm node graph');
+  }
+  return response.json();
+}
+
+/**
+ * Subscribe to real-time progress updates via SSE
+ * Returns a Promise that resolves to an unsubscribe function when connected
+ */
+export function subscribeToProgress(
+  code: string,
+  onProgress: (update: ProgressUpdate) => void,
+  onError?: (error: Event) => void
+): Promise<() => void> {
+  return new Promise((resolve) => {
+    const eventSource = new EventSource(`${API_BASE}/courses/${encodeURIComponent(code)}/progress/stream`);
+    
+    eventSource.onopen = () => {
+      console.log('SSE connection established for course:', code);
+      // Resolve with unsubscribe function once connected
+      resolve(() => {
+        eventSource.close();
+      });
+    };
+    
+    eventSource.onmessage = (event) => {
+      try {
+        const update = JSON.parse(event.data) as ProgressUpdate;
+        onProgress(update);
+      } catch (e) {
+        console.error('Failed to parse progress update:', e);
+      }
+    };
+    
+    eventSource.onerror = (error) => {
+      console.error('SSE connection error:', error);
+      if (onError) {
+        onError(error);
+      }
+      // Still resolve so we don't hang forever
+      resolve(() => {
+        eventSource.close();
+      });
+    };
+  });
+}
+
+// ============================================================================
+// STAGE 4 ENHANCED TYPES - Content Pack, Assessments, Videos, Rubric, Workload
+// ============================================================================
+
+export type ContentModality = 'text' | 'visual' | 'video' | 'interactive' | 'reflection';
+export type VideoScriptType = 'explainer' | 'walkthrough' | 'demonstration' | 'feedback';
+export type Stage4AssessmentType = 'pre_knowledge' | 'formative_diagnostic' | 'mastery_evidence';
+export type WorkloadAlignmentStatus = 'aligned' | 'under' | 'over';
+
+export interface VideoSection {
+  section_number: number;
+  title: string;
+  duration_seconds: number;
+  narration: string;
+  visual_description: string;
+  on_screen_text?: string;
+  transitions?: string;
+}
+
+export interface VideoScript {
+  node_id: string;
+  title: string;
+  duration_minutes: number;
+  script_type: VideoScriptType;
+  learning_objective: string;
+  target_audience: string;
+  sections: VideoSection[];
+  production_notes?: string;
+}
+
+export interface AssessmentQuestion {
+  question_id: string;
+  question_type: 'multiple_choice' | 'true_false' | 'short_answer' | 'scenario' | 'reflection';
+  question_text: string;
+  options?: string[];
+  correct_answer?: string;
+  rubric_criteria?: string;
+  points: number;
+  bloom_level: string;
+  diagnostic_value: string;
+}
+
+export interface NodeAssessment {
+  node_id: string;
+  assessment_type: Stage4AssessmentType;
+  title: string;
+  description: string;
+  questions: AssessmentQuestion[];
+  adaptive_function: string;
+  pass_threshold: number;
+  time_limit_minutes?: number;
+  instructions: string;
+}
+
+export interface VisualPrompt {
+  prompt_id: string;
+  node_id: string;
+  prompt_type: 'diagram' | 'illustration' | 'infographic' | 'screenshot' | 'flowchart';
+  description: string;
+  purpose: string;
+  placement: string;
+  alt_text: string;
+  style_notes?: string;
+}
+
+export interface Stage4NodeContent {
+  node_id: string;
+  clo_id: string;
+  node_type: string;
+  modalities: ContentModality[];
+  instructional_content: string;
+  learner_instructions: string;
+  visual_prompts: VisualPrompt[];
+  video_script?: VideoScript;
+  assessments: NodeAssessment[];
+  time_on_task_minutes: number;
+  generated_at: string;
+  content_version: string;
+}
+
+export interface NodeWorkload {
+  node_id: string;
+  clo_id: string;
+  node_type: string;
+  learning_intent: string;
+  content_time_minutes: number;
+  video_time_minutes: number;
+  assessment_time_minutes: number;
+  practice_time_minutes: number;
+  total_time_minutes: number;
+}
+
+export interface WeeklyWorkload {
+  week: number;
+  topic: string;
+  clo_ids: string[];
+  node_count: number;
+  total_time_minutes: number;
+  total_time_hours: number;
+  is_balanced: boolean;
+}
+
+export interface WorkloadMap {
+  course_code: string;
+  nodes: NodeWorkload[];
+  weekly_workload: WeeklyWorkload[];
+  total_content_hours: number;
+  total_assessment_hours: number;
+  total_hours: number;
+  credit_hours: number;
+  expected_hours: number;
+  hours_per_credit: number;
+  alignment_status: WorkloadAlignmentStatus;
+  deviation_percentage: number;
+  deviation_hours: number;
+  is_valid: boolean;
+  validation_notes: string[];
+  computed_at: string;
+}
+
+export interface RubricLevel {
+  level: number;
+  label: string;
+  description: string;
+  points: number;
+}
+
+export interface RubricCriterion {
+  criterion_id: string;
+  description: string;
+  weight: number;
+  levels: RubricLevel[];
+}
+
+export interface CLORubricCriteria {
+  clo_id: string;
+  clo_text: string;
+  bloom_level: string;
+  criteria: RubricCriterion[];
+}
+
+export interface GradingLevel {
+  grade: string;
+  min_percentage: number;
+  max_percentage: number;
+  description: string;
+}
+
+export interface CourseRubric {
+  course_code: string;
+  title: string;
+  clo_criteria: CLORubricCriteria[];
+  grading_scale: GradingLevel[];
+  marking_guide: string;
+  learner_instructions: string;
+  assessment_weights: {
+    pre_knowledge: number;
+    formative: number;
+    mastery: number;
+  };
+  generated_at: string;
+}
+
+export interface Stage4ContentPack {
+  course_code: string;
+  title: string;
+  total_nodes: number;
+  nodes_with_content: number;
+  nodes_with_video: number;
+  total_assessments: number;
+  total_visual_prompts: number;
+  node_content_status: {
+    node_id: string;
+    has_content: boolean;
+    has_video: boolean;
+    has_assessments: boolean;
+    assessment_types: Stage4AssessmentType[];
+  }[];
+  workload_summary: {
+    total_hours: number;
+    alignment_status: WorkloadAlignmentStatus;
+    deviation_percentage: number;
+  };
+  has_rubric: boolean;
+  is_complete: boolean;
+  completion_percentage: number;
+  missing_items: string[];
+  generated_at: string;
+}
+
+export interface WorkloadValidation {
+  course_code: string;
+  credit_hours: number;
+  expected_hours: number;
+  actual_hours: number;
+  alignment_status: WorkloadAlignmentStatus;
+  deviation_percentage: number;
+  deviation_hours: number;
+  is_valid: boolean;
+  validation_notes: string[];
+}
+
+export interface AllAssessmentsResponse {
+  course_code: string;
+  total_assessments: number;
+  by_type: {
+    pre_knowledge: (NodeAssessment & { node_learning_intent: string; node_type: string })[];
+    formative_diagnostic: (NodeAssessment & { node_learning_intent: string; node_type: string })[];
+    mastery_evidence: (NodeAssessment & { node_learning_intent: string; node_type: string })[];
+  };
+  summary: {
+    pre_knowledge_count: number;
+    formative_count: number;
+    mastery_count: number;
+  };
+}
+
+export interface AllVideoScriptsResponse {
+  course_code: string;
+  total_videos: number;
+  total_duration_minutes: number;
+  video_scripts: (VideoScript & { node_learning_intent: string; node_type: string })[];
+}
+
+// ============================================================================
+// STAGE 4 ENHANCED API FUNCTIONS
+// ============================================================================
+
+/**
+ * Fetch the full Stage 4 content pack summary for a course
+ */
+export async function fetchContentPack(code: string): Promise<Stage4ContentPack> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/stage/4/content-pack`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch content pack');
+  }
+  return response.json();
+}
+
+/**
+ * Fetch the full content pack for a specific node
+ */
+export async function fetchNodeContentPack(code: string, nodeId: string): Promise<Stage4NodeContent> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/nodes/${encodeURIComponent(nodeId)}/content-pack`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch node content pack');
+  }
+  return response.json();
+}
+
+/**
+ * Fetch assessments for a specific node
+ */
+export async function fetchNodeAssessments(code: string, nodeId: string): Promise<{
+  node_id: string;
+  assessment_count: number;
+  assessments: NodeAssessment[];
+}> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/nodes/${encodeURIComponent(nodeId)}/assessments`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch node assessments');
+  }
+  return response.json();
+}
+
+/**
+ * Fetch video script for a specific node
+ */
+export async function fetchNodeVideoScript(code: string, nodeId: string): Promise<VideoScript> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/nodes/${encodeURIComponent(nodeId)}/video-script`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch video script');
+  }
+  return response.json();
+}
+
+/**
+ * Fetch course rubric
+ */
+export async function fetchRubric(code: string): Promise<CourseRubric> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/rubric`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch rubric');
+  }
+  return response.json();
+}
+
+/**
+ * Fetch workload map
+ */
+export async function fetchWorkloadMap(code: string): Promise<WorkloadMap> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/workload`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch workload map');
+  }
+  return response.json();
+}
+
+/**
+ * Validate workload against credit hours
+ */
+export async function validateWorkload(code: string): Promise<WorkloadValidation> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/workload/validate`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to validate workload');
+  }
+  return response.json();
+}
+
+/**
+ * Fetch learner instructions
+ */
+export async function fetchLearnerInstructions(code: string): Promise<{ course_code: string; instructions: string }> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/learner-instructions`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch learner instructions');
+  }
+  return response.json();
+}
+
+/**
+ * Fetch all assessments for a course
+ */
+export async function fetchAllAssessments(code: string): Promise<AllAssessmentsResponse> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/assessments`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch assessments');
+  }
+  return response.json();
+}
+
+/**
+ * Fetch all video scripts for a course
+ */
+export async function fetchAllVideoScripts(code: string): Promise<AllVideoScriptsResponse> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/video-scripts`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch video scripts');
+  }
+  return response.json();
+}

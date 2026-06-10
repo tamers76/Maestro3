@@ -1,0 +1,42 @@
+{
+  "aiProvider": "openrouter",
+  "openrouter": {
+    "apiKey": "",
+    "baseUrl": "https://openrouter.ai/api/v1"
+  },
+  "openai": {
+    "apiKey": "",
+    "baseUrl": "https://api.openai.com/v1"
+  },
+  "ollama": {
+    "baseUrl": "http://localhost:11434",
+    "options": {
+      "numCtx": 4096
+    }
+  },
+  "models": {
+    "stage1": "anthropic/claude-sonnet-4",
+    "stage2": "anthropic/claude-sonnet-4",
+    "stage3": "anthropic/claude-sonnet-4",
+    "stage4": "anthropic/claude-sonnet-4",
+    "stage5": "anthropic/claude-sonnet-4"
+  },
+  "neo4j": {
+    "uri": "neo4j://127.0.0.1:7687",
+    "user": "neo4j",
+    "password": ""
+  },
+  "council": {
+    "councilModels": [],
+    "chairmanModel": "anthropic/claude-sonnet-4",
+    "memberSystemPrompt": "You are a helpful AI assistant participating in a council deliberation.\nProvide your best, most thorough response to the given task.\nBe specific, accurate, and comprehensive in your answer.",
+    "chairmanSystemPrompt": "You are the Chairman of an LLM Council. Multiple AI models have provided responses to a task.\n\nYour role is to synthesize all responses into a single, comprehensive, accurate final answer.\n\nConsider:\n- The individual responses and their unique insights\n- Areas of agreement and disagreement between responses\n- The most accurate and well-reasoned points from each response\n\nProvide a clear, well-structured final answer that represents the council's collective wisdom.\nIf the task requires JSON output, ensure your response is valid JSON."
+  },
+  "stageExecution": {
+    "stage1": "single",
+    "stage2": "single",
+    "stage3": "single",
+    "stage4": "single",
+    "stage5": "single"
+  }
+}

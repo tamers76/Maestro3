@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Environment files (contain API keys, passwords)
+.env
+.env.local
+.env.*.local
+.env.*
+!.env.example
+
+# Settings with API keys (use settings.example.json as template)
+config/settings.json
+
+# Key and credential files
+*.key
+*.pem
+*credentials*
+*secrets*
+
+# Runtime data
+data/courses/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# Test coverage
+coverage/
