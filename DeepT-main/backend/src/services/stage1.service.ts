@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { callAI, parseAIJson, getCouncilInfo, getStageConfig, type CouncilProgressCallback } from './ai.service.js';
+import { callAI, parseAIJson, getCouncilInfo, resolveStage1IntakeConfig, type CouncilProgressCallback } from './ai.service.js';
 import { assertAIConfigured } from './council.service.js';
 import * as neo4j from './neo4j.service.js';
 import * as fileService from './file.service.js';
@@ -92,8 +92,11 @@ export async function runStage1(
     assertAIConfigured();
     console.log('Stage 1: Starting extraction...');
     
-    // Get council info for progress reporting
-    const councilInfo = getCouncilInfo(1, executionOverride);
+    // Resolve the intake config (layer1-intake is source of truth, stageConfigs.stage1
+    // is the fallback) and use it for BOTH the AI calls and the council-info progress
+    // reporting so they always reflect the same configuration.
+    const stageConfig = resolveStage1IntakeConfig();
+    const councilInfo = getCouncilInfo(1, executionOverride, stageConfig);
     const council: CouncilInfo = {
       mode: councilInfo.mode,
       memberCount: councilInfo.memberCount,
@@ -101,9 +104,6 @@ export async function runStage1(
       chairmanModel: councilInfo.chairmanModel,
       phase: councilInfo.mode === 'council' ? 'deliberating' : undefined
     };
-    
-    // Get stage config for custom prompts
-    const stageConfig = getStageConfig(1);
     
     startStageProgress(tempCode, 1, 'Extracting course data from document', council);
     
@@ -126,7 +126,8 @@ export async function runStage1(
       [{ role: 'user', content: extractionPrompt }],
       1,
       { jsonMode: true, progressCallback },
-      executionOverride
+      executionOverride,
+      stageConfig
     );
     
     // Debug: Log raw response before parsing
@@ -168,7 +169,8 @@ export async function runStage1(
       [{ role: 'user', content: analysisPrompt }],
       1,
       { jsonMode: true, progressCallback: analysisCallback },
-      executionOverride
+      executionOverride,
+      stageConfig
     );
     
     const cloAnalysis = parseAIJson<CLOAnalysisResult>(analysisResponse);
@@ -199,7 +201,8 @@ export async function runStage1(
         mappedWeeklyPlan,
         courseCode,
         council,
-        executionOverride
+        executionOverride,
+        stageConfig
       );
       
       mappedWeeklyPlan = mappingResult.weekly_plan;
@@ -326,8 +329,9 @@ export async function runStage1FromForm(
     
     const courseCode = formData.course_code;
     
-    // Get stage config for custom prompts
-    const stageConfig = getStageConfig(1);
+    // Resolve the intake config (layer1-intake is source of truth, stageConfigs.stage1
+    // is the fallback) so the form path uses the same intake configuration as runStage1.
+    const stageConfig = resolveStage1IntakeConfig();
     
     // Analyze CLOs
     if (formData.clos.length === 0) {
@@ -340,7 +344,8 @@ export async function runStage1FromForm(
       [{ role: 'user', content: analysisPrompt }],
       1,
       { jsonMode: true },
-      executionOverride
+      executionOverride,
+      stageConfig
     );
     
     const cloAnalysis = parseAIJson<CLOAnalysisResult>(analysisResponse);

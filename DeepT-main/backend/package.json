@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "test": "node --import tsx --test src/node-engine/__tests__/phase0.test.ts src/node-engine/__tests__/stage1Adapter.test.ts src/node-engine/__tests__/nodeGeneration.test.ts src/node-engine/__tests__/referenceGrounding.test.ts src/node-engine/__tests__/referenceAnchoringV1.test.ts"
   },
   "dependencies": {
     "archiver": "^7.0.0",

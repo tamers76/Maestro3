@@ -1105,6 +1105,25 @@ export async function testOpenAIConnection(): Promise<{ success: boolean; messag
   return response.json();
 }
 
+export interface EmbeddingHealth {
+  ok: boolean;
+  provider: string;
+  model: string;
+  configuredDimensions: number;
+  liveDimensions: number;
+  providerConfigured: boolean;
+  error?: string;
+  checkedAt: string;
+}
+
+/** Live embedding/RAG provider probe — surfaces silent grounding failures. */
+export async function fetchEmbeddingHealth(): Promise<EmbeddingHealth> {
+  const response = await fetch(`${API_BASE}/settings/embedding-health`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to check embedding health');
+  return data;
+}
+
 // Recommended prompts interface (from backend defaults)
 export interface RecommendedPrompts {
   global: {
@@ -2142,4 +2161,721 @@ export async function fetchAllVideoScripts(code: string): Promise<AllVideoScript
     throw new Error(error.error || 'Failed to fetch video scripts');
   }
   return response.json();
+}
+
+// ============================================================================
+// Reference Materials (RAG grounding)
+// ============================================================================
+
+export type ReferenceSourceType = 'textbook_chapter' | 'paper' | 'other';
+
+export interface ReferenceDocument {
+  doc_id: string;
+  course_code: string;
+  title: string;
+  source_type: ReferenceSourceType;
+  citation_label: string;
+  scope: { clo_ids?: string[]; subtopic_ids?: string[] };
+  original_filename: string;
+  mime_type: string;
+  uploaded_at: string;
+  char_count: number;
+  chunk_count: number;
+  embedding_model: string;
+  embedding_dimensions: number;
+}
+
+export interface RetrievedChunk {
+  chunk_id: string;
+  doc_id: string;
+  text: string;
+  citation: string;
+  score: number;
+  clo_ids: string[];
+  subtopic_ids: string[];
+}
+
+export async function listReferences(code: string): Promise<ReferenceDocument[]> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/references`);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || 'Failed to list reference materials');
+  }
+  const data = await response.json();
+  return data.documents ?? [];
+}
+
+export async function uploadReference(
+  code: string,
+  file: File,
+  meta: {
+    title?: string;
+    source_type?: ReferenceSourceType;
+    citation_label?: string;
+    clo_ids?: string[];
+    subtopic_ids?: string[];
+  } = {}
+): Promise<ReferenceDocument> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (meta.title) formData.append('title', meta.title);
+  if (meta.source_type) formData.append('source_type', meta.source_type);
+  if (meta.citation_label) formData.append('citation_label', meta.citation_label);
+  if (meta.clo_ids?.length) formData.append('clo_ids', JSON.stringify(meta.clo_ids));
+  if (meta.subtopic_ids?.length) formData.append('subtopic_ids', JSON.stringify(meta.subtopic_ids));
+
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/references`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || 'Failed to upload reference material');
+  }
+  const data = await response.json();
+  return data.document;
+}
+
+export async function uploadReferenceFromLink(
+  code: string,
+  url: string,
+  meta: { title?: string; source_type?: ReferenceSourceType } = {}
+): Promise<ReferenceDocument> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/references/link`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, ...meta }),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || 'Failed to ingest reference link');
+  }
+  const data = await response.json();
+  return data.document;
+}
+
+export async function deleteReference(code: string, docId: string): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/references/${encodeURIComponent(docId)}`,
+    { method: 'DELETE' }
+  );
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || 'Failed to delete reference material');
+  }
+}
+
+export async function retrieveReferences(
+  code: string,
+  query: string,
+  opts: { cloId?: string; subtopicId?: string; topN?: number } = {}
+): Promise<RetrievedChunk[]> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/references/retrieve`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, ...opts }),
+    }
+  );
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || 'Failed to retrieve reference passages');
+  }
+  const data = await response.json();
+  return data.results ?? [];
+}
+
+// ============================================================================
+// Reference Alignment — Course Architect "Layer 7"
+// ============================================================================
+
+export type AlignmentStatus = 'locked' | 'no_references' | 'available' | 'proposed' | 'approved';
+
+export interface AlignmentCandidate {
+  id: string;
+  label: string;
+  score: number;
+}
+
+export interface AlignmentChunkMapping {
+  chunk_id: string;
+  doc_id: string;
+  citation: string;
+  text_preview: string;
+  subtopic_candidates: AlignmentCandidate[];
+  clo_candidates: AlignmentCandidate[];
+  confidence: number;
+  decided_subtopic_ids: string[];
+  decided_clo_ids: string[];
+  edited?: boolean;
+}
+
+export interface ReferenceAlignmentArtifact {
+  course_code: string;
+  status: AlignmentStatus;
+  threshold: number;
+  embedding_model: string;
+  embedding_dimensions: number;
+  subtopic_count: number;
+  reference_doc_count: number;
+  chunk_count: number;
+  tagged_chunk_count: number;
+  generated_at?: string;
+  approved_at?: string;
+  approved_by?: string;
+  mappings: AlignmentChunkMapping[];
+  lock_reason?: string;
+}
+
+export interface AlignmentStateSummary {
+  status: AlignmentStatus;
+  lock_reason?: string;
+  subtopic_count: number;
+  reference_doc_count: number;
+  chunk_count: number;
+  tagged_chunk_count: number;
+  threshold: number;
+  generated_at?: string;
+  approved_at?: string;
+  approved_by?: string;
+}
+
+export interface AlignmentMappingEdit {
+  chunk_id: string;
+  subtopic_ids: string[];
+  clo_ids?: string[];
+}
+
+export async function fetchAlignment(
+  code: string
+): Promise<{ state: AlignmentStateSummary; proposal: ReferenceAlignmentArtifact | null }> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/references/alignment`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to load reference alignment');
+  return data;
+}
+
+export async function proposeAlignment(
+  code: string,
+  opts: { threshold?: number; maxCandidates?: number } = {}
+): Promise<ReferenceAlignmentArtifact> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/references/alignment/propose`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(opts) }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to propose alignment');
+  return data.proposal;
+}
+
+export async function updateAlignmentMapping(
+  code: string,
+  edits: AlignmentMappingEdit[]
+): Promise<ReferenceAlignmentArtifact> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/references/alignment/mapping`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ edits }) }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to update alignment mapping');
+  return data.proposal;
+}
+
+export async function approveAlignment(
+  code: string,
+  approver: string
+): Promise<ReferenceAlignmentArtifact> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/references/alignment/approve`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approver }) }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to approve alignment');
+  return data.proposal;
+}
+
+// ============================================================================
+// Maestro Node Engine (M1/M2) — prompt template registry + status
+// ============================================================================
+
+export type NodeEngineVehicle =
+  | 'text'
+  | 'structured_visual'
+  | 'pictorial_visual'
+  | 'video'
+  | 'interactive'
+  | 'simulation'
+  | 'learning_anchor';
+
+export type PromptTemplateStatus = 'draft' | 'approved' | 'archived' | 'reserved';
+
+export interface PromptTemplate {
+  prompt_template_id: string;
+  prompt_template_name: string;
+  vehicle: NodeEngineVehicle;
+  version: number;
+  status: PromptTemplateStatus;
+  generator_kind: 'chat' | 'image' | 'video';
+  task_prompt: string;
+  output_schema_ref: unknown;
+  member_system_prompt?: string;
+  chairman_system_prompt?: string;
+  last_updated_by: string;
+  last_updated_at: string;
+  change_note: string;
+}
+
+export interface PromptTemplateRegistryEntry {
+  prompt_template_id: string;
+  vehicle: NodeEngineVehicle;
+  active_version: number;
+  versions: PromptTemplate[];
+}
+
+export interface NodeEngineStatus {
+  engine: string;
+  phase: number;
+  legacy_stages_enabled: boolean;
+  prompt_templates: {
+    count: number;
+    vehicles: NodeEngineVehicle[];
+    updated_at: string;
+  };
+}
+
+export async function fetchNodeEngineStatus(): Promise<NodeEngineStatus> {
+  const response = await fetch(`${API_BASE}/node-engine/status`);
+  if (!response.ok) throw new Error('Failed to fetch node engine status');
+  return response.json();
+}
+
+export async function fetchPromptTemplates(): Promise<PromptTemplate[]> {
+  const response = await fetch(`${API_BASE}/node-engine/prompt-templates`);
+  if (!response.ok) throw new Error('Failed to fetch prompt templates');
+  const data = await response.json();
+  return data.templates ?? [];
+}
+
+export async function fetchPromptTemplate(id: string): Promise<PromptTemplateRegistryEntry> {
+  const response = await fetch(`${API_BASE}/node-engine/prompt-templates/${encodeURIComponent(id)}`);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || 'Failed to fetch prompt template');
+  }
+  return response.json();
+}
+
+export async function updatePromptTemplate(
+  id: string,
+  payload: {
+    task_prompt?: string;
+    member_system_prompt?: string;
+    chairman_system_prompt?: string;
+    status?: PromptTemplateStatus;
+    last_updated_by: string;
+    change_note: string;
+  }
+): Promise<{ message: string; template: PromptTemplate }> {
+  const response = await fetch(`${API_BASE}/node-engine/prompt-templates/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || 'Failed to update prompt template');
+  }
+  return response.json();
+}
+
+// ============================================================================
+// Maestro Node Engine — per-vehicle Modality Generation (model) config
+// Stored independently from prompt templates: editing model config NEVER mints
+// a new prompt-template version.
+// ============================================================================
+
+export type ModelSelectionSource =
+  | 'global_default'
+  | 'modality_config'
+  | 'prompt_template_override';
+
+export type GenerationMode = 'single' | 'council';
+
+// HeyGen v3 render settings (POST /v3/videos shape). Real render is MOCKED in V1.
+// No style_id/brand_kit_id (deferred v2 Template-API concern).
+export type VideoEngine = 'avatar_iv' | 'avatar_v';
+export type VideoResolution = '4k' | '1080p' | '720p';
+export type VideoAspectRatio = 'auto' | '16:9' | '9:16' | '4:5' | '5:4' | '1:1';
+export type VideoOutputFormat = 'mp4' | 'webm';
+
+export interface VideoVoiceSettings {
+  speed?: number;
+  pitch?: number;
+  locale?: string;
+}
+
+export interface VideoSettings {
+  provider: 'heygen';
+  /** Reference to the API key (env/setting NAME), never the key value. */
+  apiKeyRef?: string;
+  avatar_id?: string;
+  voice_id?: string;
+  engine?: VideoEngine;
+  resolution?: VideoResolution;
+  aspect_ratio?: VideoAspectRatio;
+  voice_settings?: VideoVoiceSettings;
+  background?: Record<string, unknown>;
+  remove_background?: boolean;
+  motion_prompt?: string;
+  output_format?: VideoOutputFormat;
+  callback_url?: string;
+}
+
+export interface ModalityGenerationConfig {
+  id: string;
+  vehicle: NodeEngineVehicle;
+  generatorKind: 'chat' | 'image' | 'video';
+  mode: GenerationMode;
+  /** Mirror of the active template's prompt for display (not authoritative). */
+  taskPrompt: string;
+  singleModel?: string;
+  councilModels?: string[];
+  chairmanModel?: string;
+  defaultTemperature?: number;
+  defaultMaxTokens?: number;
+  modelSelectionReason?: string;
+  productionTarget?: string;
+  /** HeyGen v3 render settings — only meaningful for the `video` vehicle. */
+  videoSettings?: VideoSettings;
+  enabled: boolean;
+}
+
+/** The resolved model + which layer it came from (binding resolution order). */
+export interface ResolvedGenerationModel {
+  model: string;
+  source: ModelSelectionSource;
+  reason?: string;
+  mode: GenerationMode;
+  councilModels?: string[];
+  chairmanModel?: string;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+export interface ModalityConfigEntry {
+  config: ModalityGenerationConfig;
+  resolved: ResolvedGenerationModel;
+}
+
+export interface ModalityConfigsResponse {
+  global_default_model: string;
+  configs: ModalityConfigEntry[];
+}
+
+export interface ModalityConfigResponse {
+  global_default_model: string;
+  config: ModalityGenerationConfig;
+  resolved: ResolvedGenerationModel;
+}
+
+/** Editable model/generation fields (PUT payload). */
+export interface ModalityConfigUpdate {
+  mode?: GenerationMode;
+  singleModel?: string;
+  councilModels?: string[];
+  chairmanModel?: string;
+  defaultTemperature?: number;
+  defaultMaxTokens?: number;
+  modelSelectionReason?: string;
+  productionTarget?: string;
+  videoSettings?: VideoSettings;
+  enabled?: boolean;
+}
+
+export async function fetchModalityConfigs(): Promise<ModalityConfigsResponse> {
+  const response = await fetch(`${API_BASE}/node-engine/modality-config`);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || 'Failed to fetch modality configs');
+  }
+  return response.json();
+}
+
+export async function fetchModalityConfig(vehicle: string): Promise<ModalityConfigResponse> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/modality-config/${encodeURIComponent(vehicle)}`
+  );
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || 'Failed to fetch modality config');
+  }
+  return response.json();
+}
+
+export async function updateModalityConfig(
+  vehicle: string,
+  payload: ModalityConfigUpdate
+): Promise<{ message: string; config: ModalityGenerationConfig; resolved: ResolvedGenerationModel }> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/modality-config/${encodeURIComponent(vehicle)}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || 'Failed to update modality config');
+  }
+  return response.json();
+}
+
+// ============================================================================
+// Maestro Node Engine — Layer 1 (M7) Node Generation
+//
+// Mirrors the backend `Node`/`NodeSet` contract shapes from
+// backend/src/models/nodeEngine.ts (the M7 portion). These power the operational
+// Layer 1 workflow: generate 4-7 governed mastery nodes from ONE approved V1
+// subtopic, review the readable Node Set Report, then approve (Level 0-1 — a
+// human approves the draft before any downstream/M8 use; no auto-proceed).
+// ============================================================================
+
+export type NodeEngineNodeType =
+  | 'concept'
+  | 'distinction'
+  | 'misconception'
+  | 'procedure'
+  | 'judgment'
+  | 'application'
+  | 'integration'
+  | 'reflection'
+  | 'threshold'
+  | 'bridge'
+  | 'assessment_preparation';
+
+/** Lifecycle status shared by node-engine review objects (a node or a node-set). */
+export type NodeEngineLifecycleStatus = 'draft' | 'needs_review' | 'approved' | 'needs_revision';
+
+export type NodeEngineEvidenceMode =
+  | 'explain'
+  | 'classify_and_justify'
+  | 'select_and_justify'
+  | 'apply_to_case'
+  | 'artifact_fragment'
+  | 'simulation_decision'
+  | 'reflection_response';
+
+export type NodeEngineCaptureSignal = 'response' | 'reasoning' | 'confidence' | 'process';
+export type NodeEngineDiagnosticBand = 'secure' | 'fragile' | 'knowledge_gap' | 'misconception';
+export type NodeEngineGroundingStrength = 'strong' | 'weak';
+export type NodeEngineRiskClassification = 'standard' | 'critical' | 'bridge' | 'high_risk';
+export type NodeEngineMisconceptionSlotState = 'pending' | 'populated';
+export type NodeEngineMisconceptionSeverity = 'low' | 'medium' | 'high';
+
+export interface NodeEngineCitation {
+  citation: string;
+  passage_ref: string;
+}
+
+export interface NodeEnginePrimaryEvidenceCheck {
+  evidence_check_id: string;
+  must_capture_signals: NodeEngineCaptureSignal[];
+  preferred_evidence_mode: NodeEngineEvidenceMode;
+  diagnostic_bands: NodeEngineDiagnosticBand[];
+}
+
+export interface NodeEngineCandidateMisconception {
+  candidate_misconception_id: string;
+  statement: string;
+  reason: string;
+  severity?: NodeEngineMisconceptionSeverity;
+  suggested_trap?: string;
+}
+
+export interface NodeEngineMisconceptionBinding {
+  misconception_id: string;
+  statement: string;
+  severity: NodeEngineMisconceptionSeverity;
+  trap: string;
+  expected_error_pattern: string;
+  confirming_probe: string;
+  blocks_submission_if_state: 'confirmed' | 'suspected' | 'never';
+  clearance_rule: string;
+}
+
+export interface NodeEngineCrossCloLink {
+  clo_id: string;
+  reason: string;
+}
+
+export interface NodeEngineEvidenceMapCriterion {
+  criterion_id: string;
+  criterion_name: string;
+  solo_descriptors: {
+    surface: string;
+    multi_element: string;
+    relational: string;
+    extended_abstract: string;
+  };
+  critical: boolean;
+}
+
+export interface NodeEngineNode {
+  node_id: string;
+  parent_subtopic_id: string;
+  parent_clo_id?: string;
+  clo_ids: string[];
+  course_id?: string;
+  node_type: NodeEngineNodeType;
+  node_title: string;
+  /** Position in the within-subtopic prerequisite chain. */
+  order: number;
+  cognitive_level?: string;
+  prepares_for_assessment_id?: string | null;
+  is_core: boolean;
+  knowledge_component: string;
+  kc_ids: string[];
+  mastery_statement: string;
+  why_it_matters: string;
+  assessment_connection: string;
+  core_academic_message: string;
+  node_learning_intent?: string;
+  evidence_map: NodeEngineEvidenceMapCriterion[];
+  captured_signals: NodeEngineCaptureSignal[];
+  prerequisite_node_ids: string[];
+  dependent_node_ids: string[];
+  cross_clo_links: NodeEngineCrossCloLink[];
+  primary_evidence_check_requirement: NodeEnginePrimaryEvidenceCheck;
+  misconception_slots: NodeEngineMisconceptionSlotState;
+  candidate_misconceptions: NodeEngineCandidateMisconception[];
+  misconception_bindings: NodeEngineMisconceptionBinding[];
+  grounding_references: NodeEngineCitation[];
+  grounding_strength?: NodeEngineGroundingStrength;
+  risk_classification: NodeEngineRiskClassification[];
+  generator_divergence_note?: string;
+  grain_justification?: string;
+  status: NodeEngineLifecycleStatus;
+}
+
+export type NodeEngineGroundingSource = 'scoped_references' | 'course_level_references' | 'model_only';
+
+export interface NodeEngineGroundingSummary {
+  retrieval_called: boolean;
+  scoped_chunk_count: number;
+  course_level_chunk_count: number;
+  citations_count: number;
+  grounding_source: NodeEngineGroundingSource;
+  grounding_note: string;
+  academic_ready: boolean;
+}
+
+export interface NodeEngineNodeSet {
+  node_set_id: string;
+  course_id: string;
+  subtopic_id: string;
+  clo_ids: string[];
+  prepares_for_assessment_ids: string[];
+  nodes: NodeEngineNode[];
+  grain_justification?: string;
+  generator_divergence_notes: string[];
+  status: NodeEngineLifecycleStatus;
+  grounding_summary?: NodeEngineGroundingSummary;
+  model_used?: string;
+  model_selection_source?: ModelSelectionSource;
+  model_selection_reason?: string;
+  generation_mode?: GenerationMode;
+  prompt_template_id?: string;
+  prompt_version?: number;
+  created_at: string;
+  updated_at: string;
+  approved_by?: string;
+  approved_at?: string;
+  academic_override_reason?: string;
+  academic_override_by?: string;
+}
+
+export interface GenerateNodeSetOptions {
+  ground?: boolean;
+  persist?: boolean;
+  persistGraph?: boolean;
+}
+
+/**
+ * Generate a DRAFT node-set for one approved subtopic (Layer 1 / M7). The
+ * returned set has status `draft` and requires human approval before any
+ * downstream use.
+ */
+export async function generateNodeSet(
+  code: string,
+  subtopicId: string,
+  options: GenerateNodeSetOptions = {}
+): Promise<NodeEngineNodeSet> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/node-set`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to generate node set');
+  return data.node_set;
+}
+
+/** Read a previously generated node-set for a subtopic. Returns null when none exists. */
+export async function fetchNodeSet(
+  code: string,
+  subtopicId: string
+): Promise<NodeEngineNodeSet | null> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/node-set`
+  );
+  if (response.status === 404) return null;
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to fetch node set');
+  return data.node_set;
+}
+
+/**
+ * Human approval step (Level 0-1). Moves the node-set (and the approved nodes)
+ * from draft → approved. Approving all nodes unlocks Layer 2.
+ */
+export class AcademicApprovalRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AcademicApprovalRequiredError';
+  }
+}
+
+export async function approveNodeSet(
+  code: string,
+  subtopicId: string,
+  payload: { approver: string; nodeIds?: string[]; overrideReason?: string }
+): Promise<NodeEngineNodeSet> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/node-set/approve`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    // 422 = academic-approval guard: caller must attach grounding or override.
+    if (response.status === 422 || data.academic_approval_required) {
+      throw new AcademicApprovalRequiredError(data.error || 'Academic approval required');
+    }
+    throw new Error(data.error || 'Failed to approve node set');
+  }
+  return data.node_set;
 }

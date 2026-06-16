@@ -5,6 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { showToast } from '@/components/ui/Toaster'
 import StageModelTabs from '@/components/StageModelTabs'
 import Stage1LayersConfig from '@/components/Stage1LayersConfig'
+import PromptTemplateSettings from '@/components/nodeEngine/PromptTemplateSettings'
+import { LEGACY_STAGES_ENABLED } from '@/config/featureFlags'
 import {
   fetchRawSettings,
   updateSettings,
@@ -12,10 +14,12 @@ import {
   testOpenRouterConnection,
   testOllamaConnection,
   testOpenAIConnection,
+  fetchEmbeddingHealth,
   type Settings as SettingsType,
   type AIProvider,
+  type EmbeddingHealth,
 } from '@/services/api'
-import { Loader2, Check, X, Save, RefreshCw, Database, Key, Cpu, Server, Users, Sparkles, Layers } from 'lucide-react'
+import { Loader2, Check, X, Save, RefreshCw, Database, Key, Cpu, Server, Users, Sparkles, Layers, Activity } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export default function Settings() {
@@ -30,10 +34,34 @@ export default function Settings() {
   const [openRouterStatus, setOpenRouterStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [ollamaStatus, setOllamaStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [openAIStatus, setOpenAIStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const [embeddingHealth, setEmbeddingHealth] = useState<EmbeddingHealth | null>(null)
+  const [checkingEmbedding, setCheckingEmbedding] = useState(false)
   
   useEffect(() => {
     loadSettings()
+    handleCheckEmbedding()
   }, [])
+
+  async function handleCheckEmbedding() {
+    try {
+      setCheckingEmbedding(true)
+      const health = await fetchEmbeddingHealth()
+      setEmbeddingHealth(health)
+    } catch (error) {
+      setEmbeddingHealth({
+        ok: false,
+        provider: 'unknown',
+        model: '',
+        configuredDimensions: 0,
+        liveDimensions: 0,
+        providerConfigured: false,
+        error: error instanceof Error ? error.message : 'Health check failed',
+        checkedAt: new Date().toISOString(),
+      })
+    } finally {
+      setCheckingEmbedding(false)
+    }
+  }
   
   async function loadSettings() {
     try {
@@ -539,6 +567,72 @@ export default function Settings() {
         </Card>
       )}
       
+      {/* Embedding / RAG health — makes the silent grounding-failure mode visible.
+          A down provider can never again masquerade as "weak grounding". */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className={cn(
+              'flex h-10 w-10 items-center justify-center rounded-lg',
+              embeddingHealth?.ok ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'
+            )}>
+              <Activity className="h-5 w-5" />
+            </div>
+            <div>
+              <CardTitle>Reference Grounding (RAG) Health</CardTitle>
+              <CardDescription>
+                Live embedding-provider probe. If this is down, node generation falls back to model-only
+                and is not academically approvable.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {embeddingHealth ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex items-center gap-2">
+                {embeddingHealth.ok ? (
+                  <Check className="h-4 w-4 text-emerald-500" />
+                ) : (
+                  <X className="h-4 w-4 text-red-500" />
+                )}
+                <span className="text-sm font-medium text-foreground">
+                  {embeddingHealth.ok ? 'Embedding provider healthy' : 'Embedding provider unavailable'}
+                </span>
+              </div>
+              <div className="text-sm text-muted-foreground">Provider: <span className="text-foreground">{embeddingHealth.provider}</span></div>
+              <div className="text-sm text-muted-foreground">Model: <span className="text-foreground">{embeddingHealth.model || '—'}</span></div>
+              <div className="text-sm text-muted-foreground">
+                Dimensions: <span className="text-foreground">{embeddingHealth.liveDimensions || embeddingHealth.configuredDimensions}</span>
+                {embeddingHealth.liveDimensions > 0 && embeddingHealth.liveDimensions !== embeddingHealth.configuredDimensions && (
+                  <span className="text-amber-500"> (live {embeddingHealth.liveDimensions} ≠ configured {embeddingHealth.configuredDimensions})</span>
+                )}
+              </div>
+              <div className="text-sm text-muted-foreground">
+                Provider key configured: <span className="text-foreground">{embeddingHealth.providerConfigured ? 'yes' : 'no'}</span>
+              </div>
+              {embeddingHealth.error && (
+                <div className="sm:col-span-2 rounded-lg bg-red-500/10 border border-red-500/30 p-3 text-sm text-red-600 dark:text-red-400">
+                  {embeddingHealth.error}
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Running embedding health probe…</p>
+          )}
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={handleCheckEmbedding} disabled={checkingEmbedding}>
+              {checkingEmbedding ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Re-check
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Stage 1 Internal Layers */}
       <Card>
           <CardHeader>
@@ -547,9 +641,9 @@ export default function Settings() {
                 <Layers className="h-5 w-5" />
               </div>
               <div>
-                <CardTitle>Stage 1 — Academic Contract Layers</CardTitle>
+                <CardTitle>Course Architect</CardTitle>
                 <CardDescription>
-                  Configure each internal Stage 1 layer: prompts, execution mode, council, and SME workflow
+                  Configure each Course Architect layer: prompts, execution mode, council, and SME workflow
                 </CardDescription>
               </div>
             </div>
@@ -563,50 +657,66 @@ export default function Settings() {
           </CardContent>
         </Card>
 
-      {/* LLM Council - Per-Stage Model Configuration */}
+      {/* Legacy Stage Pipeline (deprecated) — only reachable when LEGACY_STAGES_ENABLED.
+          The V1 intake config (model + council + Extraction/CLO Analysis prompts) now
+          lives on the "Stage 1 — Academic Contract Layers" card's layer1-intake layer.
+          Stage 2-5 configs remain in storage/schema and are editable here when enabled. */}
+      {LEGACY_STAGES_ENABLED && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
+                <Users className="h-5 w-5" />
+              </div>
+              <div>
+                <CardTitle>Legacy Stage Pipeline (deprecated)</CardTitle>
+                <CardDescription>
+                  Per-stage model/council config for the legacy Stage 2–5 pipeline. Stage 1 intake is now
+                  configured on the Academic Contract Layers card above.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <StageModelTabs
+              stageConfigs={settings.stageConfigs || {
+                stage1: { mode: 'single', singleModel: '', councilModels: [], chairmanModel: '' },
+                stage2: { mode: 'single', singleModel: '', councilModels: [], chairmanModel: '' },
+                stage3: { mode: 'single', singleModel: '', councilModels: [], chairmanModel: '' },
+                stage4: { mode: 'single', singleModel: '', councilModels: [], chairmanModel: '' },
+                stage5: { mode: 'single', singleModel: '', councilModels: [], chairmanModel: '' },
+              }}
+              onChange={(stageConfigs) => setSettings(prev => prev ? {
+                ...prev,
+                stageConfigs
+              } : prev)}
+              provider={settings.aiProvider}
+              visibleStageKeys={['stage2', 'stage3', 'stage4', 'stage5']}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Maestro Node Engine — Prompt Template Registry (M2 / S7) */}
       <Card>
         <CardHeader>
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
-              <Users className="h-5 w-5" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500">
+              <Sparkles className="h-5 w-5" />
             </div>
             <div>
-              <CardTitle>LLM Council</CardTitle>
+              <CardTitle>Node Engine — Prompt Templates</CardTitle>
               <CardDescription>
-                Configure each stage to use a single model or a council of models
+                Versioned prompt templates for each production vehicle (Build Spec §8.14)
               </CardDescription>
             </div>
           </div>
         </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Stage Model Tabs */}
-          <StageModelTabs
-            stageConfigs={settings.stageConfigs || {
-              stage1: { mode: 'single', singleModel: '', councilModels: [], chairmanModel: '' },
-              stage2: { mode: 'single', singleModel: '', councilModels: [], chairmanModel: '' },
-              stage3: { mode: 'single', singleModel: '', councilModels: [], chairmanModel: '' },
-              stage4: { mode: 'single', singleModel: '', councilModels: [], chairmanModel: '' },
-              stage5: { mode: 'single', singleModel: '', councilModels: [], chairmanModel: '' },
-            }}
-            onChange={(stageConfigs) => setSettings(prev => prev ? {
-              ...prev,
-              stageConfigs
-            } : prev)}
-            provider={settings.aiProvider}
-          />
-          
-          {/* Info box */}
-          <div className="rounded-lg bg-blue-500/10 border border-blue-500/30 p-3 text-sm text-blue-600 dark:text-blue-400">
-            <p className="font-medium">How LLM Council Works</p>
-            <ul className="mt-1 text-blue-600/80 dark:text-blue-400/80 list-disc list-inside space-y-1">
-              <li><strong>Single mode:</strong> Uses one model directly (fast)</li>
-              <li><strong>Council mode:</strong> Multiple models deliberate, then the chairman synthesizes the final output (thorough)</li>
-              <li><strong>Per-stage prompts:</strong> Each stage has its own member and chairman prompts tailored to its task</li>
-            </ul>
-          </div>
+        <CardContent>
+          <PromptTemplateSettings />
         </CardContent>
       </Card>
-      
+
       {/* Save Button */}
       <div className="flex justify-end">
         <Button onClick={handleSave} disabled={saving} className="gap-2 shadow-lg shadow-primary/25 dark:shadow-primary/10">

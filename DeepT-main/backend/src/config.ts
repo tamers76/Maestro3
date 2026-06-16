@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import type { Settings, CouncilConfig, StageExecution, StageConfigs, StageModelConfig, CouncilSettings, Stage1LayerConfig } from './models/schemas.js';
+import type { Settings, CouncilConfig, StageExecution, StageConfigs, StageModelConfig, CouncilSettings, Stage1LayerConfig, NodeEngineDefaults } from './models/schemas.js';
 import { defaultStage1Layers } from './config/stage1Layers.defaults.js';
 import {
   STAGE1_EXTRACTION_PROMPT,
@@ -266,6 +266,21 @@ const defaultCouncilSettings: CouncilSettings = {
   chairmanSystemPrompt: DEFAULT_CHAIRMAN_SYSTEM_PROMPT
 };
 
+// Node Engine global defaults (NEW). The single system-wide fallback model for
+// node-engine generation (step 3 of resolveGenerationModel). Reuses the existing
+// stage1 single-model default so the fallback is consistent with the rest of the
+// app; env-overridable via NODE_ENGINE_DEFAULT_MODEL.
+const NODE_ENGINE_DEFAULT_MODEL = 'anthropic/claude-sonnet-4';
+// Cheap default for contextual-embedding header generation (Reference Anchoring
+// V1.0). A gpt-4o-mini-class model, expressed as an OpenRouter slug to match how
+// the other model defaults in this file are written. Env-overridable via
+// CONTEXT_HEADER_MODEL.
+const CONTEXT_HEADER_DEFAULT_MODEL = 'openai/gpt-4o-mini';
+const defaultNodeEngineDefaults: NodeEngineDefaults = {
+  defaultModel: NODE_ENGINE_DEFAULT_MODEL,
+  contextHeaderModel: CONTEXT_HEADER_DEFAULT_MODEL,
+};
+
 // Default settings
 const defaultSettings: Settings = {
   aiProvider: 'openrouter',
@@ -283,6 +298,11 @@ const defaultSettings: Settings = {
       numCtx: 4096
     }
   },
+  embedding: {
+    provider: 'openai',
+    model: 'text-embedding-3-small',
+    dimensions: 1536,
+  },
   models: {
     stage1: 'anthropic/claude-sonnet-4',
     stage2: 'anthropic/claude-sonnet-4',
@@ -298,6 +318,8 @@ const defaultSettings: Settings = {
   // NEW: Per-stage model configurations
   stageConfigs: defaultStageConfigs,
   councilSettings: defaultCouncilSettings,
+  // NEW: Node Engine global defaults (single system default model)
+  nodeEngineDefaults: defaultNodeEngineDefaults,
   // LEGACY: kept for backward compatibility
   council: defaultCouncil,
   stageExecution: defaultStageExecution,
@@ -334,6 +356,22 @@ function overlayEnvSecrets(settings: Settings): Settings {
       user: process.env.NEO4J_USER || settings.neo4j.user,
       password: process.env.NEO4J_PASSWORD || settings.neo4j.password,
     },
+    embedding: {
+      ...settings.embedding,
+      provider: (process.env.EMBEDDING_PROVIDER as Settings['embedding']['provider']) || settings.embedding.provider,
+      model: process.env.EMBEDDING_MODEL || settings.embedding.model,
+      dimensions: process.env.EMBEDDING_DIMENSIONS
+        ? Number(process.env.EMBEDDING_DIMENSIONS)
+        : settings.embedding.dimensions,
+    },
+    nodeEngineDefaults: {
+      ...settings.nodeEngineDefaults,
+      defaultModel: process.env.NODE_ENGINE_DEFAULT_MODEL || settings.nodeEngineDefaults.defaultModel,
+      contextHeaderModel:
+        process.env.CONTEXT_HEADER_MODEL ||
+        settings.nodeEngineDefaults.contextHeaderModel ||
+        CONTEXT_HEADER_DEFAULT_MODEL,
+    },
   };
 }
 
@@ -361,6 +399,7 @@ export function loadSettings(): Settings {
           ...settings.ollama,
           options: { ...defaultSettings.ollama.options, ...settings.ollama?.options }
         },
+        embedding: { ...defaultSettings.embedding, ...settings.embedding },
         models: { ...defaultSettings.models, ...settings.models },
         neo4j: { ...defaultSettings.neo4j, ...settings.neo4j },
         // NEW: Per-stage configs with deep merge
@@ -372,6 +411,7 @@ export function loadSettings(): Settings {
           stage5: { ...defaultStageConfigs.stage5, ...settings.stageConfigs?.stage5 },
         },
         councilSettings: { ...defaultSettings.councilSettings, ...settings.councilSettings },
+        nodeEngineDefaults: { ...defaultSettings.nodeEngineDefaults, ...settings.nodeEngineDefaults },
         // LEGACY
         council: { 
           ...defaultSettings.council, 
@@ -385,7 +425,17 @@ export function loadSettings(): Settings {
   } catch (error) {
     console.error('Error loading settings:', error);
   }
-  
+
+  // Idempotent migration: backfill layer1-intake from stageConfigs.stage1 so the
+  // retired LLM Council card's stage1 selections keep driving course intake.
+  mergedSettings = {
+    ...mergedSettings,
+    stage1Layers: migrateIntakeLayerFromStage1(
+      mergedSettings.stage1Layers ?? defaultStage1Layers,
+      mergedSettings.stageConfigs.stage1
+    ),
+  };
+
   // Overlay environment variables (env takes precedence over file values)
   return overlayEnvSecrets(mergedSettings);
 }
@@ -442,6 +492,7 @@ export function updateSettings(newSettings: Partial<Settings>): Settings {
       ...newSettings.ollama,
       options: { ...current.ollama?.options, ...newSettings.ollama?.options }
     },
+    embedding: { ...current.embedding, ...newSettings.embedding },
     models: { ...current.models, ...newSettings.models },
     neo4j: { ...current.neo4j, ...newSettings.neo4j },
     // NEW: Per-stage configs with deep merge
@@ -453,6 +504,7 @@ export function updateSettings(newSettings: Partial<Settings>): Settings {
       stage5: { ...current.stageConfigs.stage5, ...newSettings.stageConfigs?.stage5 },
     },
     councilSettings: { ...current.councilSettings, ...newSettings.councilSettings },
+    nodeEngineDefaults: { ...current.nodeEngineDefaults, ...newSettings.nodeEngineDefaults },
     // LEGACY
     council: { ...current.council, ...newSettings.council },
     stageExecution: { ...current.stageExecution, ...newSettings.stageExecution },
@@ -478,6 +530,65 @@ function mergeStage1Layers(
   });
 }
 
+/**
+ * The legacy `layer1-intake` taskPrompt default. It was descriptive only and was
+ * NEVER wired to the actual extraction AI call (runStage1 always used the stage1
+ * extraction prompt), and it emits a different JSON shape than the extraction parser
+ * expects. The migration below treats a layer1-intake still carrying this placeholder
+ * as "not yet intake-wired" and seeds it from the working stageConfigs.stage1 config.
+ */
+const LEGACY_INTAKE_TASK_PROMPT_PREFIX = 'You are Maestro Course Intake AI';
+
+/**
+ * One-time, idempotent migration that makes `layer1-intake` the source of truth for
+ * course intake by seeding it from the working `stageConfigs.stage1` config (the
+ * config the now-retired LLM Council card used to edit).
+ *
+ * The layer is considered "not yet intake-wired" when its taskPrompt is empty or is
+ * still the legacy placeholder above. In that case we copy stage1's mode, singleModel,
+ * councilModels, chairmanModel, member/chairman prompts and taskPrompt onto the layer
+ * so intake keeps using the SAME model + extraction prompt it used before (no
+ * regression, and the user's previously-picked model is preserved). taskPrompt2 is
+ * always backfilled from stage1 when missing. Once seeded, the layer no longer matches
+ * the trigger, so this is safe to run on every settings load.
+ */
+function migrateIntakeLayerFromStage1(
+  layers: Stage1LayerConfig[],
+  stage1: StageModelConfig
+): Stage1LayerConfig[] {
+  const isEmptyStr = (v?: string): boolean => !v || !v.trim();
+  const isEmptyArr = (v?: string[]): boolean => !v || v.length === 0;
+  const isLegacyIntakePrompt = (v?: string): boolean =>
+    !!v && v.trim().startsWith(LEGACY_INTAKE_TASK_PROMPT_PREFIX);
+
+  return layers.map((layer) => {
+    if (layer.id !== 'layer1-intake') return layer;
+
+    const patch: Partial<Stage1LayerConfig> = {};
+
+    // Seed the working intake bundle when the layer has never carried a real
+    // extraction prompt (empty or the legacy placeholder) and stage1 has one.
+    const needsSeeding = isEmptyStr(layer.taskPrompt) || isLegacyIntakePrompt(layer.taskPrompt);
+    if (needsSeeding && !isEmptyStr(stage1.taskPrompt)) {
+      patch.mode = stage1.mode;
+      if (!isEmptyStr(stage1.singleModel)) patch.singleModel = stage1.singleModel;
+      if (!isEmptyArr(stage1.councilModels)) patch.councilModels = [...stage1.councilModels];
+      if (!isEmptyStr(stage1.chairmanModel)) patch.chairmanModel = stage1.chairmanModel;
+      if (!isEmptyStr(stage1.memberSystemPrompt)) patch.memberSystemPrompt = stage1.memberSystemPrompt;
+      if (!isEmptyStr(stage1.chairmanSystemPrompt)) patch.chairmanSystemPrompt = stage1.chairmanSystemPrompt;
+      patch.taskPrompt = stage1.taskPrompt;
+    }
+
+    if (isEmptyStr(layer.taskPrompt2) && !isEmptyStr(stage1.taskPrompt2)) {
+      patch.taskPrompt2 = stage1.taskPrompt2;
+    }
+
+    return Object.keys(patch).length > 0 ? { ...layer, ...patch } : layer;
+  });
+}
+
+export { migrateIntakeLayerFromStage1 };
+
 export function getStage1LayerConfigs(): Stage1LayerConfig[] {
   const settings = getSettings();
   return [...(settings.stage1Layers ?? defaultStage1Layers)].sort((a, b) => a.order - b.order);
@@ -485,6 +596,29 @@ export function getStage1LayerConfigs(): Stage1LayerConfig[] {
 
 export function getStage1LayerConfig(layerId: string): Stage1LayerConfig | undefined {
   return getStage1LayerConfigs().find((l) => l.id === layerId);
+}
+
+/**
+ * The single node-engine global/system default model — step (3) of
+ * resolveGenerationModel(). Read from settings.nodeEngineDefaults.defaultModel
+ * (env-overridable via NODE_ENGINE_DEFAULT_MODEL), falling back to the seeded
+ * default so this NEVER returns empty.
+ */
+export function getNodeEngineDefaultModel(): string {
+  const settings = getSettings();
+  return settings.nodeEngineDefaults?.defaultModel || NODE_ENGINE_DEFAULT_MODEL;
+}
+
+/**
+ * The cheap, configurable model used to generate contextual-embedding headers for
+ * reference chunks (Reference Anchoring V1.0). Read from
+ * settings.nodeEngineDefaults.contextHeaderModel (env-overridable via
+ * CONTEXT_HEADER_MODEL), falling back to the seeded cheap default so this NEVER
+ * returns empty. Mirrors getNodeEngineDefaultModel().
+ */
+export function getContextHeaderModel(): string {
+  const settings = getSettings();
+  return settings.nodeEngineDefaults?.contextHeaderModel || CONTEXT_HEADER_DEFAULT_MODEL;
 }
 
 // Clear settings cache (useful after external changes)

@@ -913,6 +913,111 @@ export interface GraphData {
 // AI Provider type
 export type AIProvider = 'openrouter' | 'ollama' | 'openai';
 
+// ============================================================================
+// REFERENCE-GROUNDING (RAG) — embedding settings + entities
+// ============================================================================
+
+/** Provider used to generate text embeddings for reference grounding */
+export type EmbeddingProvider = 'openai' | 'ollama';
+
+/** Switchable embedding configuration. dimensions must match the chosen model. */
+export interface EmbeddingSettings {
+  provider: EmbeddingProvider;
+  model: string;
+  dimensions: number;
+}
+
+/** Where a reference document fits in the curriculum (optional narrowing) */
+export interface ReferenceScope {
+  clo_ids?: string[];
+  subtopic_ids?: string[];
+}
+
+export type ReferenceSourceType = 'textbook_chapter' | 'paper' | 'other';
+
+/** An SME-uploaded, institutionally-licensed reference document tied to a course */
+export interface ReferenceDocument {
+  doc_id: string;
+  course_code: string;
+  title: string;
+  source_type: ReferenceSourceType;
+  /** Human citation label, e.g. "Smith 2020, Ch.3" */
+  citation_label: string;
+  scope: ReferenceScope;
+  original_filename: string;
+  mime_type: string;
+  uploaded_at: string;
+  char_count: number;
+  chunk_count: number;
+  /** Embedding model + dims used to index this doc (for mismatch detection) */
+  embedding_model: string;
+  embedding_dimensions: number;
+  /** True once this doc's chunks were embedded with contextual headers (V1.0). */
+  contextual_embeddings?: boolean;
+}
+
+/** A passage-sized, embedded slice of a reference document */
+export interface ReferenceChunk {
+  chunk_id: string;
+  doc_id: string;
+  course_code: string;
+  seq: number;
+  /** Raw passage text — clean (used for display + citation). */
+  text: string;
+  token_estimate: number;
+  section_heading?: string;
+  page_start?: number;
+  page_end?: number;
+  /**
+   * Contextual header prepended (header + "\n---\n" + text) for the EMBEDDED input
+   * only (V1.0 contextual embeddings). `text` itself stays raw.
+   */
+  context_header?: string;
+  /** Stable sha256 of the raw text — cache key for header generation / re-embed. */
+  content_hash?: string;
+  /** Traceable source citation carried on every chunk */
+  citation: string;
+  clo_ids: string[];
+  subtopic_ids: string[];
+  embedding: number[];
+}
+
+/** A retrieval hit returned to callers (no raw embedding) */
+export interface RetrievedChunk {
+  chunk_id: string;
+  doc_id: string;
+  text: string;
+  citation: string;
+  /** Back-compat overall score; always kept === final_score for existing callers. */
+  score: number;
+  /** Hybrid-search signals (V1.0). semantic/keyword are normalized to [0,1]. */
+  semantic_score?: number;
+  keyword_score?: number;
+  /** Fused score that drives ranking. Existing callers read `score` (=== this). */
+  final_score: number;
+  /** Why this chunk matched: "semantic+keyword agree" | "semantic only" | "keyword only". */
+  match_reason: string;
+  clo_ids: string[];
+  subtopic_ids: string[];
+}
+
+/** Per-course manifest of reference documents + which vector backend is active */
+export interface ReferenceManifest {
+  course_code: string;
+  documents: ReferenceDocument[];
+  /** Which vector store actually indexed this course's chunks */
+  vector_backend: 'neo4j' | 'json';
+  updated_at: string;
+}
+
+/** Grounded context ready for prompt injection (capability output) */
+export interface GroundedContext {
+  passages: { text: string; citation: string }[];
+  citations: string[];
+  /** Prompt-ready block, empty string when nothing was retrieved */
+  promptBlock: string;
+}
+
 // Stage execution mode: single (council-of-1) or council (multi-member)
 export type StageExecutionMode = 'single' | 'council';
 
@@ -988,6 +1093,21 @@ export interface CouncilSettings {
   chairmanSystemPrompt: string;
 }
 
+// Node Engine global defaults. `defaultModel` is the single system-wide fallback
+// model used as step (3) of resolveGenerationModel() when neither a prompt-template
+// version override nor a per-vehicle modality config pins a model. Env-overridable
+// via NODE_ENGINE_DEFAULT_MODEL.
+export interface NodeEngineDefaults {
+  defaultModel: string;
+  /**
+   * Cheap, configurable model used to generate contextual-embedding headers for
+   * reference chunks (Reference Anchoring V1.0). Env-overridable via
+   * CONTEXT_HEADER_MODEL. Kept separate from defaultModel so header generation
+   * stays cheap regardless of the node-engine generation model.
+   */
+  contextHeaderModel?: string;
+}
+
 // Per-stage execution settings (LEGACY - kept for backward compatibility)
 export interface StageExecution {
   stage1: StageExecutionMode;
@@ -1027,6 +1147,8 @@ export interface Settings {
       numCtx?: number;
     };
   };
+  // Embedding configuration for reference-grounding (RAG). Switchable provider/model.
+  embedding: EmbeddingSettings;
   models: {
     stage1: string;
     stage2: string;
@@ -1043,6 +1165,8 @@ export interface Settings {
   stageConfigs: StageConfigs;
   // NEW: Global council settings (temperature, prompts)
   councilSettings: CouncilSettings;
+  // NEW: Node Engine global defaults (single system-wide default model)
+  nodeEngineDefaults: NodeEngineDefaults;
   // LEGACY: LLM Council configuration (kept for backward compatibility)
   council: CouncilConfig;
   // LEGACY: Per-stage execution mode selection (kept for backward compatibility)

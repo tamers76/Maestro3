@@ -1,0 +1,339 @@
+/**
+ * Reference-grounding fix tests (run with: npm test).
+ *
+ * node:test via tsx — hermetic (no live embedding provider, no DB):
+ *  1. Schema: NodeSet grounding-transparency fields round-trip through parseNodeSet.
+ *  2. Academic-approval guard: blocks ungrounded approval, permits with an override
+ *     reason (recorded) or when a node carries citations.
+ *  3. Reference Alignment (Layer 7): dependency state, SME edit (promote / demote /
+ *     reassign + CLO inheritance), and approve (writes scope tags + manifest).
+ *
+ * The cosine PROPOSE step needs a live embedding call, so it is exercised manually
+ * (Settings → RAG health + the propose UI), not here; these tests cover the
+ * deterministic logic against synthetic, self-cleaning fixtures + the real MDLD602
+ * artifacts (read-only).
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { existsSync, rmSync } from 'fs';
+import { join } from 'path';
+
+import { parseNodeSet, type NodeSet } from '../../models/nodeEngine.js';
+import {
+  approveNodeSet,
+  isNodeSetAcademicallyReady,
+  AcademicApprovalRequiredError,
+} from '../nodeGeneration.service.js';
+import { saveNodeSetArtifact } from '../store.service.js';
+import { saveCourseArtifact } from '../store.service.js';
+import {
+  getAlignmentState,
+  getAlignmentProposal,
+  updateAlignmentMapping,
+  approveAlignment,
+  DEFAULT_ALIGNMENT_THRESHOLD,
+  type ReferenceAlignmentArtifact,
+} from '../../services/referenceAlignment.service.js';
+import * as fileService from '../../services/file.service.js';
+import type { ReferenceChunk, ReferenceManifest } from '../../models/schemas.js';
+
+const SUBTOPIC = 'CLO1-ST2';
+const DATA_DIR = join(process.cwd(), '..', 'data', 'courses');
+
+// ---------------------------------------------------------------------------
+// A minimal, schema-valid node-set (one node) for guard/schema tests.
+// ---------------------------------------------------------------------------
+function minimalNodeSet(overrides: Partial<NodeSet> = {}): NodeSet {
+  const base = {
+    node_set_id: `nodeset_${SUBTOPIC}`,
+    course_id: 'TST',
+    subtopic_id: SUBTOPIC,
+    clo_ids: ['CLO-1'],
+    prepares_for_assessment_ids: [],
+    generator_divergence_notes: [],
+    status: 'draft',
+    created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-01T00:00:00.000Z',
+    nodes: [
+      {
+        node_id: 'node_1',
+        parent_subtopic_id: SUBTOPIC,
+        clo_ids: ['CLO-1'],
+        node_type: 'concept',
+        node_title: 'Node 1',
+        order: 0,
+        is_core: true,
+        knowledge_component: 'kc',
+        kc_ids: ['kc_node_1'],
+        mastery_statement: 'm',
+        why_it_matters: 'w',
+        assessment_connection: '',
+        core_academic_message: 'msg',
+        evidence_map: [],
+        captured_signals: ['response'],
+        prerequisite_node_ids: [],
+        dependent_node_ids: [],
+        cross_clo_links: [],
+        primary_evidence_check_requirement: {
+          evidence_check_id: 'ec_node_node_1_primary',
+          must_capture_signals: ['response'],
+          preferred_evidence_mode: 'explain',
+          diagnostic_bands: ['secure'],
+        },
+        misconception_slots: 'pending',
+        candidate_misconceptions: [],
+        misconception_bindings: [],
+        grounding_references: [],
+        risk_classification: ['standard'],
+        status: 'draft',
+      },
+    ],
+    ...overrides,
+  };
+  return parseNodeSet(JSON.parse(JSON.stringify(base)));
+}
+
+function withTempCourse(code: string, fn: () => void): void {
+  const dir = join(DATA_DIR, code);
+  try {
+    fn();
+  } finally {
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ===========================================================================
+// 1. Schema round-trip
+// ===========================================================================
+
+test('parseNodeSet round-trips grounding_summary + academic override fields', () => {
+  const ns = minimalNodeSet({
+    grounding_summary: {
+      retrieval_called: true,
+      scoped_chunk_count: 0,
+      course_level_chunk_count: 3,
+      citations_count: 2,
+      grounding_source: 'course_level_references',
+      grounding_note: 'used the course-level safety net',
+      academic_ready: true,
+    },
+    academic_override_reason: 'reviewed manually',
+    academic_override_by: 'sme@test',
+  } as Partial<NodeSet>);
+
+  assert.equal(ns.grounding_summary?.grounding_source, 'course_level_references');
+  assert.equal(ns.grounding_summary?.citations_count, 2);
+  assert.equal(ns.grounding_summary?.academic_ready, true);
+  assert.equal(ns.academic_override_reason, 'reviewed manually');
+});
+
+test('parseNodeSet defaults an invalid grounding_source to model_only', () => {
+  const ns = minimalNodeSet({
+    // @ts-expect-error intentionally invalid enum for the parse test
+    grounding_summary: { grounding_source: 'nonsense', citations_count: 0 },
+  });
+  assert.equal(ns.grounding_summary?.grounding_source, 'model_only');
+});
+
+// ===========================================================================
+// 2. Academic-approval guard
+// ===========================================================================
+
+test('isNodeSetAcademicallyReady: summary flag, then node citations fallback', () => {
+  assert.equal(isNodeSetAcademicallyReady(minimalNodeSet()), false);
+
+  const ready = minimalNodeSet({
+    grounding_summary: {
+      retrieval_called: true,
+      scoped_chunk_count: 2,
+      course_level_chunk_count: 0,
+      citations_count: 2,
+      grounding_source: 'scoped_references',
+      grounding_note: '',
+      academic_ready: true,
+    },
+  } as Partial<NodeSet>);
+  assert.equal(isNodeSetAcademicallyReady(ready), true);
+
+  // No summary, but a node carries a citation → ready via fallback.
+  const node = minimalNodeSet().nodes[0];
+  const citedNode = { ...node, grounding_references: [{ citation: 'Smith 2020', passage_ref: 'R1' }] };
+  const cited = minimalNodeSet({ nodes: [citedNode] } as Partial<NodeSet>);
+  assert.equal(isNodeSetAcademicallyReady(cited), true);
+});
+
+test('approveNodeSet blocks ungrounded approval, then permits with an override reason', () => {
+  withTempCourse('GUARDTEST', () => {
+    saveNodeSetArtifact('GUARDTEST', SUBTOPIC, minimalNodeSet());
+
+    assert.throws(
+      () => approveNodeSet('GUARDTEST', SUBTOPIC, { approver: 'sme@test' }),
+      AcademicApprovalRequiredError
+    );
+
+    const approved = approveNodeSet('GUARDTEST', SUBTOPIC, {
+      approver: 'sme@test',
+      overrideReason: 'no references for this course yet',
+    });
+    assert.equal(approved.status, 'approved');
+    assert.equal(approved.academic_override_reason, 'no references for this course yet');
+    assert.equal(approved.academic_override_by, 'sme@test');
+  });
+});
+
+test('approveNodeSet permits without override when nodes carry citations', () => {
+  withTempCourse('GUARDTEST2', () => {
+    const node = minimalNodeSet().nodes[0];
+    const cited = minimalNodeSet({
+      nodes: [{ ...node, grounding_references: [{ citation: 'Ref A', passage_ref: 'R1' }] }],
+    } as Partial<NodeSet>);
+    saveNodeSetArtifact('GUARDTEST2', SUBTOPIC, cited);
+
+    const approved = approveNodeSet('GUARDTEST2', SUBTOPIC, { approver: 'sme@test' });
+    assert.equal(approved.status, 'approved');
+    assert.equal(approved.academic_override_reason, undefined);
+  });
+});
+
+// ===========================================================================
+// 3. Reference Alignment (Layer 7)
+// ===========================================================================
+
+test('getAlignmentState reports dependency counts for MDLD602 (read-only)', () => {
+  const state = getAlignmentState('MDLD602');
+  assert.ok(state.reference_doc_count > 0, 'MDLD602 has reference docs');
+  assert.ok(state.chunk_count > 0, 'MDLD602 has reference chunks');
+  assert.equal(state.threshold, DEFAULT_ALIGNMENT_THRESHOLD);
+  assert.ok(['locked', 'available', 'proposed', 'approved'].includes(state.status));
+});
+
+test('updateAlignmentMapping promotes / reassigns and inherits CLOs only when asked', () => {
+  withTempCourse('ALIGNEDIT', () => {
+    const artifact: ReferenceAlignmentArtifact = {
+      course_code: 'ALIGNEDIT',
+      status: 'proposed',
+      threshold: DEFAULT_ALIGNMENT_THRESHOLD,
+      embedding_model: 'text-embedding-3-small',
+      embedding_dimensions: 1536,
+      subtopic_count: 1,
+      reference_doc_count: 1,
+      chunk_count: 1,
+      tagged_chunk_count: 0,
+      mappings: [
+        {
+          chunk_id: 'c1',
+          doc_id: 'd1',
+          citation: 'Doc 1',
+          text_preview: 'text',
+          subtopic_candidates: [{ id: 'ST-A', label: 'A', score: 0.4 }],
+          clo_candidates: [],
+          confidence: 0.4,
+          decided_subtopic_ids: [],
+          decided_clo_ids: [],
+        },
+      ],
+    };
+    saveCourseArtifact('ALIGNEDIT', 'reference-alignment.json', artifact);
+
+    // Promote with explicit CLO ids → no V1 bundle needed (temp course has none).
+    const updated = updateAlignmentMapping('ALIGNEDIT', [
+      { chunk_id: 'c1', subtopic_ids: ['ST-A'], clo_ids: ['CLO-9'] },
+    ]);
+    assert.deepEqual(updated.mappings[0].decided_subtopic_ids, ['ST-A']);
+    assert.deepEqual(updated.mappings[0].decided_clo_ids, ['CLO-9']);
+    assert.equal(updated.mappings[0].edited, true);
+    assert.equal(updated.tagged_chunk_count, 1);
+
+    // Demote to course-level (no tag).
+    const demoted = updateAlignmentMapping('ALIGNEDIT', [{ chunk_id: 'c1', subtopic_ids: [], clo_ids: [] }]);
+    assert.deepEqual(demoted.mappings[0].decided_subtopic_ids, []);
+    assert.equal(demoted.tagged_chunk_count, 0);
+  });
+});
+
+test('approveAlignment writes scope tags into chunks + manifest, then re-indexes (JSON)', async () => {
+  const CODE = 'ALIGNAPPROVE';
+  const dir = join(DATA_DIR, CODE);
+  try {
+    {
+      const manifest: ReferenceManifest = {
+        course_code: CODE,
+        documents: [
+          {
+            doc_id: 'd1',
+            course_code: CODE,
+            title: 'Doc 1',
+            source_type: 'textbook_chapter',
+            citation_label: 'Doc 1',
+            scope: { clo_ids: [], subtopic_ids: [] },
+            original_filename: 'd1.pdf',
+            mime_type: 'application/pdf',
+            uploaded_at: '2026-01-01T00:00:00.000Z',
+            char_count: 10,
+            chunk_count: 2,
+            embedding_model: 'text-embedding-3-small',
+            embedding_dimensions: 3,
+          },
+        ],
+        vector_backend: 'json',
+        updated_at: '2026-01-01T00:00:00.000Z',
+      };
+      fileService.saveReferenceManifest(CODE, manifest);
+
+      const chunks: ReferenceChunk[] = [
+        {
+          chunk_id: 'c1', doc_id: 'd1', course_code: CODE, seq: 0, text: 'a', token_estimate: 1,
+          citation: 'Doc 1 p1', clo_ids: [], subtopic_ids: [], embedding: [0.1, 0.2, 0.3],
+        },
+        {
+          chunk_id: 'c2', doc_id: 'd1', course_code: CODE, seq: 1, text: 'b', token_estimate: 1,
+          citation: 'Doc 1 p2', clo_ids: [], subtopic_ids: [], embedding: [0.4, 0.5, 0.6],
+        },
+      ];
+      fileService.saveReferenceChunks(CODE, 'd1', chunks);
+
+      const artifact: ReferenceAlignmentArtifact = {
+        course_code: CODE,
+        status: 'proposed',
+        threshold: DEFAULT_ALIGNMENT_THRESHOLD,
+        embedding_model: 'text-embedding-3-small',
+        embedding_dimensions: 3,
+        subtopic_count: 1,
+        reference_doc_count: 1,
+        chunk_count: 2,
+        tagged_chunk_count: 1,
+        mappings: [
+          {
+            chunk_id: 'c1', doc_id: 'd1', citation: 'Doc 1 p1', text_preview: 'a',
+            subtopic_candidates: [], clo_candidates: [], confidence: 0.5,
+            decided_subtopic_ids: ['ST-A'], decided_clo_ids: ['CLO-1'],
+          },
+          {
+            chunk_id: 'c2', doc_id: 'd1', citation: 'Doc 1 p2', text_preview: 'b',
+            subtopic_candidates: [], clo_candidates: [], confidence: 0.1,
+            decided_subtopic_ids: [], decided_clo_ids: [],
+          },
+        ],
+      };
+      saveCourseArtifact(CODE, 'reference-alignment.json', artifact);
+    }
+
+    await approveAlignment(CODE, { approver: 'sme@test' });
+
+    const written = fileService.getReferenceChunks(CODE, 'd1');
+    const c1 = written.find((c) => c.chunk_id === 'c1')!;
+    const c2 = written.find((c) => c.chunk_id === 'c2')!;
+    assert.deepEqual(c1.subtopic_ids, ['ST-A']);
+    assert.deepEqual(c1.clo_ids, ['CLO-1']);
+    assert.deepEqual(c2.subtopic_ids, [], 'low-confidence chunk stays course-level');
+
+    const m = fileService.getReferenceManifest(CODE)!;
+    assert.ok(m.documents[0].scope.subtopic_ids?.includes('ST-A'));
+
+    const approved = getAlignmentProposal(CODE)!;
+    assert.equal(approved.status, 'approved');
+    assert.equal(approved.approved_by, 'sme@test');
+  } finally {
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  }
+});

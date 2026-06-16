@@ -132,14 +132,23 @@ interface StageModelTabsProps {
   stageConfigs: StageConfigs
   onChange: (stageConfigs: StageConfigs) => void
   provider: AIProvider
+  /** When provided, only these stage tabs are shown (e.g. hide legacy 2-5). */
+  visibleStageKeys?: (keyof StageConfigs)[]
 }
 
 export default function StageModelTabs({
   stageConfigs,
   onChange,
-  provider = 'openrouter'
+  provider = 'openrouter',
+  visibleStageKeys
 }: StageModelTabsProps) {
-  const [activeTab, setActiveTab] = useState<keyof StageConfigs>('stage1')
+  const visibleStages = useMemo(
+    () => STAGE_LABELS.filter((s) => !visibleStageKeys || visibleStageKeys.includes(s.key)),
+    [visibleStageKeys]
+  )
+  const [activeTab, setActiveTab] = useState<keyof StageConfigs>(
+    visibleStageKeys && visibleStageKeys.length > 0 ? visibleStageKeys[0] : 'stage1'
+  )
   const [availableModels, setAvailableModels] = useState<AIModel[]>([])
   const [loading, setLoading] = useState(false)
   const [hasLoaded, setHasLoaded] = useState(false)
@@ -459,7 +468,7 @@ export default function StageModelTabs({
       {/* Stage Tabs */}
       <div className="border-b border-border">
         <div className="flex gap-1 overflow-x-auto">
-          {STAGE_LABELS.map(({ key, label }) => {
+          {visibleStages.map(({ key, label }) => {
             const config = stageConfigs[key]
             const isCouncil = config?.mode === 'council'
             return (

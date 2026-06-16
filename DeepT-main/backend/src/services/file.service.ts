@@ -39,7 +39,9 @@ import type {
   EnhancedWorkloadMap,
   Stage4ValidationReport,
   AdaptiveCourseModel,
-  Stage5AValidationReport
+  Stage5AValidationReport,
+  ReferenceManifest,
+  ReferenceChunk
 } from '../models/schemas.js';
 
 const DATA_DIR = join(process.cwd(), '..', 'data', 'courses');
@@ -66,6 +68,7 @@ export function initCourseDirectories(courseCode: string): void {
   ensureDir(join(courseDir, 'compiled'));
   ensureDir(join(courseDir, 'stage3'));
   ensureDir(join(courseDir, 'stage1'));
+  ensureDir(join(courseDir, 'references'));
 }
 
 export function deleteCourseDirectory(courseCode: string): void {
@@ -357,6 +360,80 @@ export function getUploadedFilePath(courseCode: string, filename: string): strin
   const path = join(getCourseDir(courseCode), 'extracted', filename);
   if (!existsSync(path)) return null;
   return path;
+}
+
+// ============== Reference Materials (RAG grounding) ==============
+
+function getReferencesDir(courseCode: string): string {
+  return join(getCourseDir(courseCode), 'references');
+}
+
+export function getReferenceManifest(courseCode: string): ReferenceManifest | null {
+  const path = join(getReferencesDir(courseCode), 'manifest.json');
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8')) as ReferenceManifest;
+  } catch (error) {
+    console.error('Error reading reference manifest:', error);
+    return null;
+  }
+}
+
+export function saveReferenceManifest(courseCode: string, manifest: ReferenceManifest): void {
+  const dir = getReferencesDir(courseCode);
+  ensureDir(dir);
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf-8');
+}
+
+export function saveReferenceDocText(courseCode: string, docId: string, text: string): void {
+  const dir = getReferencesDir(courseCode);
+  ensureDir(dir);
+  writeFileSync(join(dir, `${docId}.txt`), text, 'utf-8');
+}
+
+export function getReferenceDocText(courseCode: string, docId: string): string | null {
+  const path = join(getReferencesDir(courseCode), `${docId}.txt`);
+  if (!existsSync(path)) return null;
+  return readFileSync(path, 'utf-8');
+}
+
+export function saveReferenceChunks(courseCode: string, docId: string, chunks: ReferenceChunk[]): void {
+  const dir = getReferencesDir(courseCode);
+  ensureDir(dir);
+  writeFileSync(join(dir, `${docId}.chunks.json`), JSON.stringify(chunks, null, 2), 'utf-8');
+}
+
+export function getReferenceChunks(courseCode: string, docId: string): ReferenceChunk[] {
+  const path = join(getReferencesDir(courseCode), `${docId}.chunks.json`);
+  if (!existsSync(path)) return [];
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8')) as ReferenceChunk[];
+  } catch (error) {
+    console.error(`Error reading reference chunks for ${docId}:`, error);
+    return [];
+  }
+}
+
+export function getAllReferenceChunks(courseCode: string): ReferenceChunk[] {
+  const dir = getReferencesDir(courseCode);
+  if (!existsSync(dir)) return [];
+  const all: ReferenceChunk[] = [];
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.chunks.json'))) {
+    try {
+      all.push(...(JSON.parse(readFileSync(join(dir, file), 'utf-8')) as ReferenceChunk[]));
+    } catch (error) {
+      console.error(`Error reading reference chunks file ${file}:`, error);
+    }
+  }
+  return all;
+}
+
+export function deleteReferenceDocFiles(courseCode: string, docId: string): void {
+  const dir = getReferencesDir(courseCode);
+  for (const suffix of ['.txt', '.chunks.json']) {
+    const path = join(dir, `${docId}${suffix}`);
+    if (existsSync(path)) rmSync(path);
+  }
 }
 
 // ============== Course Confirmations ==============

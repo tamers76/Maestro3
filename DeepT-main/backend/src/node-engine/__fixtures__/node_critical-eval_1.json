@@ -1,0 +1,52 @@
+{
+  "node_id": "node_critical-eval_1",
+  "parent_subtopic_id": "subtopic_clo2_3",
+  "parent_clo_id": "clo_2",
+  "clo_ids": ["clo_2"],
+  "node_type": "judgment",
+  "node_title": "Distinguishing strong from weak evidence in a source",
+  "order": 0,
+  "knowledge_component": "Evaluating the strength of evidence supporting a claim",
+  "kc_ids": ["kc_evidence_strength", "kc_source_credibility"],
+  "mastery_statement": "Given a claim and its supporting source, judge whether the evidence is relevant, sufficient, and credible.",
+  "why_it_matters": "Curriculum-leadership decisions ride on whether the evidence behind a claim actually holds, not on how authoritative the source sounds.",
+  "assessment_connection": "Prepares for A2's evidence-based critical review.",
+  "core_academic_message": "A claim is only as strong as the evidence behind it: relevance, sufficiency, and source credibility must all hold, and a single authoritative-sounding source is not sufficient on its own.",
+  "cognitive_level": "evaluate",
+  "prepares_for_assessment_id": "assessment_2_critical_review",
+  "is_core": true,
+  "captured_signals": ["response", "reasoning", "confidence"],
+  "evidence_map": [
+    {
+      "criterion_id": "crit_evidence_relevance",
+      "criterion_name": "Evidence relevance to the claim",
+      "solo_descriptors": {
+        "surface": "Names whether a source is present.",
+        "multi_element": "Lists relevance and credibility separately.",
+        "relational": "Connects relevance, sufficiency, and credibility into a judgment.",
+        "extended_abstract": "Generalises the criteria to unfamiliar claims and sources."
+      },
+      "critical": true
+    }
+  ],
+  "misconception_slots": "populated",
+  "primary_evidence_check_requirement": {
+    "evidence_check_id": "ec_node_critical-eval_1_primary",
+    "must_capture_signals": ["response", "reasoning", "confidence"],
+    "preferred_evidence_mode": "select_and_justify",
+    "diagnostic_bands": ["secure", "fragile", "knowledge_gap", "misconception"]
+  },
+  "misconception_bindings": [
+    {
+      "misconception_id": "misc_authority_equals_truth",
+      "statement": "If a source is authoritative or frequently cited, its claim must be correct.",
+      "severity": "high",
+      "trap": "Present an authoritative-sounding source whose evidence is actually weak or irrelevant to the claim.",
+      "expected_error_pattern": "Learner accepts the claim citing the source's reputation rather than evaluating the underlying evidence.",
+      "confirming_probe": "Ask the learner to justify their judgement by pointing to the specific evidence, not the source's status.",
+      "blocks_submission_if_state": "confirmed",
+      "clearance_rule": "Learner must correctly identify that the evidence is insufficient or irrelevant before continuing."
+    }
+  ],
+  "status": "approved"
+}

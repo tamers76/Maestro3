@@ -502,6 +502,63 @@ function CloSectionView({
 }
 
 // ----------------------------------------------------------------------------
+// Approved subtopics overview (read-only recap once everything is approved)
+// ----------------------------------------------------------------------------
+
+function ApprovedSubtopicsOverview({ sections }: { sections: SubtopicCloSection[] }) {
+  const rows = sections
+    .map((s) => ({
+      section: s,
+      approved: s.subtopics.filter((t) => t.approval_status === 'approved'),
+    }))
+    .filter((r) => r.approved.length > 0)
+  if (rows.length === 0) return null
+  return (
+    <section className="rounded-xl border bg-card overflow-hidden">
+      <div className="px-4 py-3 border-b bg-muted/30">
+        <h4 className="font-bold text-sm">Approved Subtopics Overview</h4>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b bg-muted/20 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <th className="px-4 py-2 w-1/3 font-semibold">Refined CLO</th>
+              <th className="px-4 py-2 font-semibold">Approved subtopics</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ section, approved }) => (
+              <tr key={section.clo_id} className="border-b align-top last:border-0">
+                <td className="px-4 py-3">
+                  <span className="font-bold">{section.clo_id}</span>
+                  <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                    {section.refined_clo}
+                  </p>
+                </td>
+                <td className="px-4 py-3">
+                  <ul className="space-y-2">
+                    {approved.map((t) => (
+                      <li key={t.subtopic_id}>
+                        <span className="font-medium">{t.subtopic_id}</span> — {t.proposed_subtopic}
+                        {(t.purpose || t.expected_learning) && (
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            {t.purpose || t.expected_learning}
+                          </p>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+// ----------------------------------------------------------------------------
 // Summary (mirror backend computeSubtopicSummary)
 // ----------------------------------------------------------------------------
 
@@ -697,6 +754,21 @@ export default function Layer6SubtopicEditor({
   }
 
   let colorCursor = 0
+  const cloSectionViews = sections.map((section) => {
+    const base = colorCursor
+    colorCursor += section.subtopics.length
+    return (
+      <CloSectionView
+        key={section.clo_id}
+        section={section}
+        baseColorIndex={base}
+        readOnly={layerApproved}
+        saving={saving}
+        onUpdateSubtopic={(subtopicId, next) => updateSubtopic(section.clo_id, subtopicId, next)}
+        onApproveSubtopic={(subtopicId, next) => approveSubtopic(section.clo_id, subtopicId, next)}
+      />
+    )
+  })
 
   return (
     <div className="flex flex-col rounded-xl border bg-card shadow-sm overflow-hidden mt-4">
@@ -769,28 +841,20 @@ export default function Layer6SubtopicEditor({
           </div>
         </section>
 
-        {/* CLO sections */}
-        <div className="space-y-5">
-          {sections.map((section) => {
-            const base = colorCursor
-            colorCursor += section.subtopics.length
-            return (
-              <CloSectionView
-                key={section.clo_id}
-                section={section}
-                baseColorIndex={base}
-                readOnly={layerApproved}
-                saving={saving}
-                onUpdateSubtopic={(subtopicId, next) =>
-                  updateSubtopic(section.clo_id, subtopicId, next)
-                }
-                onApproveSubtopic={(subtopicId, next) =>
-                  approveSubtopic(section.clo_id, subtopicId, next)
-                }
-              />
-            )
-          })}
-        </div>
+        {/* CLO sections — collapsed behind a toggle once everything is approved */}
+        {summary?.all_approved ? (
+          <details className="rounded-lg border border-dashed border-border">
+            <summary className="cursor-pointer px-4 py-2.5 text-sm font-medium text-primary hover:underline">
+              View / edit all {summary.total_subtopics} subtopics
+            </summary>
+            <div className="px-4 pb-4 border-t border-border pt-3 space-y-5">{cloSectionViews}</div>
+          </details>
+        ) : (
+          <div className="space-y-5">{cloSectionViews}</div>
+        )}
+
+        {/* Approved subtopics overview — shown after the subtopics once approved */}
+        {summary?.all_approved && <ApprovedSubtopicsOverview sections={sections} />}
 
         {/* Collapsible full report */}
         {course.full_report?.trim() && (

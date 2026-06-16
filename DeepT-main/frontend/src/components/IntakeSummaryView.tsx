@@ -21,6 +21,7 @@ import { Input } from '@/components/ui/Input'
 import { showToast } from '@/components/ui/Toaster'
 import { cn } from '@/lib/utils'
 import { saveCourseReferences, type CLO, type WeeklyPlanItem } from '@/services/api'
+import ReferenceMaterialsPanel from '@/components/ReferenceMaterialsPanel'
 
 export interface IntakeAssessment {
   name: string
@@ -232,6 +233,8 @@ function ReferencesSection({
       <p className="mt-2 text-xs text-muted-foreground">
         Saved references are added to this course and used as source material for downstream layers.
       </p>
+
+      <ReferenceMaterialsPanel courseCode={code} embedded />
     </CollapsibleCard>
   )
 }
@@ -436,7 +439,7 @@ export default function IntakeSummaryView({
         )}
       </CollapsibleCard>
 
-      {/* References */}
+      {/* References (includes grounding-materials upload/link subsection) */}
       <ReferencesSection code={code} references={references} />
 
       {/* Delivery & Accreditation */}

@@ -75,6 +75,7 @@ import type {
   SubtopicCloSection,
 } from '../models/schemas.js';
 import { assertAIConfigured } from '../services/council.service.js';
+import { LEGACY_STAGES_ENABLED, isLegacyStage } from '../config/featureFlags.js';
 import { startStageProgress, completeStageProgress, errorStageProgress } from '../services/progress.service.js';
 import type { 
   CourseListItem, StageNumber, StageExecutionMode, Stage4Options,
@@ -397,6 +398,18 @@ router.post('/:code/stage/:num', async (req: Request, res: Response) => {
     
     if (stageNum < 1 || stageNum > 5) {
       return res.status(400).json({ error: 'Invalid stage number (1-5)' });
+    }
+    
+    // Legacy Stages 2-5 are parked behind a reversible feature flag. The Maestro
+    // Node Engine (which consumes the approved Stage 1 Layer 6 output) supersedes
+    // them. Return a clear "disabled" response instead of running legacy code.
+    if (!LEGACY_STAGES_ENABLED && isLegacyStage(stageNum)) {
+      return res.status(409).json({
+        error: `Stage ${stageNum} is disabled. The legacy Stage 2-5 pipeline has been retired in favour of the Maestro Node Engine. Set LEGACY_STAGES_ENABLED=true to re-enable it.`,
+        disabled: true,
+        legacy_stages_enabled: false,
+        stage: stageNum,
+      });
     }
     
     const course = await neo4j.getCourse(code);

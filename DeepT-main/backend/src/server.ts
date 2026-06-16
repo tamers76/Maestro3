@@ -17,6 +17,8 @@ import cors from 'cors';
 import { initNeo4j, closeNeo4j, getNeo4jStatus } from './services/neo4j.service.js';
 import coursesRouter from './routes/courses.js';
 import settingsRouter from './routes/settings.js';
+import referencesRouter from './routes/references.js';
+import nodeEngineRouter from './routes/nodeEngine.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -28,7 +30,9 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Routes
 app.use('/api/courses', coursesRouter);
+app.use('/api/courses', referencesRouter);
 app.use('/api/settings', settingsRouter);
+app.use('/api/node-engine', nodeEngineRouter);
 
 // Health check
 app.get('/api/health', (_req, res) => {

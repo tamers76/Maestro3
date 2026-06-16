@@ -6,7 +6,8 @@ import type {
   WeeklyPlanItem, 
   CLODistribution, 
   CLODistributionStat,
-  StageExecutionMode 
+  StageExecutionMode,
+  StageModelConfig
 } from '../models/schemas.js';
 
 interface WeekCLOMapping {
@@ -25,6 +26,7 @@ interface MappingResult {
  * @param courseCode - Course code for progress updates
  * @param council - Council info for progress reporting
  * @param executionOverride - Optional execution mode override
+ * @param configOverride - Optional Stage 1 intake config (layer1-intake) override
  * @returns Updated weekly plan with clo_ids added to each week
  */
 export async function mapWeeklyPlanToCLOs(
@@ -32,7 +34,8 @@ export async function mapWeeklyPlanToCLOs(
   weeklyPlan: WeeklyPlanItem[],
   courseCode: string,
   council?: CouncilInfo,
-  executionOverride?: StageExecutionMode
+  executionOverride?: StageExecutionMode,
+  configOverride?: StageModelConfig
 ): Promise<WeeklyPlanItem[]> {
   // Skip if no weekly plan
   if (!weeklyPlan || weeklyPlan.length === 0) {
@@ -71,7 +74,8 @@ export async function mapWeeklyPlanToCLOs(
     [{ role: 'user', content: prompt }],
     1, // Use stage 1 config
     { jsonMode: true },
-    executionOverride
+    executionOverride,
+    configOverride
   );
 
   const result = parseAIJson<MappingResult>(response);
@@ -217,6 +221,7 @@ export function computeCLODistribution(
  * @param courseCode - Course code for progress updates
  * @param council - Council info for progress reporting
  * @param executionOverride - Optional execution mode override
+ * @param configOverride - Optional Stage 1 intake config (layer1-intake) override
  * @returns Object with updated weekly plan and distribution statistics
  */
 export async function runCLOMapping(
@@ -224,7 +229,8 @@ export async function runCLOMapping(
   weeklyPlan: WeeklyPlanItem[],
   courseCode: string,
   council?: CouncilInfo,
-  executionOverride?: StageExecutionMode
+  executionOverride?: StageExecutionMode,
+  configOverride?: StageModelConfig
 ): Promise<{
   weekly_plan: WeeklyPlanItem[];
   distribution: CLODistribution;
@@ -235,7 +241,8 @@ export async function runCLOMapping(
     weeklyPlan,
     courseCode,
     council,
-    executionOverride
+    executionOverride,
+    configOverride
   );
 
   // Compute distribution statistics

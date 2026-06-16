@@ -5,6 +5,13 @@ import {
   LAYER2_MEMBER_SYSTEM_PROMPT,
   LAYER2_TASK_PROMPT,
 } from './layer2CloReview.prompts.js';
+// Reuse the canonical Stage 1 intake prompts (extraction + CLO analysis) as the
+// layer1-intake defaults so the intake AI call has a single source of truth that
+// matches getRecommendedPrompts().stages.stage1. No new prompt text is invented.
+import {
+  STAGE1_EXTRACTION_PROMPT,
+  STAGE1_CLO_ANALYSIS_PROMPT,
+} from '../utils/prompts.js';
 
 const BASE_MODEL = 'anthropic/claude-sonnet-4';
 
@@ -38,27 +45,10 @@ export const defaultStage1Layers: Stage1LayerConfig[] = [
     regenerateEnabled: true,
     editEnabled: true,
     lockNextUntilApproval: true,
-    taskPrompt: `You are Maestro Course Intake AI.
-
-Extract the academic structure from the uploaded university course outline.
-
-Identify:
-1. Course title
-2. Course code
-3. Course level
-4. Credit hours
-5. Prerequisites
-6. Course description
-7. Official Course Learning Outcomes exactly as written
-8. Assessment tasks, descriptions, CLO links, and weights
-9. Weekly topics and readings
-10. Delivery model
-11. Any accreditation or learning-hour information
-12. Any obvious risks, such as missing CLO links, vague assessments, or week-based structure that should not be copied into a self-paced course.
-
-Do not redesign anything yet. Your role is extraction and structured summary only.
-
-Return a JSON object with keys matching the required output fields. Also include a "report_markdown" field with a human-readable Course Intake Summary in Markdown.`,
+    // Source of truth for the live intake extraction call (runStage1). Reuses the
+    // canonical Stage 1 extraction prompt; taskPrompt2 drives the CLO analysis call.
+    taskPrompt: STAGE1_EXTRACTION_PROMPT,
+    taskPrompt2: STAGE1_CLO_ANALYSIS_PROMPT,
   },
   {
     id: 'layer2-clo-review',

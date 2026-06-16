@@ -1,9 +1,25 @@
 import { Router, Request, Response } from 'express';
 import { getSettings, updateSettings, clearSettingsCache, getRecommendedPrompts } from '../config.js';
 import { initNeo4j } from '../services/neo4j.service.js';
+import { checkEmbeddingHealth } from '../services/embedding.service.js';
 import type { Settings } from '../models/schemas.js';
 
 const router = Router();
+
+// GET /api/settings/embedding-health - live embedding/RAG provider probe.
+// Makes the silent-failure mode visible so empty grounding can never again be
+// mistaken for "weak grounding" when the real cause is the embedding provider.
+router.get('/embedding-health', async (_req: Request, res: Response) => {
+  try {
+    const health = await checkEmbeddingHealth();
+    res.json(health);
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Embedding health check failed',
+    });
+  }
+});
 
 // GET /api/settings - Get current settings
 router.get('/', async (_req: Request, res: Response) => {

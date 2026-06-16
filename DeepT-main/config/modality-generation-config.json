@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-06-15T11:35:34.286Z",
+  "configs": [
+    {
+      "id": "modality_text",
+      "vehicle": "text",
+      "generatorKind": "chat",
+      "mode": "single",
+      "taskPrompt": "",
+      "enabled": true,
+      "modelSelectionReason": "Falls back to the system default chat/reasoning model. Configurable per deployment.",
+      "productionTarget": "System default chat/reasoning model (text rendering)."
+    },
+    {
+      "id": "modality_structured_visual",
+      "vehicle": "structured_visual",
+      "generatorKind": "chat",
+      "mode": "single",
+      "taskPrompt": "",
+      "enabled": true,
+      "modelSelectionReason": "Prefer a model strong at structured JSON / semantic organization. Configurable; defaults to global default.",
+      "productionTarget": "Model strong at structured JSON / semantic organization."
+    },
+    {
+      "id": "modality_pictorial_visual",
+      "vehicle": "pictorial_visual",
+      "generatorKind": "image",
+      "mode": "single",
+      "taskPrompt": "",
+      "enabled": true,
+      "modelSelectionReason": "A chat model writes the image brief (real image generation is MOCKED in V1). Configurable; defaults to global default.",
+      "productionTarget": "Chat model that writes the image brief (image gen mocked)."
+    },
+    {
+      "id": "modality_video",
+      "vehicle": "video",
+      "generatorKind": "video",
+      "mode": "single",
+      "taskPrompt": "",
+      "enabled": true,
+      "modelSelectionReason": "Prefer a model strong at narration / brief writing (HeyGen production is MOCKED in V1). Configurable; defaults to global default.",
+      "productionTarget": "Model strong at narration / brief writing (HeyGen mocked).",
+      "videoSettings": {
+        "provider": "heygen",
+        "apiKeyRef": "HEYGEN_API_KEY",
+        "engine": "avatar_iv",
+        "resolution": "1080p",
+        "aspect_ratio": "auto",
+        "output_format": "mp4",
+        "remove_background": false
+      }
+    },
+    {
+      "id": "modality_interactive",
+      "vehicle": "interactive",
+      "generatorKind": "chat",
+      "mode": "single",
+      "taskPrompt": "",
+      "enabled": true,
+      "modelSelectionReason": "Use the strongest reasoning model available. Configurable; defaults to global default.",
+      "productionTarget": "Strongest reasoning model available."
+    },
+    {
+      "id": "modality_learning_anchor",
+      "vehicle": "learning_anchor",
+      "generatorKind": "chat",
+      "mode": "single",
+      "taskPrompt": "",
+      "enabled": true,
+      "modelSelectionReason": "Prefer a model strong at safe, bounded learner-facing tone. Configurable; defaults to global default.",
+      "productionTarget": "Model strong at safe, bounded learner-facing tone."
+    },
+    {
+      "id": "modality_simulation",
+      "vehicle": "simulation",
+      "generatorKind": "chat",
+      "mode": "single",
+      "taskPrompt": "",
+      "enabled": false,
+      "modelSelectionReason": "Reserved/deferred in V1. Not activated.",
+      "productionTarget": "Reserved/deferred (simulation not activated in V1)."
+    }
+  ]
+}

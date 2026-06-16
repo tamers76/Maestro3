@@ -38,6 +38,7 @@ import {
   assertLayer6ReadyForApproval,
   buildCloTopicsFromArchitecture,
 } from './subtopicArchitecture.service.js';
+import { buildGroundedContext } from './referenceRetrieval.service.js';
 import { runStage1 } from './stage1.service.js';
 import { callAI, parseAIJson, getCouncilInfo } from './ai.service.js';
 import {
@@ -306,6 +307,59 @@ function extractReportFromResponse(response: string): { markdown: string; json: 
   }
 }
 
+// Layers whose substance should be tightly grounded in the textbook references.
+const STRONG_GROUNDING_LAYERS = new Set([
+  'layer2-clo-review',
+  'layer6-subtopic-architecture',
+]);
+
+/**
+ * Build a reference-grounding section (retrieved textbook passages + an augmented
+ * grounding policy) to append to a layer's prompt. Returns '' when there are no
+ * ingested references or retrieval fails — grounding is additive and never blocks.
+ */
+async function buildGroundingSection(
+  courseCode: string,
+  config: Stage1LayerConfig
+): Promise<string> {
+  try {
+    // Query from refined CLOs when available, else the extracted contract CLOs.
+    const { refinements } = getCloRefinementContext(courseCode);
+    let cloTexts = refinements
+      .map((r) =>
+        r.sme_decision === 'keep_official'
+          ? r.official_clo
+          : r.final_clo_for_adaptive_design || r.official_clo
+      )
+      .filter((t): t is string => !!t && !!t.trim());
+
+    if (cloTexts.length === 0) {
+      const contract = fileService.getCourseContract(courseCode);
+      cloTexts = (contract?.course_learning_outcomes ?? [])
+        .map((c) => c.clo_text ?? '')
+        .filter((t) => !!t.trim());
+    }
+
+    const query = cloTexts.join('\n');
+    if (!query.trim()) return '';
+
+    const grounded = await buildGroundedContext(courseCode, query, { topN: 8 });
+    if (!grounded.promptBlock) return '';
+
+    const policy = STRONG_GROUNDING_LAYERS.has(config.id)
+      ? 'GROUNDING POLICY (authoritative): Base the substance of this layer on the reference passages above and cite them inline as [R#]. If a needed point is not supported by the passages, mark it "(not in provided references)". You may add connective explanation, but do not invent facts, definitions, or examples or attribute unsupported claims to the references.'
+      : 'GROUNDING POLICY: Use the reference passages above where relevant and cite them as [R#]. Methodological content (assessment design, weighting, integrity) may extend beyond the passages, but do not fabricate textbook content or attribute unsupported claims to the references.';
+
+    return `\n\n---\n\n${grounded.promptBlock}\n\n${policy}`;
+  } catch (err) {
+    console.warn(
+      '[stage1 grounding] skipped:',
+      err instanceof Error ? err.message : String(err)
+    );
+    return '';
+  }
+}
+
 export async function runStage1Layer(
   courseCode: string,
   layerId: string,
@@ -383,7 +437,8 @@ export async function runStage1Layer(
       };
     } else {
       const upstream = buildUpstreamContext(courseCode, config.order);
-      const userPrompt = `${config.taskPrompt}\n\n---\n\n## Upstream approved outputs and evidence\n\n${upstream}`;
+      const groundingSection = await buildGroundingSection(courseCode, config);
+      const userPrompt = `${config.taskPrompt}\n\n---\n\n## Upstream approved outputs and evidence\n\n${upstream}${groundingSection}`;
 
       updateProgress({
         courseCode,

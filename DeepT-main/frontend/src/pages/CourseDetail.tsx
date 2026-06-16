@@ -27,7 +27,6 @@ import {
   fetchStage3Snapshot,
   fetchStage3IncompleteReport,
   generateSuggestedCloTopics,
-  fetchSubtopicArchitecture,
   type CourseDetail as CourseDetailType,
   type GraphData,
   type ProgressUpdate,
@@ -37,7 +36,6 @@ import {
   type CourseRubric,
   type AllAssessmentsResponse,
   type AllVideoScriptsResponse,
-  type SubtopicArchitectureResponse,
   type Stage3Snapshot,
   type Stage3IncompleteReport,
 } from '@/services/api'
@@ -53,14 +51,12 @@ import {
   Loader2,
   FileText,
   Network,
-  BookOpen,
   ChevronRight,
   Package,
   Users,
   User,
   CheckCircle2,
   AlertCircle,
-  BarChart3,
   Lock,
   Video,
   ClipboardCheck,
@@ -68,9 +64,13 @@ import {
   Clock,
   Edit3,
   Shield,
+  Boxes,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { cn } from '@/lib/utils'
+import { LEGACY_STAGES_ENABLED } from '@/config/featureFlags'
+import NodeEnginePanel from '@/components/nodeEngine/NodeEnginePanel'
+import ReferenceAlignmentPanel from '@/components/ReferenceAlignmentPanel'
 
 export default function CourseDetail() {
   const { code } = useParams<{ code: string }>()
@@ -104,14 +104,13 @@ export default function CourseDetail() {
   const [stage3IncompleteReport, setStage3IncompleteReport] = useState<Stage3IncompleteReport | null>(null)
   const [loadingStage3, setLoadingStage3] = useState(false)
   
-  // CLO subtopic coverage is driven entirely by the Stage 1 Layer 6 architecture
-  const [architecture, setArchitecture] = useState<SubtopicArchitectureResponse | null>(null)
-  
   // AI Suggested Topics (deep research) state
   const [generatingSuggestions, setGeneratingSuggestions] = useState(false)
   
-  // Tab navigation state
-  const [activeTab, setActiveTab] = useState('overview')
+  // Tab navigation state. The Node Engine is the default V1 surface; the legacy
+  // Overview tab has been removed (its CLO Subtopic Coverage lives in Course
+  // Architect Layer 6, which renders above these tabs).
+  const [activeTab, setActiveTab] = useState('node-engine')
   
   // Track SSE unsubscribe function
   const unsubscribeRef = useRef<(() => void) | null>(null)
@@ -176,11 +175,6 @@ export default function CourseDetail() {
       }
       const data = await fetchCourse(code)
       setCourse(data)
-      
-      // Load Layer 6 subtopic architecture for the CLO subtopic coverage card
-      fetchSubtopicArchitecture(code)
-        .then(setArchitecture)
-        .catch(() => setArchitecture(null))
       
       // Load graph if we have nodes
       if (data.current_stage >= 2) {
@@ -547,8 +541,13 @@ export default function CourseDetail() {
                 currentStage={course.current_stage} 
                 runningStage={runningStage}
                 progress={progress}
+                courseArchitectComplete={stage1AllApproved}
               />
               
+              {/* Legacy stage-run controls (monolithic Stage 1–5 pipeline). V1 runs
+                  Course Architect per-layer in the card below and the Node Engine in
+                  its own tab, so these only appear behind LEGACY_STAGES_ENABLED. */}
+              {LEGACY_STAGES_ENABLED && (
               <div className="flex flex-col gap-3 flex-shrink-0 ml-4">
                 {/* Execution Mode Selector */}
                 <div className="flex items-center gap-2">
@@ -600,7 +599,7 @@ export default function CourseDetail() {
                 
                 {/* Stage Run Buttons */}
                 <div className="flex gap-2">
-                  {nextStage && (
+                  {nextStage && (LEGACY_STAGES_ENABLED || nextStage < 2) && (
                     <Button
                       onClick={() => handleRunStage(nextStage)}
                       disabled={runningStage !== null || stage2Blocked || stage3Blocked || stage4Blocked}
@@ -647,6 +646,7 @@ export default function CourseDetail() {
                   </p>
                 )}
               </div>
+              )}
             </div>
           </div>
         </CardContent>
@@ -670,208 +670,46 @@ export default function CourseDetail() {
           assessmentStrategy: course.contract?.assessment_strategy,
         }}
       />
-      
-      {/* Main Content Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="overview" className="gap-2">
-            <BookOpen className="h-4 w-4" />
-            Overview
-          </TabsTrigger>
-          <TabsTrigger value="edit-graph" className="gap-2" disabled={course.current_stage < 2}>
-            <Edit3 className="h-4 w-4" />
-            Edit Graph
-            {needsNodeGraphConfirmation && !nodeGraphConfirmed && (
-              <span className="ml-1 h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="graph" className="gap-2" disabled={!graphData}>
-            <Network className="h-4 w-4" />
-            Graph View
-          </TabsTrigger>
-          <TabsTrigger value="stage3-logic" className="gap-2" disabled={course.current_stage < 3}>
-            <Shield className="h-4 w-4" />
-            Stage 3 Logic
-          </TabsTrigger>
-          <TabsTrigger value="content" className="gap-2" disabled={course.current_stage < 4}>
-            <FileText className="h-4 w-4" />
-            Content
-          </TabsTrigger>
-        </TabsList>
-        
-        {/* Overview Tab */}
-        <TabsContent value="overview" className="space-y-6">
-          {/* CLO Subtopic Coverage (driven by Stage 1 Layer 6 architecture) */}
-          {(() => {
-            const sections = architecture?.clo_sections ?? []
-            const totalSubtopics = sections.reduce((sum, s) => sum + s.subtopics.length, 0)
-            const totalApproved = sections.reduce(
-              (sum, s) => sum + s.subtopics.filter((t) => t.approval_status === 'approved').length,
-              0
-            )
-            const hasAny = sections.length > 0 && totalSubtopics > 0
-            const allCovered = sections.length > 0 && sections.every((s) => s.subtopics.length > 0)
 
-            return (
-              <Card className={cn(
-                'border-2',
-                !hasAny
-                  ? 'border-border'
-                  : allCovered
-                  ? 'border-green-500/30 dark:border-green-500/20'
-                  : 'border-amber-500/30 dark:border-amber-500/20'
-              )}>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <BarChart3 className="h-5 w-5" />
-                      CLO Subtopic Coverage
-                    </CardTitle>
-                    {hasAny && (
-                      <div className="flex items-center gap-2">
-                        {allCovered ? (
-                          <span className="flex items-center gap-1 text-sm text-green-600 dark:text-green-400">
-                            <CheckCircle2 className="h-4 w-4" />
-                            All CLOs have subtopics
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1 text-sm text-amber-600 dark:text-amber-400">
-                            <AlertCircle className="h-4 w-4" />
-                            Needs Attention
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  {hasAny && (
-                    <p className="text-sm text-muted-foreground">
-                      {totalSubtopics} subtopics across {sections.length} refined CLOs (self-paced)
-                      {' · '}
-                      {totalApproved}/{totalSubtopics} approved
-                    </p>
-                  )}
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {!hasAny ? (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <AlertCircle className="h-4 w-4 text-amber-500" />
-                      Run Stage 1 Layer 6 (Self-Paced Subtopic Architecture) to generate subtopics for each CLO.
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {sections.map((section, index) => {
-                        const total = section.subtopics.length
-                        const approved = section.subtopics.filter(
-                          (t) => t.approval_status === 'approved'
-                        ).length
-                        const fullyApproved = total > 0 && approved === total
-                        return (
-                          <div key={section.clo_id} className="space-y-1">
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="flex items-center gap-2 min-w-0">
-                                <span className="flex h-5 w-5 items-center justify-center rounded bg-primary/10 text-xs font-semibold text-primary shrink-0">
-                                  {index + 1}
-                                </span>
-                                <span className="font-medium shrink-0">{section.clo_id}</span>
-                                <span className="truncate text-muted-foreground" title={section.refined_clo}>
-                                  {section.refined_clo}
-                                </span>
-                              </span>
-                              <span className={cn(
-                                'flex items-center gap-1 text-xs font-medium shrink-0 ml-2',
-                                total === 0
-                                  ? 'text-amber-600 dark:text-amber-400'
-                                  : fullyApproved
-                                  ? 'text-green-600 dark:text-green-400'
-                                  : 'text-amber-600 dark:text-amber-400'
-                              )}>
-                                {total === 0
-                                  ? 'No subtopics'
-                                  : `${approved}/${total} approved`}
-                                {total === 0 ? (
-                                  <AlertCircle className="h-3 w-3" />
-                                ) : fullyApproved ? (
-                                  <CheckCircle2 className="h-3 w-3" />
-                                ) : (
-                                  <AlertCircle className="h-3 w-3" />
-                                )}
-                              </span>
-                            </div>
-                            <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                              <div
-                                className={cn(
-                                  'h-full rounded-full transition-all',
-                                  total === 0
-                                    ? 'bg-amber-500'
-                                    : fullyApproved
-                                    ? 'bg-green-500'
-                                    : 'bg-amber-500'
-                                )}
-                                style={{
-                                  width: `${total === 0 ? 0 : Math.round((approved / total) * 100)}%`,
-                                }}
-                              />
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )
-          })()}
-          
-          {/* Learning Nodes Summary */}
-          {course.nodes && course.nodes.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center justify-between">
-                  <span>Learning Nodes ({course.nodes.length})</span>
-                  <div className="flex gap-3 text-xs font-normal text-muted-foreground">
-                    <span>{course.nodes.filter(n => n.mandatory && !n.skippable).length} required</span>
-                    <span>{course.nodes.filter(n => n.skippable && n.skip_conditions).length} conditional</span>
-                    <span>{course.nodes.filter(n => n.skippable && !n.skip_conditions).length} skippable</span>
-                  </div>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
-                  {course.nodes.slice(0, 9).map(node => {
-                    const status = getNodeStatusLabel(node)
-                    return (
-                      <div
-                        key={node.node_id}
-                        className="flex items-center gap-3 rounded-lg border border-border p-3 hover:bg-muted/50 cursor-pointer transition-colors"
-                        onClick={() => handleNodeClick(`ln-${node.node_id}`)}
-                      >
-                        <div className={`h-3 w-3 rounded-full ${NODE_TYPE_COLORS[node.node_type] || 'bg-muted-foreground'}`} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-foreground truncate">
-                            {node.learning_intent}
-                          </p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-xs text-muted-foreground capitalize">
-                              {node.node_type}
-                            </span>
-                            <span className={cn('rounded px-1.5 py-0.5 text-xs', status.color)}>
-                              {status.label}
-                            </span>
-                          </div>
-                        </div>
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                      </div>
-                    )
-                  })}
-                </div>
-                {course.nodes.length > 9 && (
-                  <p className="mt-4 text-center text-sm text-muted-foreground">
-                    And {course.nodes.length - 9} more nodes...
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          )}
+      {/* Course Architect Layer 7 — Reference Alignment (grounds the Node Engine). */}
+      <ReferenceAlignmentPanel courseCode={course.course_code} />
+
+      {/* Main Content Tabs. With only the Node Engine surface (legacy parked),
+          the single-item tab switcher is redundant — the Node Engine panel
+          renders its own header below. We only render the tab nav when the
+          legacy Stage 2–4 tabs are present and a real switcher is needed. */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        {LEGACY_STAGES_ENABLED && (
+          <TabsList>
+            <TabsTrigger value="node-engine" className="gap-2">
+              <Boxes className="h-4 w-4" />
+              Node Engine
+            </TabsTrigger>
+            <TabsTrigger value="edit-graph" className="gap-2" disabled={course.current_stage < 2}>
+              <Edit3 className="h-4 w-4" />
+              Edit Graph
+              {needsNodeGraphConfirmation && !nodeGraphConfirmed && (
+                <span className="ml-1 h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="graph" className="gap-2" disabled={!graphData}>
+              <Network className="h-4 w-4" />
+              Graph View
+            </TabsTrigger>
+            <TabsTrigger value="stage3-logic" className="gap-2" disabled={course.current_stage < 3}>
+              <Shield className="h-4 w-4" />
+              Stage 3 Logic
+            </TabsTrigger>
+            <TabsTrigger value="content" className="gap-2" disabled={course.current_stage < 4}>
+              <FileText className="h-4 w-4" />
+              Content
+            </TabsTrigger>
+          </TabsList>
+        )}
+
+        {/* Node Engine Tab (Phase 0 foundations) */}
+        <TabsContent value="node-engine" className="space-y-4">
+          <NodeEnginePanel courseCode={course.course_code} />
         </TabsContent>
         
         {/* Edit Graph Tab (Stage 2.5) */}

@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { Toaster } from './components/ui/Toaster'
 import { ThemeProvider } from './contexts/ThemeContext'
+import { RoleProvider } from './contexts/RoleContext'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import CourseDetail from './pages/CourseDetail'
@@ -11,6 +12,7 @@ import HeroSection from './components/HeroSection'
 function App() {
   return (
     <ThemeProvider>
+      <RoleProvider>
       <Router>
         <Routes>
           {/* Home page hero header — standalone landing (no app shell) */}
@@ -24,6 +26,7 @@ function App() {
         </Routes>
         <Toaster />
       </Router>
+      </RoleProvider>
     </ThemeProvider>
   )
 }

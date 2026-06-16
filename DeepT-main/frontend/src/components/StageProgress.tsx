@@ -3,12 +3,16 @@ import { STAGE_NAMES } from '@/lib/utils'
 import { Check, Loader2, AlertCircle, Users, User, Sparkles, Brain, Zap } from 'lucide-react'
 import { Progress } from '@/components/ui/Progress'
 import type { ProgressUpdate, CouncilInfo } from '@/services/api'
+import { LEGACY_STAGES_ENABLED } from '@/config/featureFlags'
+import ProductProgress from '@/components/ProductProgress'
 
 interface StageProgressProps {
   currentStage: number
   runningStage?: number | null
   progress?: ProgressUpdate | null
   compact?: boolean
+  /** V1 only: precise "all six Course Architect layers approved" signal. */
+  courseArchitectComplete?: boolean
 }
 
 // Futuristic phase messages for council mode
@@ -138,7 +142,20 @@ function CouncilIndicator({ council }: { council: CouncilInfo }) {
   )
 }
 
-export default function StageProgress({ currentStage, runningStage, progress, compact }: StageProgressProps) {
+export default function StageProgress({ currentStage, runningStage, progress, compact, courseArchitectComplete }: StageProgressProps) {
+  // V1 default: present the two-half Course Architect → Node Engine product model
+  // instead of the legacy five-stage stepper. The legacy stepper below stays
+  // intact and is only reached when LEGACY_STAGES_ENABLED is true.
+  if (!LEGACY_STAGES_ENABLED) {
+    return (
+      <ProductProgress
+        currentStage={currentStage}
+        courseArchitectComplete={courseArchitectComplete}
+        compact={compact}
+      />
+    )
+  }
+
   // Calculate percentage for progress bar
   const progressPercent = progress?.current && progress?.total 
     ? Math.round((progress.current / progress.total) * 100)

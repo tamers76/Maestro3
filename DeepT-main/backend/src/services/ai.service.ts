@@ -13,6 +13,8 @@ import {
   callModel,
   getCouncilInfo,
   getStageConfig,
+  resolveStage1IntakeConfig,
+  mergeIntakeConfig,
   type AIMessage, 
   type CouncilOptions,
   type CouncilProgressCallback
@@ -20,7 +22,7 @@ import {
 
 // Re-export types and functions from council service
 export { AIMessage, CouncilOptions, CouncilProgressCallback } from './council.service.js';
-export { callModel, getCouncilInfo, getStageConfig } from './council.service.js';
+export { callModel, getCouncilInfo, getStageConfig, resolveStage1IntakeConfig, mergeIntakeConfig } from './council.service.js';
 
 /**
  * Main AI call function - unified entry point for all stage execution

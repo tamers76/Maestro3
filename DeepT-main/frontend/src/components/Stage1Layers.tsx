@@ -156,7 +156,7 @@ export default function Stage1Layers({ courseCode, onAllApproved, intake }: Stag
     } catch (error) {
       showToast({
         title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to load Stage 1 layers',
+        description: error instanceof Error ? error.message : 'Failed to load Course Architect layers',
         variant: 'destructive',
       })
     } finally {
@@ -292,7 +292,7 @@ export default function Stage1Layers({ courseCode, onAllApproved, intake }: Stag
       showToast({
         title: 'Approved',
         description: result.allApproved
-          ? 'All Stage 1 layers approved. You can proceed to Stage 2.'
+          ? 'All Course Architect layers approved. You can proceed to the Node Engine.'
           : 'Layer approved. Next layer unlocked.',
         variant: 'success',
       })
@@ -366,12 +366,13 @@ export default function Stage1Layers({ courseCode, onAllApproved, intake }: Stag
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Stage 1 — Academic Contract Layers</CardTitle>
+        <CardTitle>Course Architect</CardTitle>
         <CardDescription>
-          Complete all six internal layers in order. Stage 2 unlocks when every layer is approved.
+          Course Architect prepares the approved academic structure. Complete all six layers in
+          order — the Node Engine unlocks when every layer is approved.
           {allApproved && (
             <span className="ml-2 inline-flex items-center gap-1 text-emerald-600">
-              <Check className="h-4 w-4" /> Stage 1 complete
+              <Check className="h-4 w-4" /> Course Architect complete
             </span>
           )}
         </CardDescription>

@@ -9,7 +9,7 @@
  * - multi-member council: Parallel model queries + chairman synthesis
  */
 
-import { getSettings } from '../config.js';
+import { getSettings, getStage1LayerConfig } from '../config.js';
 import type { StageNumber, StageExecutionMode, StageModelConfig } from '../models/schemas.js';
 
 export interface AIMessage {
@@ -558,6 +558,50 @@ export function getStageConfig(stage: StageNumber): StageModelConfig {
     councilModels: settings.council?.councilModels || [],
     chairmanModel: settings.council?.chairmanModel || ''
   };
+}
+
+/** The Stage 1 layer whose config drives the live intake extraction + CLO analysis. */
+export const STAGE1_INTAKE_LAYER_ID = 'layer1-intake';
+
+/**
+ * Pure merge of the layer1-intake config over the legacy stageConfigs.stage1 config.
+ *
+ * The layer1-intake config is the source of truth for course intake, but any field
+ * it leaves empty (model/prompts) falls back to stageConfigs.stage1 so nothing
+ * regresses if a layer field was never populated.
+ */
+export function mergeIntakeConfig(
+  layer: StageModelConfig | undefined,
+  stage1: StageModelConfig
+): StageModelConfig {
+  if (!layer) return stage1;
+  const str = (v?: string): string | undefined => (v && v.trim() ? v : undefined);
+  const councilModels =
+    layer.councilModels && layer.councilModels.length > 0
+      ? layer.councilModels
+      : stage1.councilModels;
+  return {
+    mode: layer.mode ?? stage1.mode,
+    singleModel: str(layer.singleModel) ?? stage1.singleModel,
+    councilModels,
+    chairmanModel: str(layer.chairmanModel) ?? stage1.chairmanModel,
+    memberSystemPrompt: str(layer.memberSystemPrompt) ?? stage1.memberSystemPrompt,
+    chairmanSystemPrompt: str(layer.chairmanSystemPrompt) ?? stage1.chairmanSystemPrompt,
+    taskPrompt: str(layer.taskPrompt) ?? stage1.taskPrompt,
+    taskPrompt2: str(layer.taskPrompt2) ?? stage1.taskPrompt2,
+  };
+}
+
+/**
+ * Resolve the effective Stage 1 intake config: the layer1-intake Stage 1 layer is
+ * the source of truth, with stageConfigs.stage1 as the per-field fallback. Used by
+ * runStage1 / runStage1FromForm / the weekly CLO mapping so all intake AI calls share
+ * one configuration (model, council, taskPrompt for extraction, taskPrompt2 for CLOs).
+ */
+export function resolveStage1IntakeConfig(): StageModelConfig {
+  const stage1 = getStageConfig(1);
+  const layer = getStage1LayerConfig(STAGE1_INTAKE_LAYER_ID);
+  return mergeIntakeConfig(layer, stage1);
 }
 
 /**

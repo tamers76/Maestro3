@@ -1,0 +1,110 @@
+{
+  "_comment": "Canned raw M7 generator proposal for the MDLD602 critical-evaluation subtopic (CLO1-ST2), mirroring Build Spec §2.3. Represents what the node-generation model would emit BEFORE the deterministic projection (no ec ids, no statuses, no frozen FKs). Used by the golden acceptance test so the M7 logic is exercised without a live model.",
+  "nodes": [
+    {
+      "node_id": "node_critical-eval_1",
+      "node_title": "Distinguish description from critical evaluation",
+      "node_type": "distinction",
+      "knowledge_component": "Separate describing a framework from evaluating it with criteria, evidence, and context",
+      "kc_ids": ["kc_describe-vs-evaluate"],
+      "mastery_statement": "Given a passage about a curriculum framework, classify whether it describes the framework or critically evaluates it, and justify the classification.",
+      "why_it_matters": "Learners who cannot separate description from evaluation produce summaries instead of the criteria-based critique A1 requires.",
+      "node_learning_intent": "Describing what a framework says is not the same as judging its quality with criteria, evidence, and context.",
+      "cognitive_level": "Analyze",
+      "prerequisite_node_ids": [],
+      "evidence_map": [
+        {
+          "criterion_id": "crit_describe_vs_evaluate",
+          "criterion_name": "Separates description from evaluation",
+          "solo_descriptors": {
+            "surface": "States that description and evaluation differ.",
+            "multi_element": "Lists features of description and of evaluation separately.",
+            "relational": "Classifies a passage and justifies it by pointing to criteria/evidence/context.",
+            "extended_abstract": "Generalises the distinction to unfamiliar frameworks and mixed passages."
+          },
+          "critical": true
+        }
+      ],
+      "primary_evidence_check_requirement": {
+        "preferred_evidence_mode": "classify_and_justify"
+      },
+      "candidate_misconceptions": [
+        {
+          "candidate_misconception_id": "eval-vs-opinion",
+          "statement": "evaluation means saying whether I like it",
+          "reason": "common confusion implied by this distinction node",
+          "severity": "high",
+          "suggested_trap": "an item that invites an opinion-style answer where a criteria-based judgment is required"
+        }
+      ],
+      "risk_classification": ["standard"]
+    },
+    {
+      "node_title": "Identify criteria for evaluating curriculum frameworks",
+      "node_type": "concept",
+      "knowledge_component": "Know the criteria a rigorous framework evaluation uses",
+      "kc_ids": ["kc_evaluation-criteria"],
+      "mastery_statement": "Name and explain the criteria used to evaluate a curriculum framework.",
+      "why_it_matters": "Criteria are the backbone of a defensible evaluation.",
+      "prerequisite_node_ids": ["node_critical-eval_1"],
+      "primary_evidence_check_requirement": { "preferred_evidence_mode": "explain" },
+      "risk_classification": ["standard"]
+    },
+    {
+      "node_title": "Analyze assumptions behind a curriculum framework",
+      "node_type": "judgment",
+      "knowledge_component": "Surface a framework's hidden assumptions",
+      "kc_ids": ["kc_framework-assumptions"],
+      "mastery_statement": "Identify and articulate the implicit assumptions a framework rests on.",
+      "why_it_matters": "Unexamined assumptions undermine framework selection.",
+      "prerequisite_node_ids": ["node_critical-eval_1", "node_clo1-st2_2"],
+      "primary_evidence_check_requirement": { "preferred_evidence_mode": "explain" },
+      "risk_classification": ["standard"]
+    },
+    {
+      "node_title": "Judge contextual fit of a curriculum framework",
+      "node_type": "judgment",
+      "knowledge_component": "Decide a framework's suitability for a specific institutional context",
+      "kc_ids": ["kc_contextual-fit"],
+      "mastery_statement": "Given a context, judge whether a framework fits, justifying with criteria and evidence.",
+      "why_it_matters": "Fit-for-context is the practical core of curriculum-leadership judgment.",
+      "prerequisite_node_ids": ["node_clo1-st2_2", "node_clo1-st2_3"],
+      "primary_evidence_check_requirement": { "preferred_evidence_mode": "select_and_justify" },
+      "risk_classification": ["standard"]
+    },
+    {
+      "node_title": "Evaluate strengths and limitations using evidence-based criteria",
+      "node_type": "judgment",
+      "knowledge_component": "Produce a balanced, criteria-based evaluation of a framework",
+      "kc_ids": ["kc_balanced-evaluation"],
+      "mastery_statement": "Evaluate a framework's strengths and limitations against explicit criteria and evidence.",
+      "why_it_matters": "This is the judgment the A1 critical review is graded on.",
+      "prerequisite_node_ids": ["node_clo1-st2_4"],
+      "primary_evidence_check_requirement": { "preferred_evidence_mode": "select_and_justify" },
+      "risk_classification": ["critical"]
+    },
+    {
+      "node_title": "Compare two curriculum frameworks for a specific context",
+      "node_type": "integration",
+      "knowledge_component": "Combine criteria-based judgments into a comparative recommendation",
+      "kc_ids": ["kc_comparative-recommendation"],
+      "mastery_statement": "Compare two frameworks for a given context and recommend one with justification.",
+      "why_it_matters": "Integrates the prior nodes into the comparative decision A1 demands.",
+      "prerequisite_node_ids": ["node_clo1-st2_5"],
+      "primary_evidence_check_requirement": { "preferred_evidence_mode": "apply_to_case" },
+      "risk_classification": ["standard"]
+    },
+    {
+      "node_title": "Turn evaluation criteria into design criteria",
+      "node_type": "bridge",
+      "knowledge_component": "Transfer critique skill toward curriculum design (CLO-4)",
+      "kc_ids": ["kc_critique-to-design"],
+      "mastery_statement": "Reframe evaluation criteria as design criteria for building a framework.",
+      "why_it_matters": "Bridges critical analysis (CLO-1) to design (CLO-4).",
+      "prerequisite_node_ids": ["node_clo1-st2_6"],
+      "cross_clo_links": [{ "clo_id": "CLO-4", "reason": "Critique criteria become design criteria for framework creation" }],
+      "primary_evidence_check_requirement": { "preferred_evidence_mode": "apply_to_case" },
+      "risk_classification": ["bridge"]
+    }
+  ]
+}
