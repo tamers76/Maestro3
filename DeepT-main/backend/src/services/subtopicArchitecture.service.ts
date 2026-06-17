@@ -13,6 +13,9 @@ import type {
   TopicItem,
 } from '../models/schemas.js';
 import * as fileService from './file.service.js';
+import * as referenceRepo from '../db/repos/referenceRepo.js';
+import * as artifactRepo from '../db/repos/artifactRepo.js';
+import { retrieveReferenceChunks } from './referenceRetrieval.service.js';
 import { getCloRefinementContext } from './cloRefinements.service.js';
 import { getWeightingRubricContext } from './weightingRubric.service.js';
 
@@ -213,40 +216,139 @@ interface CloRef {
   reference_readings: string[];
 }
 
-function buildCloRefs(courseCode: string): CloRef[] {
-  const { clos, refinements } = getCloRefinementContext(courseCode);
+// How many passages to pull per CLO when sourcing readings from the uploaded
+// reference, and how many distinct chapter/section citations to keep from them.
+const UPLOADED_READINGS_TOP_N = 10;
+const MAX_UPLOADED_READINGS_PER_CLO = 6;
+
+// Cache (per course) for readings derived from the uploaded reference, so we only
+// pay the per-CLO embedding/similarity cost when the reference set actually
+// changes — not on every Layer 6 context load (approve/save/summary all hit it).
+const LAYER6_READINGS_CACHE = 'layer6-readings-cache';
+
+interface Layer6ReadingsCache {
+  /** Fingerprint of the uploaded reference set; recompute when it changes. */
+  refsSignature: string;
+  /** clo_id -> distinct chapter/section citations from the uploaded reference. */
+  readingsByClo: Record<string, string[]>;
+}
+
+/**
+ * Distinct chapter/section citations from the UPLOADED reference passages that
+ * best match a refined CLO. At Layer 6 generation time the chunks are not yet
+ * CLO-tagged (Reference Alignment runs after Layer 6 approval), so we match by
+ * unscoped course-level similarity rather than relying on clo_ids tags. Returns
+ * an empty list when nothing is uploaded or no passage matches — the caller then
+ * falls back to the deep-research web pool.
+ */
+async function readingsFromUploadedReferences(
+  courseCode: string,
+  refinedClo: string
+): Promise<string[]> {
+  if (!refinedClo.trim()) return [];
+  const hits = await retrieveReferenceChunks(courseCode, refinedClo, {
+    topN: UPLOADED_READINGS_TOP_N,
+  });
+  const seen = new Set<string>();
+  const readings: string[] = [];
+  for (const hit of hits) {
+    const citation = hit.citation?.trim();
+    if (!citation || seen.has(citation)) continue;
+    seen.add(citation);
+    readings.push(citation);
+    if (readings.length >= MAX_UPLOADED_READINGS_PER_CLO) break;
+  }
+  return readings;
+}
+
+/**
+ * Resolve uploaded-reference readings for every CLO, cached by a fingerprint of
+ * the uploaded reference set. On a cache hit (signature unchanged) this is a
+ * single DB read with zero embedding calls; otherwise it recomputes once and
+ * persists the result. Returns an empty map when the course has no references.
+ */
+async function resolveUploadedReadings(
+  courseCode: string,
+  refinedByClo: Map<string, string>
+): Promise<Map<string, string[]>> {
+  const docs = await referenceRepo.listDocuments(courseCode);
+  if (docs.length === 0) return new Map();
+
+  // Signature changes when a doc is added/removed or re-ingested (chunk count shifts).
+  const refsSignature = docs
+    .map((d) => `${d.doc_id}:${d.chunk_count ?? 0}`)
+    .sort()
+    .join('|');
+
+  const cached = await artifactRepo.get<Layer6ReadingsCache>(courseCode, LAYER6_READINGS_CACHE);
+  if (cached && cached.refsSignature === refsSignature) {
+    return new Map(Object.entries(cached.readingsByClo));
+  }
+
+  // Cache miss: recompute once (one similarity query per CLO) and persist.
+  const readingsByClo: Record<string, string[]> = {};
+  for (const [cloId, refinedClo] of refinedByClo) {
+    const readings = await readingsFromUploadedReferences(courseCode, refinedClo);
+    if (readings.length) readingsByClo[cloId] = readings;
+  }
+
+  await artifactRepo.save(courseCode, LAYER6_READINGS_CACHE, {
+    refsSignature,
+    readingsByClo,
+  } satisfies Layer6ReadingsCache);
+
+  return new Map(Object.entries(readingsByClo));
+}
+
+async function buildCloRefs(courseCode: string): Promise<CloRef[]> {
+  const { clos, refinements } = await getCloRefinementContext(courseCode);
   const bloomByClo = new Map(clos.map((c) => [c.clo_id, c.bloom_level]));
 
   // Assessments → which refined CLOs they align to (from Layer 4 / Layer 3 finals).
-  const weighting = getWeightingRubricContext(courseCode);
+  const weighting = await getWeightingRubricContext(courseCode);
   const assessmentAlignments = weighting.assessment_structure_reviews.map((r) => ({
     assessment_id: r.assessment_id,
     alignment: (r.final_assessment_from_layer_3.refined_clo_alignment ?? []).join(' ').toLowerCase(),
   }));
 
-  // Deep-research readings pool keyed by CLO (reused from the old topic editor pipeline).
-  const snapshot = fileService.getExtractedSnapshot(courseCode);
-  const readingsByClo = new Map<string, string[]>();
+  // Deep-research readings pool keyed by CLO — the FALLBACK used when the course
+  // has no uploaded reference (or an uploaded passage doesn't match a CLO).
+  const snapshot = await fileService.getExtractedSnapshot(courseCode);
+  const webReadingsByClo = new Map<string, string[]>();
   for (const group of snapshot?.suggested_clo_topics?.topics_by_clo ?? []) {
     const readings = group.topics
       .map((t) => (typeof t.readings === 'string' ? t.readings.trim() : ''))
       .filter((r): r is string => !!r);
-    if (readings.length) readingsByClo.set(group.clo_id, readings);
+    if (readings.length) webReadingsByClo.set(group.clo_id, readings);
   }
 
-  return refinements.map((r) => {
+  // Refined CLO wording per CLO (used both as the similarity query and the output).
+  const refinedByClo = new Map<string, string>();
+  for (const r of refinements) {
     const refined =
       r.sme_decision === 'keep_official' ? r.official_clo : r.final_clo_for_adaptive_design;
+    refinedByClo.set(r.clo_id, refined || r.official_clo);
+  }
+
+  // Single source of truth: when the course has an uploaded reference, source the
+  // readings pool from that file's own chapter/section citations (cached). When a
+  // CLO has no uploaded match, fall back to the deep-research web pool below.
+  const uploadedReadingsByClo = await resolveUploadedReadings(courseCode, refinedByClo);
+
+  return refinements.map((r) => {
+    const refinedClo = refinedByClo.get(r.clo_id) ?? r.official_clo;
     const idLower = r.clo_id.toLowerCase();
     const related = assessmentAlignments
       .filter((a) => a.alignment.includes(idLower))
       .map((a) => a.assessment_id);
+
+    const uploaded = uploadedReadingsByClo.get(r.clo_id) ?? [];
     return {
       clo_id: r.clo_id,
-      refined_clo: refined || r.official_clo,
+      refined_clo: refinedClo,
       bloom_level: bloomByClo.get(r.clo_id) ?? 'Understand',
       related_assessments: related,
-      reference_readings: readingsByClo.get(r.clo_id) ?? [],
+      reference_readings: uploaded.length ? uploaded : webReadingsByClo.get(r.clo_id) ?? [],
     };
   });
 }
@@ -291,14 +393,16 @@ export interface SubtopicArchitectureContext {
   layer6GeneratedAt?: string;
 }
 
-export function getSubtopicArchitectureContext(courseCode: string): SubtopicArchitectureContext {
-  const refs = buildCloRefs(courseCode);
+export async function getSubtopicArchitectureContext(
+  courseCode: string
+): Promise<SubtopicArchitectureContext> {
+  const refs = await buildCloRefs(courseCode);
   const refByClo = new Map(refs.map((r) => [r.clo_id, r]));
 
-  const layer6 = fileService.getStage1LayerState(courseCode, LAYER6_ID);
+  const layer6 = await fileService.getStage1LayerState(courseCode, LAYER6_ID);
   const ai = parseAiArchitecture(layer6?.outputJson);
 
-  const saved = fileService.getSubtopicArchitectureFile(courseCode);
+  const saved = await fileService.getSubtopicArchitectureFile(courseCode);
   const savedSectionByClo = new Map<string, SubtopicCloSection>();
   for (const s of saved?.clo_sections ?? []) {
     if (s.clo_id) savedSectionByClo.set(s.clo_id, s);
@@ -334,7 +438,7 @@ export function getSubtopicArchitectureContext(courseCode: string): SubtopicArch
 
   const total_subtopics = clo_sections.reduce((sum, s) => sum + s.subtopics.length, 0);
   const savedCourse = saved?.course_summary;
-  const snapshot = fileService.getExtractedSnapshot(courseCode);
+  const snapshot = await fileService.getExtractedSnapshot(courseCode);
 
   const course_summary: SubtopicArchitectureCourseSummary = {
     course_title:
@@ -400,17 +504,17 @@ export function computeSubtopicSummary(
 // Save (whole SME working file)
 // ----------------------------------------------------------------------------
 
-export function saveSubtopicArchitecture(
+export async function saveSubtopicArchitecture(
   courseCode: string,
   payload: {
     course_summary: SubtopicArchitectureCourseSummary;
     clo_sections: SubtopicCloSection[];
   }
-): {
+): Promise<{
   course_summary: SubtopicArchitectureCourseSummary;
   clo_sections: SubtopicCloSection[];
   summary: SubtopicArchitectureReviewSummary;
-} {
+}> {
   const clo_sections = payload.clo_sections ?? [];
   const total_subtopics = clo_sections.reduce((sum, s) => sum + s.subtopics.length, 0);
 
@@ -425,7 +529,7 @@ export function saveSubtopicArchitecture(
     clo_sections,
     updated_at: new Date().toISOString(),
   };
-  fileService.saveSubtopicArchitectureFile(courseCode, file);
+  await fileService.saveSubtopicArchitectureFile(courseCode, file);
 
   return {
     course_summary,
@@ -434,19 +538,19 @@ export function saveSubtopicArchitecture(
   };
 }
 
-export function seedSubtopicArchitectureFromOutput(
+export async function seedSubtopicArchitectureFromOutput(
   courseCode: string
-): SubtopicArchitectureContext {
-  const ctx = getSubtopicArchitectureContext(courseCode);
-  saveSubtopicArchitecture(courseCode, {
+): Promise<SubtopicArchitectureContext> {
+  const ctx = await getSubtopicArchitectureContext(courseCode);
+  await saveSubtopicArchitecture(courseCode, {
     course_summary: ctx.course_summary,
     clo_sections: ctx.clo_sections,
   });
   return ctx;
 }
 
-export function assertLayer6ReadyForApproval(courseCode: string): void {
-  const { summary } = getSubtopicArchitectureContext(courseCode);
+export async function assertLayer6ReadyForApproval(courseCode: string): Promise<void> {
+  const { summary } = await getSubtopicArchitectureContext(courseCode);
   if (summary.total_subtopics === 0) {
     throw new Error('No subtopics to approve. Run Layer 6 first.');
   }
@@ -461,8 +565,10 @@ export function assertLayer6ReadyForApproval(courseCode: string): void {
 // Project the approved rich architecture down to thin clo_topics for Stage 2
 // ----------------------------------------------------------------------------
 
-export function buildCloTopicsFromArchitecture(courseCode: string): CloTopics | null {
-  const saved = fileService.getSubtopicArchitectureFile(courseCode);
+export async function buildCloTopicsFromArchitecture(
+  courseCode: string
+): Promise<CloTopics | null> {
+  const saved = await fileService.getSubtopicArchitectureFile(courseCode);
   if (!saved?.clo_sections?.length) return null;
 
   const cloTopics: CloTopics = saved.clo_sections

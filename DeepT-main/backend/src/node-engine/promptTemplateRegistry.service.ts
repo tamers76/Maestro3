@@ -41,18 +41,30 @@ function buildSeedRegistry(): PromptTemplateRegistryFile {
   };
 }
 
-/** Load the registry, seeding + persisting it on first run. Cached in memory. */
-export function getRegistry(): PromptTemplateRegistryFile {
-  if (cachedRegistry) return cachedRegistry;
-
-  const existing = readPromptTemplateRegistry();
+/**
+ * Hydrate the in-memory cache from Postgres at startup, seeding + persisting on
+ * first run. Call once during boot; the sync getters below read the cache.
+ */
+export async function hydrateRegistry(): Promise<PromptTemplateRegistryFile> {
+  const existing = await readPromptTemplateRegistry();
   if (existing && Array.isArray(existing.templates) && existing.templates.length > 0) {
     cachedRegistry = existing;
     return existing;
   }
-
   const seeded = buildSeedRegistry();
-  writePromptTemplateRegistry(seeded);
+  await writePromptTemplateRegistry(seeded);
+  cachedRegistry = seeded;
+  return seeded;
+}
+
+/**
+ * The registry (cache-backed, synchronous). Falls back to the in-code seed if the
+ * cache has not been hydrated yet (deterministic; persistence happens via hydrate
+ * at boot or via updateTemplate).
+ */
+export function getRegistry(): PromptTemplateRegistryFile {
+  if (cachedRegistry) return cachedRegistry;
+  const seeded = buildSeedRegistry();
   cachedRegistry = seeded;
   return seeded;
 }
@@ -112,7 +124,7 @@ export interface UpdateTemplateInput {
  * Edit a template by appending a NEW immutable version (current active + 1) and
  * moving the active pointer to it. The previous version is preserved untouched.
  */
-export function updateTemplate(templateId: string, input: UpdateTemplateInput): PromptTemplate {
+export async function updateTemplate(templateId: string, input: UpdateTemplateInput): Promise<PromptTemplate> {
   const registry = getRegistry();
   const entry = findEntry(registry, templateId);
   if (!entry) {
@@ -143,7 +155,7 @@ export function updateTemplate(templateId: string, input: UpdateTemplateInput): 
   entry.active_version = newVersion.version;
   registry.updated_at = new Date().toISOString();
 
-  writePromptTemplateRegistry(registry);
+  await writePromptTemplateRegistry(registry);
   cachedRegistry = registry;
   return newVersion;
 }

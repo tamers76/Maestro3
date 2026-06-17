@@ -122,10 +122,10 @@ router.post('/:code/references/link', async (req: Request, res: Response) => {
 });
 
 // GET /api/courses/:code/references — list ingested reference documents
-router.get('/:code/references', (req: Request, res: Response) => {
+router.get('/:code/references', async (req: Request, res: Response) => {
   try {
     const { code } = req.params;
-    return res.json({ documents: listReferenceDocuments(code) });
+    return res.json({ documents: await listReferenceDocuments(code) });
   } catch (error) {
     return res
       .status(500)
@@ -173,10 +173,10 @@ router.post('/:code/references/retrieve', async (req: Request, res: Response) =>
 // ===========================================================================
 
 // GET /api/courses/:code/references/duplicates — non-destructive duplicate report
-router.get('/:code/references/duplicates', (req: Request, res: Response) => {
+router.get('/:code/references/duplicates', async (req: Request, res: Response) => {
   try {
     const { code } = req.params;
-    return res.json({ report: detectDuplicateDocuments(code) });
+    return res.json({ report: await detectDuplicateDocuments(code) });
   } catch (error) {
     return res
       .status(500)
@@ -248,11 +248,11 @@ router.get('/:code/references/retrieval-preview', async (req: Request, res: Resp
 // ===========================================================================
 
 // GET /api/courses/:code/references/alignment — Layer 7 state + current proposal
-router.get('/:code/references/alignment', (req: Request, res: Response) => {
+router.get('/:code/references/alignment', async (req: Request, res: Response) => {
   try {
     const { code } = req.params;
-    const state = getAlignmentState(code);
-    const proposal = getAlignmentProposal(code);
+    const state = await getAlignmentState(code);
+    const proposal = await getAlignmentProposal(code);
     return res.json({ state, proposal });
   } catch (error) {
     return res
@@ -279,14 +279,14 @@ router.post('/:code/references/alignment/propose', async (req: Request, res: Res
 });
 
 // PUT /api/courses/:code/references/alignment/mapping — apply SME edits
-router.put('/:code/references/alignment/mapping', (req: Request, res: Response) => {
+router.put('/:code/references/alignment/mapping', async (req: Request, res: Response) => {
   try {
     const { code } = req.params;
     const edits = Array.isArray(req.body?.edits) ? (req.body.edits as AlignmentMappingEdit[]) : [];
     if (edits.length === 0) {
       return res.status(400).json({ error: 'edits[] is required' });
     }
-    const proposal = updateAlignmentMapping(code, edits);
+    const proposal = await updateAlignmentMapping(code, edits);
     return res.json({ proposal });
   } catch (error) {
     return res

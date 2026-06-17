@@ -1,5 +1,5 @@
 import { callAI, parseAIJson, getCouncilInfo, getStageConfig, type CouncilProgressCallback } from './ai.service.js';
-import * as neo4j from './neo4j.service.js';
+import * as neo4j from './curriculumStore.service.js';
 import * as fileService from './file.service.js';
 import { buildStage3Prompt } from '../utils/prompts.js';
 import { startStageProgress, updateProgress, completeStageProgress, errorStageProgress, type CouncilInfo } from './progress.service.js';
@@ -523,7 +523,7 @@ export async function runStage3(courseCode: string, executionOverride?: StageExe
       incomplete_count: incompleteNodes.length,
       nodes: incompleteNodes
     };
-    fileService.saveStage3IncompleteReport(courseCode, incompleteReport);
+    await fileService.saveStage3IncompleteReport(courseCode, incompleteReport);
 
     updateProgress({
       courseCode,
@@ -582,7 +582,7 @@ export async function runStage3(courseCode: string, executionOverride?: StageExe
         remediation_paths_total: remediationPathsTotal
       }
     };
-    fileService.saveStage3Snapshot(courseCode, snapshot);
+    await fileService.saveStage3Snapshot(courseCode, snapshot);
     
     // Update course stage
     await neo4j.updateCourseStage(courseCode, 3);

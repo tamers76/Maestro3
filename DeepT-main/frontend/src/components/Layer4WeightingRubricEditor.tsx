@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Textarea'
 import { Input } from '@/components/ui/Input'
@@ -28,6 +28,8 @@ import {
   ArrowDown,
   ArrowUp,
   Minus,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
 
 // ----------------------------------------------------------------------------
@@ -640,6 +642,8 @@ function AssessmentStructureCard({
   onUpdate,
   onApprove,
   onSaveNote,
+  expanded,
+  onToggle,
 }: {
   review: AssessmentStructureReview
   colorIndex: number
@@ -651,6 +655,8 @@ function AssessmentStructureCard({
   onUpdate: (next: AssessmentStructureReview) => void
   onApprove: (next: AssessmentStructureReview) => void | Promise<void>
   onSaveNote: () => void | Promise<void>
+  expanded: boolean
+  onToggle: () => void
 }) {
   const colors = CARD_COLORS[colorIndex % CARD_COLORS.length]
   const ref = review.final_assessment_from_layer_3
@@ -711,7 +717,10 @@ function AssessmentStructureCard({
   return (
     <div className={cn('rounded-xl border-2 overflow-hidden', colors.border)}>
       {/* Header */}
-      <div className={cn('px-5 py-4 border-b', colors.border, colors.bg)}>
+      <div
+        className={cn('px-5 py-4 border-b cursor-pointer', colors.border, colors.bg)}
+        onClick={onToggle}
+      >
         <div className="flex items-start gap-3">
           <div className={cn('p-2.5 rounded-lg', colors.badge)}>
             <ClipboardList className="h-5 w-5" />
@@ -727,6 +736,11 @@ function AssessmentStructureCard({
               >
                 {APPROVAL_LABELS[review.approval_status]}
               </span>
+              {expanded ? (
+                <ChevronDown className="h-5 w-5 text-black/40" />
+              ) : (
+                <ChevronRight className="h-5 w-5 text-black/40" />
+              )}
             </div>
             <p className={cn('text-sm font-semibold', colors.text)}>{ref.title}</p>
             <div className="flex items-center gap-3 mt-1 text-xs text-black/70 dark:text-slate-400">
@@ -738,6 +752,7 @@ function AssessmentStructureCard({
         </div>
       </div>
 
+      {expanded && (
       <div className="p-4 space-y-5">
         {/* Approved assessment from Layer 3 (reference only, collapsed by default) */}
         <details className="rounded-lg border border-dashed border-border">
@@ -1049,6 +1064,7 @@ function AssessmentStructureCard({
           </div>
         )}
       </div>
+      )}
     </div>
   )
 }
@@ -1193,6 +1209,18 @@ export default function Layer4WeightingRubricEditor({
     await persist(next, reviews)
   }
 
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const zoneRefs = useRef<Record<string, HTMLDivElement | null>>({})
+
+  const toggleExpanded = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   const updateReview = (id: string, next: AssessmentStructureReview) => {
     setReviews((prev) => prev.map((r) => (r.assessment_id === id ? next : r)))
   }
@@ -1201,6 +1229,36 @@ export default function Layer4WeightingRubricEditor({
     if (!weighting) return
     const nextReviews = reviews.map((r) => (r.assessment_id === id ? next : r))
     setReviews(nextReviews)
+
+    // Auto-advance UI: collapse the just-approved assessment and open the next
+    // not-yet-approved assessment by rendered order (none if all later are approved).
+    const approvedIndex = nextReviews.findIndex((r) => r.assessment_id === id)
+    let nextId: string | null = null
+    for (let i = approvedIndex + 1; i < nextReviews.length; i++) {
+      if (nextReviews[i].approval_status !== 'approved') {
+        nextId = nextReviews[i].assessment_id
+        break
+      }
+    }
+    setExpandedIds((prev) => {
+      const updatedSet = new Set(prev)
+      updatedSet.delete(id)
+      if (nextId) updatedSet.add(nextId)
+      return updatedSet
+    })
+
+    // When a next item auto-expands, scroll its header to the top of the viewport.
+    // Defer past the collapse/expand re-render and layout shift so the scroll lands
+    // on the correct zone even as the approved body collapses above it.
+    if (nextId) {
+      const scrollToNext = () => {
+        const el = zoneRefs.current[nextId]
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+      requestAnimationFrame(scrollToNext)
+      ;[120, 300].forEach((ms) => setTimeout(scrollToNext, ms))
+    }
+
     await persist(weighting, nextReviews)
   }
 
@@ -1286,21 +1344,30 @@ export default function Layer4WeightingRubricEditor({
                 const noteChanged =
                   (review.sme_internal_note || '') !== (initial?.sme_internal_note || '')
                 return (
-                  <AssessmentStructureCard
+                  <div
                     key={review.assessment_id}
-                    review={review}
-                    colorIndex={index}
-                    selectedWeight={w?.selected_weight || review.selected_weight_from_step_1}
-                    currentWeight={w?.current_weight || ''}
-                    readOnly={layerApproved}
-                    saving={saving}
-                    noteChanged={noteChanged}
-                    onUpdate={(next) => updateReview(review.assessment_id, next)}
-                    onApprove={(next) => approveReview(review.assessment_id, next)}
-                    onSaveNote={async () => {
-                      await handleSave()
+                    ref={(el) => {
+                      zoneRefs.current[review.assessment_id] = el
                     }}
-                  />
+                    style={{ scrollMarginTop: 16 }}
+                  >
+                    <AssessmentStructureCard
+                      review={review}
+                      colorIndex={index}
+                      selectedWeight={w?.selected_weight || review.selected_weight_from_step_1}
+                      currentWeight={w?.current_weight || ''}
+                      readOnly={layerApproved}
+                      saving={saving}
+                      noteChanged={noteChanged}
+                      onUpdate={(next) => updateReview(review.assessment_id, next)}
+                      onApprove={(next) => approveReview(review.assessment_id, next)}
+                      onSaveNote={async () => {
+                        await handleSave()
+                      }}
+                      expanded={expandedIds.has(review.assessment_id)}
+                      onToggle={() => toggleExpanded(review.assessment_id)}
+                    />
+                  </div>
                 )
               })}
             </div>

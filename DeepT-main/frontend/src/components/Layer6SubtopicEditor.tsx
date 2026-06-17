@@ -468,8 +468,12 @@ function CloSectionView({
         {section.reference_readings.length > 0 && (
           <details className="rounded-lg border border-dashed border-border">
             <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-primary hover:underline flex items-center gap-1.5">
-              <BookOpen className="h-3.5 w-3.5" /> Reference readings pool ({section.reference_readings.length})
+              <BookOpen className="h-3.5 w-3.5" /> Suggested readings — preview ({section.reference_readings.length})
             </summary>
+            <p className="px-3 pt-1 text-[11px] italic text-muted-foreground">
+              A preview of likely readings for this CLO. Confirm which passages actually ground each
+              subtopic in Reference Alignment (below) after approving Layer 6.
+            </p>
             <ul className="list-disc pl-8 pr-3 pb-3 pt-1 space-y-1 text-xs text-muted-foreground leading-relaxed">
               {section.reference_readings.map((r, i) => (
                 <li key={i}>{r}</li>

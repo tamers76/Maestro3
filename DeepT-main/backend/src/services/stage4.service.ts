@@ -15,7 +15,7 @@
  */
 
 import { callAI, getCouncilInfo, getStageConfig, type CouncilProgressCallback } from './ai.service.js';
-import * as neo4j from './neo4j.service.js';
+import * as neo4j from './curriculumStore.service.js';
 import * as fileService from './file.service.js';
 import { 
   buildStage4Prompt,
@@ -476,14 +476,14 @@ function countWords(content: string): number {
  * Load Stage 3 snapshot and build a Map<nodeId, Stage3NodeLogic>.
  * Falls back to parsing stage3_logic_json from individual nodes if snapshot is missing.
  */
-function loadStage3LogicMap(
+async function loadStage3LogicMap(
   courseCode: string,
   nodes: LearningNode[]
-): Map<string, Stage3NodeLogic> {
+): Promise<Map<string, Stage3NodeLogic>> {
   const map = new Map<string, Stage3NodeLogic>();
 
   // Try snapshot first (canonical source)
-  const snapshot = fileService.getStage3Snapshot(courseCode);
+  const snapshot = await fileService.getStage3Snapshot(courseCode);
   if (snapshot && snapshot.nodes) {
     for (const logic of snapshot.nodes) {
       map.set(logic.node_id, logic);
@@ -2197,12 +2197,12 @@ export async function runStage4(
     }
     
     // Get weekly plan and assessment blueprint from snapshot
-    const extractedSnapshot = fileService.getExtractedSnapshot(courseCode);
+    const extractedSnapshot = await fileService.getExtractedSnapshot(courseCode);
     const weeklyPlan = extractedSnapshot?.weekly_plan || [];
     const assessmentBlueprint: Assessment[] = extractedSnapshot?.assessments || [];
     
     // Get course contract for assessment strategy
-    const contract = fileService.getCourseContract(courseCode);
+    const contract = await fileService.getCourseContract(courseCode);
     const assessmentStrategy = contract?.assessment_strategy || '';
     
     // Create CLO lookup map
@@ -2222,24 +2222,24 @@ export async function runStage4(
       council
     });
     
-    const stage3Map = loadStage3LogicMap(courseCode, nodes);
+    const stage3Map = await loadStage3LogicMap(courseCode, nodes);
     
     // Check for existing checkpoint
-    let checkpoint = resume && !forceRestart ? fileService.getStage4Checkpoint(courseCode) : null;
+    let checkpoint = resume && !forceRestart ? await fileService.getStage4Checkpoint(courseCode) : null;
     let completedNodeIds = new Set<string>(checkpoint?.completedNodeIds || []);
     let errorCount = checkpoint?.errors || 0;
     
     // Handle force restart
     if (forceRestart || !resume) {
       console.log('Stage 4: Fresh start - clearing existing content...');
-      fileService.deleteStage4Content(courseCode);
-      fileService.clearStage4ErrorLog(courseCode);
-      fileService.deleteStage4Checkpoint(courseCode);
+      await fileService.deleteStage4Content(courseCode);
+      await fileService.clearStage4ErrorLog(courseCode);
+      await fileService.deleteStage4Checkpoint(courseCode);
       completedNodeIds = new Set<string>();
       errorCount = 0;
       checkpoint = null;
     } else if (checkpoint) {
-      const existingFiles = new Set(fileService.getExistingStage4NodeIds(courseCode));
+      const existingFiles = new Set(await fileService.getExistingStage4NodeIds(courseCode));
       completedNodeIds = new Set(
         Array.from(completedNodeIds).filter(id => existingFiles.has(id))
       );
@@ -2268,18 +2268,18 @@ export async function runStage4(
       
       // Skip completed nodes (resume support)
       if (completedNodeIds.has(node.node_id)) {
-        const existing = fileService.getStage4NodeContent(courseCode, node.node_id);
+        const existing = await fileService.getStage4NodeContent(courseCode, node.node_id);
         if (existing) contentPacks.set(node.node_id, existing);
         // Load existing enhanced artifacts
-        const existingPlan = fileService.getStage4ModalityPlan(courseCode, node.node_id);
+        const existingPlan = await fileService.getStage4ModalityPlan(courseCode, node.node_id);
         if (existingPlan) modalityPlans.set(node.node_id, existingPlan);
-        const existingPkg = fileService.getStage4InstructionalPackage(courseCode, node.node_id);
+        const existingPkg = await fileService.getStage4InstructionalPackage(courseCode, node.node_id);
         if (existingPkg) instructionalPackages.set(node.node_id, existingPkg);
-        const existingDiag = fileService.getStage4DiagnosticAssessment(courseCode, node.node_id);
+        const existingDiag = await fileService.getStage4DiagnosticAssessment(courseCode, node.node_id);
         if (existingDiag) diagnosticAssessments.set(node.node_id, existingDiag);
-        const existingLLM = fileService.getStage4LLMInteractiveSpec(courseCode, node.node_id);
+        const existingLLM = await fileService.getStage4LLMInteractiveSpec(courseCode, node.node_id);
         if (existingLLM) llmInteractiveSpecs.set(node.node_id, existingLLM);
-        const existingRem = fileService.getStage4RemediationPack(courseCode, node.node_id);
+        const existingRem = await fileService.getStage4RemediationPack(courseCode, node.node_id);
         if (existingRem) remediationPacks.set(node.node_id, existingRem);
         continue;
       }
@@ -2300,7 +2300,7 @@ export async function runStage4(
         const modalityPlan = await generateModalityPlan(
           node, clo, stage3Logic, council, courseCode, executionOverride
         );
-        fileService.saveStage4ModalityPlan(courseCode, node.node_id, modalityPlan);
+        await fileService.saveStage4ModalityPlan(courseCode, node.node_id, modalityPlan);
         modalityPlans.set(node.node_id, modalityPlan);
         
         // --- Step B: Instructional Package ---
@@ -2312,7 +2312,7 @@ export async function runStage4(
         const instrPkg = await generateInstructionalPackage(
           node, clo, stage3Logic, nodes, council, courseCode, executionOverride
         );
-        fileService.saveStage4InstructionalPackage(courseCode, node.node_id, instrPkg);
+        await fileService.saveStage4InstructionalPackage(courseCode, node.node_id, instrPkg);
         instructionalPackages.set(node.node_id, instrPkg);
         
         // Also generate legacy content pack for backward compatibility
@@ -2328,7 +2328,7 @@ export async function runStage4(
           const diagAssessment = await generateDiagnosticAssessment(
             node, clo, stage3Logic, council, courseCode, executionOverride
           );
-          fileService.saveStage4DiagnosticAssessment(courseCode, node.node_id, diagAssessment);
+          await fileService.saveStage4DiagnosticAssessment(courseCode, node.node_id, diagAssessment);
           diagnosticAssessments.set(node.node_id, diagAssessment);
           
           // --- Step C Layer 2: LLM-Interactive Spec (if qualifying) ---
@@ -2342,7 +2342,7 @@ export async function runStage4(
             const llmSpec = await generateLLMInteractiveSpec(
               node, clo, stage3Logic, llmQual, council, courseCode, executionOverride
             );
-            fileService.saveStage4LLMInteractiveSpec(courseCode, node.node_id, llmSpec);
+            await fileService.saveStage4LLMInteractiveSpec(courseCode, node.node_id, llmSpec);
             llmInteractiveSpecs.set(node.node_id, llmSpec);
           }
           
@@ -2356,7 +2356,7 @@ export async function runStage4(
             const remPack = await generateRemediationAssets(
               node, clo, stage3Logic, council, courseCode, executionOverride
             );
-            fileService.saveStage4RemediationPack(courseCode, node.node_id, remPack);
+            await fileService.saveStage4RemediationPack(courseCode, node.node_id, remPack);
             remediationPacks.set(node.node_id, remPack);
           }
         }
@@ -2371,14 +2371,14 @@ export async function runStage4(
           node, clo, stage3Logic, contentSummary, council, courseCode, executionOverride
         );
         if (visualSpecs.length > 0) {
-          fileService.saveStage4VisualAssetSpecs(courseCode, node.node_id, visualSpecs);
+          await fileService.saveStage4VisualAssetSpecs(courseCode, node.node_id, visualSpecs);
         }
         
         const videoPackage = await generateVideoProductionPackage(
           node, clo, contentSummary, council, courseCode, executionOverride
         );
         if (videoPackage) {
-          fileService.saveStage4VideoProductionPackage(courseCode, node.node_id, videoPackage);
+          await fileService.saveStage4VideoProductionPackage(courseCode, node.node_id, videoPackage);
         }
         
         // --- Legacy content pack (backward compatibility) ---
@@ -2408,7 +2408,7 @@ export async function runStage4(
           content_version: '3.0'
         };
         
-        fileService.saveStage4NodeContent(courseCode, node.node_id, contentPack);
+        await fileService.saveStage4NodeContent(courseCode, node.node_id, contentPack);
         contentPacks.set(node.node_id, contentPack);
         
         // Update Neo4j
@@ -2427,7 +2427,7 @@ export async function runStage4(
           lastUpdatedAt: new Date().toISOString(),
           errors: errorCount
         };
-        fileService.saveStage4Checkpoint(courseCode, updatedCheckpoint);
+        await fileService.saveStage4Checkpoint(courseCode, updatedCheckpoint);
         
       } catch (nodeError) {
         const errorMsg = `Failed content pack for ${node.node_id}: ${nodeError instanceof Error ? nodeError.message : String(nodeError)}`;
@@ -2442,7 +2442,7 @@ export async function runStage4(
           errorStack: nodeError instanceof Error ? nodeError.stack : undefined,
           attempt: 1
         };
-        fileService.appendStage4ErrorLog(courseCode, errorEntry);
+        await fileService.appendStage4ErrorLog(courseCode, errorEntry);
       }
     }
     
@@ -2463,7 +2463,7 @@ export async function runStage4(
         courseCode, course.title, clos, assessmentBlueprint, assessmentStrategy,
         council, executionOverride
       );
-      fileService.saveStage4SummativeAssessments(courseCode, summativePack);
+      await fileService.saveStage4SummativeAssessments(courseCode, summativePack);
     } catch (error) {
       const msg = `Failed summative assessments: ${error instanceof Error ? error.message : String(error)}`;
       console.error(msg);
@@ -2485,7 +2485,7 @@ export async function runStage4(
       courseCode, course.title, clos, nodes, allTopics, instructionalPackages
     );
     const courseBookMarkdown = renderCourseBookMarkdown(courseBook);
-    fileService.saveStage4CourseBook(courseCode, courseBook, courseBookMarkdown);
+    await fileService.saveStage4CourseBook(courseCode, courseBook, courseBookMarkdown);
     
     // ================================================================
     // PHASE G: Enhanced Workload Map
@@ -2507,7 +2507,7 @@ export async function runStage4(
       baseWorkloadMap, clos, nodes, allTopics,
       baseWorkloadMap.nodes, summativePack, course.credit_hours
     );
-    fileService.saveStage4WorkloadMap(courseCode, enhancedWorkload);
+    await fileService.saveStage4WorkloadMap(courseCode, enhancedWorkload);
     
     // ================================================================
     // PHASE: Course Rubric + Learner Instructions (legacy)
@@ -2523,7 +2523,7 @@ export async function runStage4(
     const rubric = await generateCourseRubric(
       courseCode, course.title, clos, council, executionOverride
     );
-    fileService.saveStage4Rubric(courseCode, rubric);
+    await fileService.saveStage4Rubric(courseCode, rubric);
     
     console.log('Stage 4: Generating learner instructions...');
     updateProgress({
@@ -2537,7 +2537,7 @@ export async function runStage4(
       courseCode, course.title, course.description,
       enhancedWorkload.total_hours, weeklyPlan, council, executionOverride
     );
-    fileService.saveStage4LearnerInstructions(courseCode, learnerInstructions);
+    await fileService.saveStage4LearnerInstructions(courseCode, learnerInstructions);
     
     // ================================================================
     // VALIDATION
@@ -2547,14 +2547,14 @@ export async function runStage4(
       courseCode, nodes, stage3Map,
       { modalityPlans, instructionalPackages, diagnosticAssessments, remediationPacks, llmInteractiveSpecs }
     );
-    fileService.saveStage4ValidationReport(courseCode, validationReport);
+    await fileService.saveStage4ValidationReport(courseCode, validationReport);
     
     // Update course stage
     await neo4j.updateCourseStage(courseCode, 4);
     
     // Clear checkpoint on success
     if (completedNodeIds.size === totalNodes) {
-      fileService.deleteStage4Checkpoint(courseCode);
+      await fileService.deleteStage4Checkpoint(courseCode);
     }
     
     // Generate content pack summary
@@ -2588,7 +2588,7 @@ export async function runStage4(
       generated_at: new Date().toISOString()
     };
     
-    fileService.saveStage4ContentPackSummary(courseCode, contentPackSummary);
+    await fileService.saveStage4ContentPackSummary(courseCode, contentPackSummary);
     
     const summaryMsg = `Generated ${completedNodeIds.size}/${totalNodes} nodes | ${diagnosticAssessments.size} diagnostic assessments | ${llmInteractiveSpecs.size} LLM-interactive specs | ${remediationPacks.size} remediation packs | Workload: ${enhancedWorkload.alignment_status} (${enhancedWorkload.total_hours}h / ${enhancedWorkload.expected_hours}h) | Validation: ${validationReport.is_valid ? 'PASSED' : 'ISSUES FOUND'}`;
     
@@ -2628,7 +2628,7 @@ export async function runStage4(
       errorStack: error instanceof Error ? error.stack : undefined,
       attempt: 1
     };
-    fileService.appendStage4ErrorLog(courseCode, errorEntry);
+    await fileService.appendStage4ErrorLog(courseCode, errorEntry);
     
     return {
       success: false,
@@ -2648,45 +2648,45 @@ export async function runStage4WithCouncil(courseCode: string, options?: Stage4O
 // RETRIEVAL FUNCTIONS
 // ============================================================================
 
-export function getStage4CheckpointStatus(courseCode: string): Stage4Checkpoint | null {
-  return fileService.getStage4Checkpoint(courseCode);
+export async function getStage4CheckpointStatus(courseCode: string): Promise<Stage4Checkpoint | null> {
+  return await fileService.getStage4Checkpoint(courseCode);
 }
 
-export function getStage4Errors(courseCode: string): Stage4ErrorEntry[] {
-  return fileService.getStage4ErrorLog(courseCode);
+export async function getStage4Errors(courseCode: string): Promise<Stage4ErrorEntry[]> {
+  return await fileService.getStage4ErrorLog(courseCode);
 }
 
-export function clearStage4Errors(courseCode: string): void {
-  fileService.clearStage4ErrorLog(courseCode);
+export async function clearStage4Errors(courseCode: string): Promise<void> {
+  await fileService.clearStage4ErrorLog(courseCode);
 }
 
-export function getStage4ContentPack(courseCode: string): Stage4ContentPack | null {
-  return fileService.getStage4ContentPackSummary(courseCode);
+export async function getStage4ContentPack(courseCode: string): Promise<Stage4ContentPack | null> {
+  return await fileService.getStage4ContentPackSummary(courseCode);
 }
 
-export function getStage4NodeContent(courseCode: string, nodeId: string): Stage4NodeContent | null {
-  return fileService.getStage4NodeContent(courseCode, nodeId);
+export async function getStage4NodeContent(courseCode: string, nodeId: string): Promise<Stage4NodeContent | null> {
+  return await fileService.getStage4NodeContent(courseCode, nodeId);
 }
 
-export function getStage4WorkloadMap(courseCode: string): WorkloadMap | null {
-  return fileService.getStage4WorkloadMap(courseCode);
+export async function getStage4WorkloadMap(courseCode: string): Promise<WorkloadMap | null> {
+  return await fileService.getStage4WorkloadMap(courseCode);
 }
 
-export function getStage4Rubric(courseCode: string): CourseRubric | null {
-  return fileService.getStage4Rubric(courseCode);
+export async function getStage4Rubric(courseCode: string): Promise<CourseRubric | null> {
+  return await fileService.getStage4Rubric(courseCode);
 }
 
-export function getStage4LearnerInstructions(courseCode: string): string | null {
-  return fileService.getStage4LearnerInstructions(courseCode);
+export async function getStage4LearnerInstructions(courseCode: string): Promise<string | null> {
+  return await fileService.getStage4LearnerInstructions(courseCode);
 }
 
-export function getNodeAssessments(courseCode: string, nodeId: string): NodeAssessment[] {
-  const contentPack = fileService.getStage4NodeContent(courseCode, nodeId);
+export async function getNodeAssessments(courseCode: string, nodeId: string): Promise<NodeAssessment[]> {
+  const contentPack = await fileService.getStage4NodeContent(courseCode, nodeId);
   return contentPack?.assessments || [];
 }
 
-export function getNodeVideoScript(courseCode: string, nodeId: string): VideoScript | null {
-  const contentPack = fileService.getStage4NodeContent(courseCode, nodeId);
+export async function getNodeVideoScript(courseCode: string, nodeId: string): Promise<VideoScript | null> {
+  const contentPack = await fileService.getStage4NodeContent(courseCode, nodeId);
   return contentPack?.video_script || null;
 }
 
@@ -2694,46 +2694,46 @@ export function getNodeVideoScript(courseCode: string, nodeId: string): VideoScr
 // NEW RETRIEVAL FUNCTIONS — Steps A–G Artifacts
 // ============================================================================
 
-export function getStage4ModalityPlan(courseCode: string, nodeId: string): ModalityPlan | null {
-  return fileService.getStage4ModalityPlan(courseCode, nodeId);
+export async function getStage4ModalityPlan(courseCode: string, nodeId: string): Promise<ModalityPlan | null> {
+  return await fileService.getStage4ModalityPlan(courseCode, nodeId);
 }
 
-export function getStage4InstructionalPackage(courseCode: string, nodeId: string): NodeInstructionalPackage | null {
-  return fileService.getStage4InstructionalPackage(courseCode, nodeId);
+export async function getStage4InstructionalPackage(courseCode: string, nodeId: string): Promise<NodeInstructionalPackage | null> {
+  return await fileService.getStage4InstructionalPackage(courseCode, nodeId);
 }
 
-export function getStage4DiagnosticAssessment(courseCode: string, nodeId: string): DiagnosticAssessment | null {
-  return fileService.getStage4DiagnosticAssessment(courseCode, nodeId);
+export async function getStage4DiagnosticAssessment(courseCode: string, nodeId: string): Promise<DiagnosticAssessment | null> {
+  return await fileService.getStage4DiagnosticAssessment(courseCode, nodeId);
 }
 
-export function getStage4LLMInteractiveSpec(courseCode: string, nodeId: string): LLMInteractiveAssessmentSpec | null {
-  return fileService.getStage4LLMInteractiveSpec(courseCode, nodeId);
+export async function getStage4LLMInteractiveSpec(courseCode: string, nodeId: string): Promise<LLMInteractiveAssessmentSpec | null> {
+  return await fileService.getStage4LLMInteractiveSpec(courseCode, nodeId);
 }
 
-export function getStage4RemediationPack(courseCode: string, nodeId: string): NodeRemediationPack | null {
-  return fileService.getStage4RemediationPack(courseCode, nodeId);
+export async function getStage4RemediationPack(courseCode: string, nodeId: string): Promise<NodeRemediationPack | null> {
+  return await fileService.getStage4RemediationPack(courseCode, nodeId);
 }
 
-export function getStage4SummativeAssessments(courseCode: string): SummativeAssessmentPack | null {
-  return fileService.getStage4SummativeAssessments(courseCode);
+export async function getStage4SummativeAssessments(courseCode: string): Promise<SummativeAssessmentPack | null> {
+  return await fileService.getStage4SummativeAssessments(courseCode);
 }
 
-export function getStage4CourseBook(courseCode: string): CourseBook | null {
-  return fileService.getStage4CourseBook(courseCode);
+export async function getStage4CourseBook(courseCode: string): Promise<CourseBook | null> {
+  return await fileService.getStage4CourseBook(courseCode);
 }
 
-export function getStage4CourseBookMarkdown(courseCode: string): string | null {
-  return fileService.getStage4CourseBookMarkdown(courseCode);
+export async function getStage4CourseBookMarkdown(courseCode: string): Promise<string | null> {
+  return await fileService.getStage4CourseBookMarkdown(courseCode);
 }
 
-export function getStage4ValidationReport(courseCode: string): Stage4ValidationReport | null {
-  return fileService.getStage4ValidationReport(courseCode);
+export async function getStage4ValidationReport(courseCode: string): Promise<Stage4ValidationReport | null> {
+  return await fileService.getStage4ValidationReport(courseCode);
 }
 
-export function getStage4VisualAssetSpecs(courseCode: string, nodeId: string): VisualAssetSpec[] | null {
-  return fileService.getStage4VisualAssetSpecs(courseCode, nodeId);
+export async function getStage4VisualAssetSpecs(courseCode: string, nodeId: string): Promise<VisualAssetSpec[] | null> {
+  return await fileService.getStage4VisualAssetSpecs(courseCode, nodeId);
 }
 
-export function getStage4VideoProductionPackage(courseCode: string, nodeId: string): VideoProductionPackage | null {
-  return fileService.getStage4VideoProductionPackage(courseCode, nodeId);
+export async function getStage4VideoProductionPackage(courseCode: string, nodeId: string): Promise<VideoProductionPackage | null> {
+  return await fileService.getStage4VideoProductionPackage(courseCode, nodeId);
 }

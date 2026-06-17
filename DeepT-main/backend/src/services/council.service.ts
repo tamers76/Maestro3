@@ -271,7 +271,6 @@ export function getActiveAIProvider(): 'openrouter' | 'openai' | 'ollama' {
   if (preferred === 'openrouter' && hasProviderKey('openrouter')) return 'openrouter';
   if (hasProviderKey('openai')) return 'openai';
   if (hasProviderKey('openrouter')) return 'openrouter';
-  if (preferred === 'ollama') return 'ollama';
 
   throw new Error(AI_NOT_CONFIGURED_MSG);
 }

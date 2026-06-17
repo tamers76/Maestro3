@@ -114,6 +114,19 @@ export default function CourseDetail() {
   
   // Track SSE unsubscribe function
   const unsubscribeRef = useRef<(() => void) | null>(null)
+
+  // Guided-navigation targets: after Course Architect (Layer 6) is approved we
+  // scroll to Reference Alignment, and after alignment is approved we scroll to
+  // the Node Engine. These render in sequence on this page (tabs are hidden when
+  // LEGACY_STAGES_ENABLED is false), so "moving on" is a scroll, not a route.
+  const referenceAlignmentRef = useRef<HTMLDivElement | null>(null)
+  const nodeEngineRef = useRef<HTMLDivElement | null>(null)
+  const scrollToRef = useCallback((ref: React.RefObject<HTMLDivElement | null>) => {
+    const scroll = () => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    requestAnimationFrame(scroll)
+    // Re-scroll as layout settles (collapsing editors above shift the target).
+    ;[120, 300, 550].forEach((ms) => setTimeout(scroll, ms))
+  }, [])
   
   // Subscribe to progress updates when a stage starts running
   // Returns a promise that resolves when connected
@@ -656,6 +669,7 @@ export default function CourseDetail() {
       <Stage1Layers
         courseCode={course.course_code}
         onAllApproved={setStage1AllApproved}
+        onCourseArchitectComplete={() => scrollToRef(referenceAlignmentRef)}
         intake={{
           title: course.title,
           code: course.course_code,
@@ -671,8 +685,14 @@ export default function CourseDetail() {
         }}
       />
 
-      {/* Course Architect Layer 7 — Reference Alignment (grounds the Node Engine). */}
-      <ReferenceAlignmentPanel courseCode={course.course_code} />
+      {/* Reference Alignment — the transition between Course Architect and the
+          Node Engine (grounds node generation on approved source material). */}
+      <div ref={referenceAlignmentRef} className="scroll-mt-4">
+        <ReferenceAlignmentPanel
+          courseCode={course.course_code}
+          onAlignmentApproved={() => scrollToRef(nodeEngineRef)}
+        />
+      </div>
 
       {/* Main Content Tabs. With only the Node Engine surface (legacy parked),
           the single-item tab switcher is redundant — the Node Engine panel
@@ -709,7 +729,9 @@ export default function CourseDetail() {
 
         {/* Node Engine Tab (Phase 0 foundations) */}
         <TabsContent value="node-engine" className="space-y-4">
-          <NodeEnginePanel courseCode={course.course_code} />
+          <div ref={nodeEngineRef} className="scroll-mt-4">
+            <NodeEnginePanel courseCode={course.course_code} />
+          </div>
         </TabsContent>
         
         {/* Edit Graph Tab (Stage 2.5) */}

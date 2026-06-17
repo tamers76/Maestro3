@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Textarea'
 import { Input } from '@/components/ui/Input'
@@ -28,6 +28,8 @@ import {
   Plus,
   Trash2,
   Flag,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
 
 // ----------------------------------------------------------------------------
@@ -194,6 +196,8 @@ function AssessmentIntegrityCard({
   onUpdate,
   onApprove,
   onSaveNote,
+  expanded,
+  onToggle,
 }: {
   review: AssessmentIntegrityReview
   colorIndex: number
@@ -203,6 +207,8 @@ function AssessmentIntegrityCard({
   onUpdate: (next: AssessmentIntegrityReview) => void
   onApprove: (next: AssessmentIntegrityReview) => void
   onSaveNote: () => void | Promise<void>
+  expanded: boolean
+  onToggle: () => void
 }) {
   const editable = !readOnly && review.approval_status !== 'approved'
   const ref = review.final_assessment_reference
@@ -213,8 +219,16 @@ function AssessmentIntegrityCard({
   return (
     <div className={cn('rounded-xl border-2 bg-card overflow-hidden', CARD_COLORS[colorIndex % CARD_COLORS.length])}>
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b bg-muted/30">
+      <div
+        className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b bg-muted/30 cursor-pointer"
+        onClick={onToggle}
+      >
         <div className="flex items-center gap-2 min-w-0">
+          {expanded ? (
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          )}
           <span className="font-bold text-sm">{review.assessment_id}</span>
           <span className="text-sm text-muted-foreground truncate">— {ref.title || 'Untitled assessment'}</span>
         </div>
@@ -240,6 +254,7 @@ function AssessmentIntegrityCard({
         </div>
       </div>
 
+      {expanded && (
       <div className="p-4 space-y-4">
         {/* Approved assessment reference (collapsed) */}
         <details className="rounded-lg border border-dashed border-border">
@@ -642,6 +657,7 @@ function AssessmentIntegrityCard({
           </div>
         )}
       </div>
+      )}
     </div>
   )
 }
@@ -788,6 +804,18 @@ export default function Layer5IntegrityEditor({
     return persist(course, reviews)
   }
 
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const zoneRefs = useRef<Record<string, HTMLDivElement | null>>({})
+
+  const toggleExpanded = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   const updateReview = (id: string, next: AssessmentIntegrityReview) => {
     setReviews((prev) => prev.map((r) => (r.assessment_id === id ? next : r)))
   }
@@ -796,6 +824,36 @@ export default function Layer5IntegrityEditor({
     if (!course) return
     const nextReviews = reviews.map((r) => (r.assessment_id === id ? next : r))
     setReviews(nextReviews)
+
+    // Auto-advance UI: collapse the just-approved assessment and open the next
+    // not-yet-approved assessment by rendered order (none if all later are approved).
+    const approvedIndex = nextReviews.findIndex((r) => r.assessment_id === id)
+    let nextId: string | null = null
+    for (let i = approvedIndex + 1; i < nextReviews.length; i++) {
+      if (nextReviews[i].approval_status !== 'approved') {
+        nextId = nextReviews[i].assessment_id
+        break
+      }
+    }
+    setExpandedIds((prev) => {
+      const updatedSet = new Set(prev)
+      updatedSet.delete(id)
+      if (nextId) updatedSet.add(nextId)
+      return updatedSet
+    })
+
+    // When a next item auto-expands, scroll its header to the top of the viewport.
+    // Defer past the collapse/expand re-render and layout shift so the scroll lands
+    // on the correct zone even as the approved body collapses above it.
+    if (nextId) {
+      const scrollToNext = () => {
+        const el = zoneRefs.current[nextId]
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+      requestAnimationFrame(scrollToNext)
+      ;[120, 300].forEach((ms) => setTimeout(scrollToNext, ms))
+    }
+
     await persist(course, nextReviews)
   }
 
@@ -896,19 +954,28 @@ export default function Layer5IntegrityEditor({
               const initial = initialReviews.find((r) => r.assessment_id === review.assessment_id)
               const noteChanged = (review.sme_internal_note || '') !== (initial?.sme_internal_note || '')
               return (
-                <AssessmentIntegrityCard
+                <div
                   key={review.assessment_id}
-                  review={review}
-                  colorIndex={index}
-                  readOnly={layerApproved}
-                  saving={saving}
-                  noteChanged={noteChanged}
-                  onUpdate={(next) => updateReview(review.assessment_id, next)}
-                  onApprove={(next) => approveReview(review.assessment_id, next)}
-                  onSaveNote={async () => {
-                    await handleSave()
+                  ref={(el) => {
+                    zoneRefs.current[review.assessment_id] = el
                   }}
-                />
+                  style={{ scrollMarginTop: 16 }}
+                >
+                  <AssessmentIntegrityCard
+                    review={review}
+                    colorIndex={index}
+                    readOnly={layerApproved}
+                    saving={saving}
+                    noteChanged={noteChanged}
+                    onUpdate={(next) => updateReview(review.assessment_id, next)}
+                    onApprove={(next) => approveReview(review.assessment_id, next)}
+                    onSaveNote={async () => {
+                      await handleSave()
+                    }}
+                    expanded={expandedIds.has(review.assessment_id)}
+                    onToggle={() => toggleExpanded(review.assessment_id)}
+                  />
+                </div>
               )
             })}
           </div>

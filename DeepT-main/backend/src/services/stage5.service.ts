@@ -4,7 +4,7 @@ import HTMLtoDOCX from 'html-to-docx';
 import archiver from 'archiver';
 import { createWriteStream, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import * as neo4j from './neo4j.service.js';
+import * as neo4j from './curriculumStore.service.js';
 import * as fileService from './file.service.js';
 import { startStageProgress, updateProgress, completeStageProgress, errorStageProgress, type CouncilInfo } from './progress.service.js';
 import type {
@@ -750,11 +750,11 @@ export async function runStage5(courseCode: string, _executionOverride?: StageEx
     }
 
     // Get all node content from Stage 4
-    const nodeContents = fileService.getAllStage4InstructionalContents(courseCode);
+    const nodeContents = await fileService.getAllStage4InstructionalContents(courseCode);
 
     // Fall back to old location if Stage 4 content not found
     if (nodeContents.size === 0) {
-      const legacyContents = fileService.getAllNodeContents(courseCode);
+      const legacyContents = await fileService.getAllNodeContents(courseCode);
       if (legacyContents.size === 0) {
         throw new Error('No node content found. Please run Stage 4 first.');
       }
@@ -769,7 +769,7 @@ export async function runStage5(courseCode: string, _executionOverride?: StageEx
     const allAssessments: NodeAssessment[] = [];
 
     for (const node of nodes) {
-      const contentPack = fileService.getStage4NodeContent(courseCode, node.node_id);
+      const contentPack = await fileService.getStage4NodeContent(courseCode, node.node_id);
       if (contentPack) {
         allContentPacks.set(node.node_id, contentPack);
         if (contentPack.video_script) {
@@ -782,8 +782,8 @@ export async function runStage5(courseCode: string, _executionOverride?: StageEx
     }
 
     // Get rubric and workload map
-    const rubric = fileService.getStage4Rubric(courseCode);
-    const workloadMap = fileService.getStage4WorkloadMap(courseCode);
+    const rubric = await fileService.getStage4Rubric(courseCode);
+    const workloadMap = await fileService.getStage4WorkloadMap(courseCode);
 
     console.log(`Stage 5: Loaded ${nodeContents.size} node contents, ${allVideoScripts.length} video scripts, ${allAssessments.length} assessments`);
 
@@ -887,16 +887,16 @@ export async function runStage5(courseCode: string, _executionOverride?: StageEx
 // ============================================================================
 
 export async function createCourseZip(courseCode: string): Promise<string> {
-  const nodeContents = fileService.getAllStage4InstructionalContents(courseCode);
+  const nodeContents = await fileService.getAllStage4InstructionalContents(courseCode);
   const course = await neo4j.getCourse(courseCode);
   const clos = await neo4j.getCLOs(courseCode);
   const nodes = await neo4j.getLearningNodes(courseCode);
-  const contract = fileService.getCourseContract(courseCode);
+  const contract = await fileService.getCourseContract(courseCode);
 
   // Get Stage 4 content
-  const rubric = fileService.getStage4Rubric(courseCode);
-  const workloadMap = fileService.getStage4WorkloadMap(courseCode);
-  const learnerInstructions = fileService.getStage4LearnerInstructions(courseCode);
+  const rubric = await fileService.getStage4Rubric(courseCode);
+  const workloadMap = await fileService.getStage4WorkloadMap(courseCode);
+  const learnerInstructions = await fileService.getStage4LearnerInstructions(courseCode);
 
   // Collect all video scripts and assessments
   const allVideoScripts: VideoScript[] = [];
@@ -904,7 +904,7 @@ export async function createCourseZip(courseCode: string): Promise<string> {
   const contentPacks: Stage4NodeContent[] = [];
 
   for (const node of nodes) {
-    const contentPack = fileService.getStage4NodeContent(courseCode, node.node_id);
+    const contentPack = await fileService.getStage4NodeContent(courseCode, node.node_id);
     if (contentPack) {
       contentPacks.push(contentPack);
       if (contentPack.video_script) {

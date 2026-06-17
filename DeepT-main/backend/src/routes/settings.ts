@@ -82,7 +82,7 @@ router.put('/', async (req: Request, res: Response) => {
     }
     
     // Update settings
-    const updated = updateSettings(updates);
+    const updated = await updateSettings(updates);
     
     console.log('[Settings] Updated stageConfigs in memory:', JSON.stringify(updated.stageConfigs, null, 2));
     

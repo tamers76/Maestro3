@@ -245,8 +245,8 @@ function isStructuredItem(entry: Record<string, unknown>): boolean {
   );
 }
 
-function loadSavedItems(courseCode: string): Map<string, AssessmentRedesignItem> {
-  const file = fileService.getAssessmentRedesignsFile(courseCode);
+async function loadSavedItems(courseCode: string): Promise<Map<string, AssessmentRedesignItem>> {
+  const file = await fileService.getAssessmentRedesignsFile(courseCode);
   const map = new Map<string, AssessmentRedesignItem>();
   for (const raw of file?.items ?? []) {
     const entry = raw as AssessmentRedesignItem & Record<string, unknown>;
@@ -258,19 +258,19 @@ function loadSavedItems(courseCode: string): Map<string, AssessmentRedesignItem>
   return map;
 }
 
-export function getAssessmentRedesignContext(courseCode: string): {
+export async function getAssessmentRedesignContext(courseCode: string): Promise<{
   suggestions: SuggestedAssessmentRedesign[];
   redesigns: AssessmentRedesignItem[];
   summary: AssessmentRedesignReviewSummary;
   layer3GeneratedAt?: string;
-} {
-  const snapshot = fileService.getExtractedSnapshot(courseCode);
+}> {
+  const snapshot = await fileService.getExtractedSnapshot(courseCode);
   const originalAssessments = snapshot?.assessments ?? [];
-  const layer3 = fileService.getStage1LayerState(courseCode, LAYER3_ID);
+  const layer3 = await fileService.getStage1LayerState(courseCode, LAYER3_ID);
   const suggestions = layer3?.outputJson
     ? parseLayer3Suggestions(layer3.outputJson, originalAssessments)
     : [];
-  const savedMap = loadSavedItems(courseCode);
+  const savedMap = await loadSavedItems(courseCode);
 
   const redesigns = suggestions.map((s) => suggestionToItem(s, savedMap.get(s.assessment_id)));
 
@@ -309,10 +309,10 @@ export function computeSummary(items: AssessmentRedesignItem[]): AssessmentRedes
   };
 }
 
-export function saveAssessmentRedesigns(
+export async function saveAssessmentRedesigns(
   courseCode: string,
   items: AssessmentRedesignItem[]
-): { redesigns: AssessmentRedesignItem[]; summary: AssessmentRedesignReviewSummary } {
+): Promise<{ redesigns: AssessmentRedesignItem[]; summary: AssessmentRedesignReviewSummary }> {
   const normalized = items.map((item) => ({
     ...item,
     final_assessment_for_maestro:
@@ -323,14 +323,14 @@ export function saveAssessmentRedesigns(
     items: normalized,
     updated_at: new Date().toISOString(),
   };
-  fileService.saveAssessmentRedesignsFile(courseCode, file);
+  await fileService.saveAssessmentRedesignsFile(courseCode, file);
 
   return { redesigns: normalized, summary: computeSummary(normalized) };
 }
 
-export function seedRedesignsFromSuggestions(courseCode: string): AssessmentRedesignItem[] {
-  const { redesigns } = getAssessmentRedesignContext(courseCode);
-  saveAssessmentRedesigns(courseCode, redesigns);
+export async function seedRedesignsFromSuggestions(courseCode: string): Promise<AssessmentRedesignItem[]> {
+  const { redesigns } = await getAssessmentRedesignContext(courseCode);
+  await saveAssessmentRedesigns(courseCode, redesigns);
   return redesigns;
 }
 
@@ -348,15 +348,15 @@ export function assertLayer3ReadyForApproval(items: AssessmentRedesignItem[]): v
   }
 }
 
-export function applyApprovedRedesignsToContract(courseCode: string): void {
-  const file = fileService.getAssessmentRedesignsFile(courseCode);
+export async function applyApprovedRedesignsToContract(courseCode: string): Promise<void> {
+  const file = await fileService.getAssessmentRedesignsFile(courseCode);
   if (!file?.items.length) {
     throw new Error('No assessment redesigns saved. Review and save before approving.');
   }
 
   assertLayer3ReadyForApproval(file.items);
 
-  const contract = fileService.getCourseContract(courseCode);
+  const contract = await fileService.getCourseContract(courseCode);
   if (!contract) throw new Error('Course contract not found');
 
   const summary = file.items
@@ -371,7 +371,7 @@ export function applyApprovedRedesignsToContract(courseCode: string): void {
     })
     .join('; ');
 
-  fileService.saveCourseContract(courseCode, {
+  await fileService.saveCourseContract(courseCode, {
     ...contract,
     assessment_strategy: summary,
   });

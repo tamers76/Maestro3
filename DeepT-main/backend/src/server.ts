@@ -14,7 +14,24 @@ if (existsSync(envPath)) {
 
 import express from 'express';
 import cors from 'cors';
-import { initNeo4j, closeNeo4j, getNeo4jStatus } from './services/neo4j.service.js';
+import {
+  initNeo4j,
+  closeNeo4j,
+  getNeo4jStatus,
+  startProjectionWorker,
+  stopProjectionWorker,
+} from './services/neo4j.service.js';
+import {
+  initPostgres,
+  closePostgres,
+  getPostgresStatus,
+  getPool,
+} from './db/client.js';
+import { ensureSchema } from './db/bootstrap.js';
+import { getPostgresConfig, hydrateSettings } from './config.js';
+import { hydrateRegistry } from './node-engine/promptTemplateRegistry.service.js';
+import { hydrateModalityConfig } from './node-engine/modalityGenerationConfig.service.js';
+import { hydrateNodeGenerationPrompt } from './node-engine/nodeGenerationPrompt.service.js';
 import coursesRouter from './routes/courses.js';
 import settingsRouter from './routes/settings.js';
 import referencesRouter from './routes/references.js';
@@ -37,10 +54,12 @@ app.use('/api/node-engine', nodeEngineRouter);
 // Health check
 app.get('/api/health', (_req, res) => {
   const neo4j = getNeo4jStatus();
-  res.json({ 
-    status: 'ok', 
+  const postgres = getPostgresStatus();
+  res.json({
+    status: postgres.connected ? 'ok' : 'degraded',
     timestamp: new Date().toISOString(),
-    neo4j
+    postgres,
+    neo4j,
   });
 });
 
@@ -53,49 +72,75 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 });
 
 // Graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM received. Closing connections...');
+async function shutdown(signal: string): Promise<void> {
+  console.log(`${signal} received. Closing connections...`);
+  stopProjectionWorker();
   await closeNeo4j();
+  await closePostgres();
   process.exit(0);
-});
+}
 
-process.on('SIGINT', async () => {
-  console.log('SIGINT received. Closing connections...');
-  await closeNeo4j();
-  process.exit(0);
-});
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));
 
 // Start server
 async function start() {
+  // Postgres is the primary source of truth and is REQUIRED — fail fast if it is
+  // unreachable or the schema cannot be ensured.
   try {
-    // Initialize Neo4j connection (do not block startup)
-    let neo4jConnected = false;
-    let neo4jError: string | null = null;
-    try {
-      await initNeo4j();
-      neo4jConnected = true;
-    } catch (e) {
-      neo4jConnected = false;
-      neo4jError = e instanceof Error ? e.message : String(e);
-      console.error('[Startup] Neo4j connection failed. Server will start without Neo4j.', neo4jError);
-    }
-    
-    app.listen(PORT, () => {
-      console.log(`
+    await initPostgres();
+    const pool = getPool();
+    if (!pool) throw new Error('Postgres pool was not initialized');
+    const { schema } = getPostgresConfig();
+    await pool.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
+    await ensureSchema(pool);
+    console.log('[Startup] Postgres connected and schema ensured.');
+  } catch (error) {
+    console.error(
+      '[Startup] FATAL: Postgres is required but could not be initialized.',
+      error instanceof Error ? error.message : String(error)
+    );
+    process.exit(1);
+  }
+
+  // Hydrate synchronous config caches from Postgres (settings + node-engine config).
+  try {
+    await Promise.all([
+      hydrateSettings(),
+      hydrateRegistry(),
+      hydrateModalityConfig(),
+      hydrateNodeGenerationPrompt(),
+    ]);
+    console.log('[Startup] Configuration caches hydrated.');
+  } catch (e) {
+    console.error('[Startup] Config hydration encountered an error:', e);
+  }
+
+  // Neo4j is an OPTIONAL graph projection — never block startup on it.
+  let neo4jConnected = false;
+  let neo4jError: string | null = null;
+  try {
+    await initNeo4j();
+    neo4jConnected = true;
+    startProjectionWorker();
+  } catch (e) {
+    neo4jError = e instanceof Error ? e.message : String(e);
+    console.error('[Startup] Neo4j connection failed. Server will start without graph projection.', neo4jError);
+  }
+
+  app.listen(PORT, () => {
+    console.log(`
 ╔════════════════════════════════════════════════════════╗
 ║     Adaptive Curriculum Intelligence System            ║
 ║     Backend Server                                     ║
 ╠════════════════════════════════════════════════════════╣
 ║     🚀 Server running on http://localhost:${PORT}         ║
-║     📊 Neo4j: ${neo4jConnected ? 'connected' : 'NOT connected'}${neo4jError ? ' (check /api/health)' : '                '}║
+║     🐘 Postgres: connected (primary)                   ║
+║     📊 Neo4j: ${neo4jConnected ? 'connected (projection)' : 'NOT connected        '}${neo4jError ? ' (see /api/health)' : '          '}║
 ║     📚 API ready                                       ║
 ╚════════════════════════════════════════════════════════╝
       `);
-    });
-  } catch (error) {
-    console.error('Failed to start server:', error);
-    process.exit(1);
-  }
+  });
 }
 
 start();

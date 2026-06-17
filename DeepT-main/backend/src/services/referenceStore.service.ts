@@ -1,20 +1,20 @@
 /**
- * Reference Vector Store
+ * Reference Vector Store — Postgres/pgvector is THE backend.
  *
- * One interface, two backends:
- *  - Neo4jVectorStore: uses the native vector index (db.index.vector.queryNodes)
- *  - JsonCosineStore:   in-process cosine over chunks persisted in JSON
+ * `PostgresVectorStore` persists/queries chunk embeddings in the `reference_chunks`
+ * table (vector(1536) + HNSW). Retrieval runs a single scoped pgvector query with
+ * iterative-scan enabled (see referenceRepo.searchByVector). BM25 fusion stays in
+ * app code (referenceRetrieval.fuseHybrid).
  *
- * indexChunks() probes Neo4j vector-index support at the embedding's dimensions
- * and auto-falls back to JSON when unavailable. Embeddings are always persisted
- * to JSON by the ingestion layer, so switching backends never requires re-embedding.
+ * The Neo4j vector backend has been retired. `JsonCosineStore` remains only as a
+ * dependency-light fallback/test shim doing in-process cosine over the SAME
+ * Postgres rows (so switching backends never requires re-embedding).
  */
 
-import type { ReferenceChunk, RetrievedChunk } from '../models/schemas.js';
-import * as fileService from './file.service.js';
-import * as neo4j from './neo4j.service.js';
+import type { ReferenceChunk } from '../models/schemas.js';
+import * as referenceRepo from '../db/repos/referenceRepo.js';
 
-export type VectorBackend = 'neo4j' | 'json';
+export type VectorBackend = 'postgres' | 'neo4j' | 'json';
 
 export interface RetrieveScope {
   cloId?: string;
@@ -35,7 +35,36 @@ export interface ReferenceVectorStore {
 }
 
 // ---------------------------------------------------------------------------
-// Cosine helpers (used by the JSON backend + as the Neo4j fallback path)
+// Postgres / pgvector backend (default)
+// ---------------------------------------------------------------------------
+
+class PostgresVectorStore implements ReferenceVectorStore {
+  backend: VectorBackend = 'postgres';
+
+  async indexChunks(chunks: ReferenceChunk[]): Promise<VectorBackend> {
+    if (chunks.length > 0) {
+      await referenceRepo.upsertChunks(chunks);
+      await referenceRepo.ensureVectorIndex();
+    }
+    return 'postgres';
+  }
+
+  async query(
+    courseCode: string,
+    queryVector: number[],
+    topN: number,
+    scope?: RetrieveScope
+  ): Promise<{ chunk_id: string; score: number }[]> {
+    return referenceRepo.searchByVector(courseCode, queryVector, topN, scope);
+  }
+
+  async deleteDoc(courseCode: string, docId: string): Promise<void> {
+    await referenceRepo.deleteChunksByDoc(courseCode, docId);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// JSON cosine fallback (test/parity shim) — reads the SAME Postgres rows
 // ---------------------------------------------------------------------------
 
 function cosineSimilarity(a: number[], b: number[]): number {
@@ -59,16 +88,11 @@ function matchesScope(chunk: ReferenceChunk, scope?: RetrieveScope): boolean {
   return true;
 }
 
-// ---------------------------------------------------------------------------
-// JSON cosine backend
-// ---------------------------------------------------------------------------
-
 class JsonCosineStore implements ReferenceVectorStore {
   backend: VectorBackend = 'json';
 
   async indexChunks(_chunks: ReferenceChunk[]): Promise<VectorBackend> {
-    // Chunks (incl. embeddings) are persisted to JSON by the ingestion layer;
-    // nothing else to do for this backend.
+    // Embeddings already persisted to Postgres by the ingestion layer.
     return 'json';
   }
 
@@ -78,7 +102,7 @@ class JsonCosineStore implements ReferenceVectorStore {
     topN: number,
     scope?: RetrieveScope
   ): Promise<{ chunk_id: string; score: number }[]> {
-    const chunks = fileService.getAllReferenceChunks(courseCode);
+    const chunks = await referenceRepo.getAllChunks(courseCode);
     return chunks
       .filter((c) => matchesScope(c, scope))
       .map((c) => ({ chunk_id: c.chunk_id, score: cosineSimilarity(queryVector, c.embedding) }))
@@ -86,53 +110,20 @@ class JsonCosineStore implements ReferenceVectorStore {
       .slice(0, topN);
   }
 
-  async deleteDoc(_courseCode: string, _docId: string): Promise<void> {
-    // JSON chunk files are removed by the ingestion layer (file.service).
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Neo4j vector-index backend
-// ---------------------------------------------------------------------------
-
-class Neo4jVectorStore implements ReferenceVectorStore {
-  backend: VectorBackend = 'neo4j';
-
-  async indexChunks(chunks: ReferenceChunk[]): Promise<VectorBackend> {
-    await neo4j.upsertReferenceChunks(chunks);
-    return 'neo4j';
-  }
-
-  async query(
-    courseCode: string,
-    queryVector: number[],
-    topN: number,
-    scope?: RetrieveScope
-  ): Promise<{ chunk_id: string; score: number }[]> {
-    return neo4j.queryReferenceChunks(courseCode, queryVector, topN, scope);
-  }
-
   async deleteDoc(courseCode: string, docId: string): Promise<void> {
-    await neo4j.deleteReferenceChunksByDoc(courseCode, docId);
+    await referenceRepo.deleteChunksByDoc(courseCode, docId);
   }
 }
 
+const postgresStore = new PostgresVectorStore();
 const jsonStore = new JsonCosineStore();
-const neo4jStore = new Neo4jVectorStore();
 
-/**
- * Choose the store for INDEXING. Prefers Neo4j when connected and a vector index
- * is usable at the given embedding dimensions; otherwise falls back to JSON.
- */
-export async function resolveStoreForIndexing(dimensions: number): Promise<ReferenceVectorStore> {
-  if (neo4j.isNeo4jConnected()) {
-    const ok = await neo4j.ensureReferenceVectorIndex(dimensions);
-    if (ok) return neo4jStore;
-  }
-  return jsonStore;
+/** The store used for INDEXING. Postgres/pgvector is the only real backend now. */
+export async function resolveStoreForIndexing(_dimensions: number): Promise<ReferenceVectorStore> {
+  return postgresStore;
 }
 
-/** Get the store matching the backend recorded in a course's manifest. */
+/** Get the store matching a manifest backend. Legacy 'neo4j' maps to Postgres. */
 export function getStoreForBackend(backend: VectorBackend): ReferenceVectorStore {
-  return backend === 'neo4j' ? neo4jStore : jsonStore;
+  return backend === 'json' ? jsonStore : postgresStore;
 }

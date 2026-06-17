@@ -40,12 +40,19 @@ function buildSeedFile(): NodeGenerationPromptFile {
  */
 function getFile(): NodeGenerationPromptFile {
   if (cached) return cached;
-  const existing = readNodeGenerationPromptFile();
+  return buildSeedFile();
+}
+
+/** Hydrate the cache from Postgres at startup (no write on read; seed is in-code). */
+export async function hydrateNodeGenerationPrompt(): Promise<NodeGenerationPromptFile> {
+  const existing = await readNodeGenerationPromptFile();
   if (existing && Array.isArray(existing.versions) && existing.versions.length > 0) {
     cached = existing;
     return existing;
   }
-  return buildSeedFile();
+  const seeded = buildSeedFile();
+  cached = seeded;
+  return seeded;
 }
 
 export function clearNodeGenerationPromptCache(): void {
@@ -67,7 +74,7 @@ export interface UpdateNodeGenerationPromptInput {
 }
 
 /** Edit by appending a NEW immutable version and moving the active pointer (D3). */
-export function updateNodeGenerationPrompt(input: UpdateNodeGenerationPromptInput): NodeGenerationPromptSeed {
+export async function updateNodeGenerationPrompt(input: UpdateNodeGenerationPromptInput): Promise<NodeGenerationPromptSeed> {
   const file = getFile();
   const current = file.versions.find((v) => v.version === file.active_version) ?? defaultNodeGenerationPrompt;
   const nextVersion = Math.max(...file.versions.map((v) => v.version)) + 1;
@@ -84,7 +91,7 @@ export function updateNodeGenerationPrompt(input: UpdateNodeGenerationPromptInpu
   file.versions.push(newVersion);
   file.active_version = nextVersion;
   file.updated_at = new Date().toISOString();
-  writeNodeGenerationPromptFile(file);
+  await writeNodeGenerationPromptFile(file);
   cached = file;
   return newVersion;
 }

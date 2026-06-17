@@ -93,7 +93,7 @@ router.get('/prompt-templates/:id', (req: Request, res: Response) => {
 });
 
 // PUT /api/node-engine/prompt-templates/:id — edit appends a new version
-router.put('/prompt-templates/:id', (req: Request, res: Response) => {
+router.put('/prompt-templates/:id', async (req: Request, res: Response) => {
   try {
     const { task_prompt, output_schema_ref, member_system_prompt, chairman_system_prompt, status, last_updated_by, change_note } =
       req.body as Record<string, unknown>;
@@ -105,7 +105,7 @@ router.put('/prompt-templates/:id', (req: Request, res: Response) => {
       return res.status(400).json({ error: 'change_note is required' });
     }
 
-    const updated = updateTemplate(req.params.id, {
+    const updated = await updateTemplate(req.params.id, {
       task_prompt: typeof task_prompt === 'string' ? task_prompt : undefined,
       output_schema_ref,
       member_system_prompt: typeof member_system_prompt === 'string' ? member_system_prompt : undefined,
@@ -176,7 +176,7 @@ router.get('/modality-config/:vehicle', (req: Request, res: Response) => {
 });
 
 // PUT /api/node-engine/modality-config/:vehicle — update model/generation settings only
-router.put('/modality-config/:vehicle', (req: Request, res: Response) => {
+router.put('/modality-config/:vehicle', async (req: Request, res: Response) => {
   try {
     const vehicle: Vehicle = assertEnum(VEHICLES, req.params.vehicle, 'vehicle');
     const body = req.body as Record<string, unknown>;
@@ -239,7 +239,7 @@ router.put('/modality-config/:vehicle', (req: Request, res: Response) => {
       update.enabled = body.enabled;
     }
 
-    const updated = updateConfigForVehicle(vehicle, update);
+    const updated = await updateConfigForVehicle(vehicle, update);
     res.json({
       message: 'Modality config updated (no prompt-template version created)',
       config: hydrateTaskPrompt(updated),
@@ -270,7 +270,7 @@ router.get('/node-generation-prompt', (_req: Request, res: Response) => {
 });
 
 // PUT /api/node-engine/node-generation-prompt — edit appends a new version (D3)
-router.put('/node-generation-prompt', (req: Request, res: Response) => {
+router.put('/node-generation-prompt', async (req: Request, res: Response) => {
   try {
     const { system_prompt, task_prompt, output_schema_ref, last_updated_by, change_note } =
       req.body as Record<string, unknown>;
@@ -280,7 +280,7 @@ router.put('/node-generation-prompt', (req: Request, res: Response) => {
     if (typeof change_note !== 'string' || !change_note.trim()) {
       return res.status(400).json({ error: 'change_note is required' });
     }
-    const updated = updateNodeGenerationPrompt({
+    const updated = await updateNodeGenerationPrompt({
       system_prompt: typeof system_prompt === 'string' ? system_prompt : undefined,
       task_prompt: typeof task_prompt === 'string' ? task_prompt : undefined,
       output_schema_ref: typeof output_schema_ref === 'string' ? output_schema_ref : undefined,
@@ -318,10 +318,10 @@ router.post(
 );
 
 // GET /api/node-engine/courses/:courseCode/subtopics/:subtopicId/node-set — read
-router.get('/courses/:courseCode/subtopics/:subtopicId/node-set', (req: Request, res: Response) => {
+router.get('/courses/:courseCode/subtopics/:subtopicId/node-set', async (req: Request, res: Response) => {
   try {
     const { courseCode, subtopicId } = req.params;
-    const nodeSet = getNodeSet(courseCode, subtopicId);
+    const nodeSet = await getNodeSet(courseCode, subtopicId);
     if (!nodeSet) {
       return res.status(404).json({ error: `No node-set for ${courseCode}/${subtopicId}` });
     }
@@ -335,7 +335,7 @@ router.get('/courses/:courseCode/subtopics/:subtopicId/node-set', (req: Request,
 // POST /api/node-engine/courses/:courseCode/subtopics/:subtopicId/node-set/approve
 router.post(
   '/courses/:courseCode/subtopics/:subtopicId/node-set/approve',
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     try {
       const { courseCode, subtopicId } = req.params;
       const body = (req.body ?? {}) as Record<string, unknown>;
@@ -347,7 +347,7 @@ router.post(
         ? (body.nodeIds.filter((x) => typeof x === 'string') as string[])
         : undefined;
       const overrideReason = typeof body.overrideReason === 'string' ? body.overrideReason : undefined;
-      const nodeSet = approveNodeSet(courseCode, subtopicId, { approver, nodeIds, overrideReason });
+      const nodeSet = await approveNodeSet(courseCode, subtopicId, { approver, nodeIds, overrideReason });
       res.json({ message: 'Node-set approval updated', node_set: nodeSet });
     } catch (error) {
       if (error instanceof AcademicApprovalRequiredError) {

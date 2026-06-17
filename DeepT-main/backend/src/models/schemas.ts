@@ -1006,7 +1006,7 @@ export interface ReferenceManifest {
   course_code: string;
   documents: ReferenceDocument[];
   /** Which vector store actually indexed this course's chunks */
-  vector_backend: 'neo4j' | 'json';
+  vector_backend: 'postgres' | 'neo4j' | 'json';
   updated_at: string;
 }
 
@@ -1128,6 +1128,19 @@ export interface CouncilConfig {
   chairmanSystemPrompt: string;
 }
 
+// Postgres connection settings (primary DB). `connectionString` (DATABASE_URL)
+// takes precedence; discrete fields are a fallback for assembling a URL.
+export interface PostgresSettings {
+  connectionString: string;
+  host?: string;
+  port?: number;
+  user?: string;
+  password?: string;
+  database?: string;
+  /** Max pool size. */
+  poolMax?: number;
+}
+
 // Settings Configuration
 export interface Settings {
   aiProvider: AIProvider;
@@ -1161,6 +1174,9 @@ export interface Settings {
     user: string;
     password: string;
   };
+  // Postgres (primary source-of-truth DB + pgvector). Connection string is the
+  // authoritative source; never persisted to disk (env-overlaid).
+  postgres: PostgresSettings;
   // NEW: Per-stage model configuration (single or council per stage)
   stageConfigs: StageConfigs;
   // NEW: Global council settings (temperature, prompts)

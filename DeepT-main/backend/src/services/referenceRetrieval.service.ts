@@ -9,7 +9,7 @@
  */
 
 import type { GroundedContext, ReferenceChunk, RetrievedChunk } from '../models/schemas.js';
-import * as fileService from './file.service.js';
+import * as referenceRepo from '../db/repos/referenceRepo.js';
 import { embedQuery } from './embedding.service.js';
 import { getStoreForBackend, type RetrieveScope } from './referenceStore.service.js';
 import { keywordSearch, type KeywordSearchResult } from './keywordSearch.service.js';
@@ -146,24 +146,21 @@ export async function hybridRetrieve(
 ): Promise<RetrievedChunk[]> {
   const { scope, topN = DEFAULT_TOP_N, minScore } = options;
 
-  const manifest = fileService.getReferenceManifest(courseCode);
-  if (!manifest || manifest.documents.length === 0) return [];
+  const docCount = (await referenceRepo.listDocuments(courseCode)).length;
+  if (docCount === 0) return [];
   if (!query.trim()) return [];
 
   const queryVector = await embedQuery(query);
   if (queryVector.length === 0) return [];
 
   const poolSize = Math.max(topN * CANDIDATE_POOL_MULTIPLIER, MIN_CANDIDATE_POOL);
-  const store = getStoreForBackend(manifest.vector_backend);
+  const store = getStoreForBackend('postgres');
   const semanticHits = await store.query(courseCode, queryVector, poolSize, scope);
 
   // Resolve candidates to full chunks (scope already applied by store.query).
+  const candidateChunks = await referenceRepo.getChunksByIds(semanticHits.map((h) => h.chunk_id));
   const byId = new Map<string, ReferenceChunk>();
-  for (const c of fileService.getAllReferenceChunks(courseCode)) byId.set(c.chunk_id, c);
-
-  const candidateChunks = semanticHits
-    .map((h) => byId.get(h.chunk_id))
-    .filter((c): c is ReferenceChunk => Boolean(c));
+  for (const c of candidateChunks) byId.set(c.chunk_id, c);
 
   // BM25 over the SAME scope-filtered candidate set.
   const keyword = keywordSearch(

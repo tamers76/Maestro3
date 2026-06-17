@@ -21,7 +21,7 @@
  * Layers 1-6 logic is untouched.
  */
 import type { ReferenceChunk } from '../models/schemas.js';
-import * as fileService from './file.service.js';
+import * as referenceRepo from '../db/repos/referenceRepo.js';
 import { embedTexts } from './embedding.service.js';
 import { resolveStoreForIndexing } from './referenceStore.service.js';
 import { buildV1ContractBundle } from '../node-engine/stage1Adapter.service.js';
@@ -133,13 +133,12 @@ function subtopicQueryText(s: {
 }
 
 /** Resolve the live dependency/status for Layer 7 without generating anything. */
-export function getAlignmentState(courseCode: string): AlignmentStateSummary {
-  const bundle = buildV1ContractBundle(courseCode);
+export async function getAlignmentState(courseCode: string): Promise<AlignmentStateSummary> {
+  const bundle = await buildV1ContractBundle(courseCode);
   const approvedSubtopics = bundle.subtopics.filter((s) => s.status === 'approved');
-  const manifest = fileService.getReferenceManifest(courseCode);
-  const referenceDocCount = manifest?.documents.length ?? 0;
-  const chunkCount = fileService.getAllReferenceChunks(courseCode).length;
-  const existing = getCourseArtifact<ReferenceAlignmentArtifact>(courseCode, ARTIFACT_FILE);
+  const referenceDocCount = (await referenceRepo.listDocuments(courseCode)).length;
+  const chunkCount = await referenceRepo.countChunks(courseCode);
+  const existing = await getCourseArtifact<ReferenceAlignmentArtifact>(courseCode, ARTIFACT_FILE);
 
   let status: AlignmentStatus;
   let lock_reason: string | undefined;
@@ -197,7 +196,7 @@ export async function proposeAlignment(
   const threshold = options.threshold ?? DEFAULT_ALIGNMENT_THRESHOLD;
   const maxCandidates = options.maxCandidates ?? 3;
 
-  const state = getAlignmentState(courseCode);
+  const state = await getAlignmentState(courseCode);
   if (state.status === 'locked' || state.status === 'no_references') {
     const artifact: ReferenceAlignmentArtifact = {
       course_code: courseCode,
@@ -212,14 +211,14 @@ export async function proposeAlignment(
       mappings: [],
       lock_reason: state.lock_reason,
     };
-    saveCourseArtifact(courseCode, ARTIFACT_FILE, artifact);
+    await saveCourseArtifact(courseCode, ARTIFACT_FILE, artifact);
     return artifact;
   }
 
-  const bundle = buildV1ContractBundle(courseCode);
+  const bundle = await buildV1ContractBundle(courseCode);
   const subtopics = bundle.subtopics.filter((s) => s.status === 'approved');
   const clos = bundle.clos;
-  const chunks = fileService.getAllReferenceChunks(courseCode);
+  const chunks = await referenceRepo.getAllChunks(courseCode);
 
   // Embed CLO + subtopic query text (the only new embedding work — chunks already
   // carry persisted embeddings).
@@ -276,7 +275,7 @@ export async function proposeAlignment(
     generated_at: new Date().toISOString(),
     mappings,
   };
-  saveCourseArtifact(courseCode, ARTIFACT_FILE, artifact);
+  await saveCourseArtifact(courseCode, ARTIFACT_FILE, artifact);
   return artifact;
 }
 
@@ -285,7 +284,7 @@ function round(n: number): number {
 }
 
 /** Read the current alignment proposal artifact (null when none generated). */
-export function getAlignmentProposal(courseCode: string): ReferenceAlignmentArtifact | null {
+export async function getAlignmentProposal(courseCode: string): Promise<ReferenceAlignmentArtifact | null> {
   return getCourseArtifact<ReferenceAlignmentArtifact>(courseCode, ARTIFACT_FILE);
 }
 
@@ -305,11 +304,11 @@ export interface AlignmentMappingEdit {
  * Apply SME edits to the proposal (promote / demote-to-course-level / reassign).
  * Does NOT touch the chunks — only the reviewable artifact. Approval is separate.
  */
-export function updateAlignmentMapping(
+export async function updateAlignmentMapping(
   courseCode: string,
   edits: AlignmentMappingEdit[]
-): ReferenceAlignmentArtifact {
-  const artifact = getAlignmentProposal(courseCode);
+): Promise<ReferenceAlignmentArtifact> {
+  const artifact = await getAlignmentProposal(courseCode);
   if (!artifact) {
     throw new Error(`No alignment proposal for course "${courseCode}". Run propose first.`);
   }
@@ -319,7 +318,7 @@ export function updateAlignmentMapping(
   const needsInheritance = edits.some((e) => !e.clo_ids);
   const subtopicCloIndex = new Map<string, string[]>();
   if (needsInheritance) {
-    for (const s of buildV1ContractBundle(courseCode).subtopics) subtopicCloIndex.set(s.subtopic_id, s.clo_ids);
+    for (const s of (await buildV1ContractBundle(courseCode)).subtopics) subtopicCloIndex.set(s.subtopic_id, s.clo_ids);
   }
 
   for (const edit of edits) {
@@ -343,7 +342,7 @@ export function updateAlignmentMapping(
     (m) => m.decided_subtopic_ids.length > 0 || m.decided_clo_ids.length > 0
   ).length;
   artifact.status = 'proposed';
-  saveCourseArtifact(courseCode, ARTIFACT_FILE, artifact);
+  await saveCourseArtifact(courseCode, ARTIFACT_FILE, artifact);
   return artifact;
 }
 
@@ -364,7 +363,7 @@ export async function approveAlignment(
   courseCode: string,
   input: ApproveAlignmentInput
 ): Promise<ReferenceAlignmentArtifact> {
-  const artifact = getAlignmentProposal(courseCode);
+  const artifact = await getAlignmentProposal(courseCode);
   if (!artifact) {
     throw new Error(`No alignment proposal for course "${courseCode}". Run propose first.`);
   }
@@ -374,14 +373,14 @@ export async function approveAlignment(
 
   const decisionByChunk = new Map(artifact.mappings.map((m) => [m.chunk_id, m]));
 
-  const manifest = fileService.getReferenceManifest(courseCode);
-  const docIds = manifest ? manifest.documents.map((d) => d.doc_id) : [];
+  const documents = await referenceRepo.listDocuments(courseCode);
 
   const updatedAcrossDocs: ReferenceChunk[] = [];
   let dimensions = artifact.embedding_dimensions;
 
-  for (const docId of docIds) {
-    const chunks = fileService.getReferenceChunks(courseCode, docId);
+  for (const doc of documents) {
+    const docId = doc.doc_id;
+    const chunks = await referenceRepo.getChunksByDoc(docId);
     if (chunks.length === 0) continue;
 
     const docCloIds = new Set<string>();
@@ -397,27 +396,18 @@ export async function approveAlignment(
       if (chunk.embedding.length > 0) dimensions = chunk.embedding.length;
     }
 
-    fileService.saveReferenceChunks(courseCode, docId, chunks);
+    await referenceRepo.upsertChunks(chunks);
     updatedAcrossDocs.push(...chunks);
 
-    // Roll the doc-level scope summary up into the manifest.
-    if (manifest) {
-      const doc = manifest.documents.find((d) => d.doc_id === docId);
-      if (doc) {
-        doc.scope = { clo_ids: [...docCloIds], subtopic_ids: [...docSubtopicIds] };
-      }
-    }
+    // Roll the doc-level scope summary up into the document metadata.
+    doc.scope = { clo_ids: [...docCloIds], subtopic_ids: [...docSubtopicIds] };
+    await referenceRepo.saveDocument(doc);
   }
 
-  // Re-index. JSON backend reads chunks live (no-op); Neo4j upserts the new tags.
+  // Re-index the updated tags into pgvector (ensures the HNSW index too).
   if (updatedAcrossDocs.length > 0 && dimensions > 0) {
     const store = await resolveStoreForIndexing(dimensions);
     await store.indexChunks(updatedAcrossDocs);
-  }
-
-  if (manifest) {
-    manifest.updated_at = new Date().toISOString();
-    fileService.saveReferenceManifest(courseCode, manifest);
   }
 
   artifact.status = 'approved';
@@ -426,6 +416,6 @@ export async function approveAlignment(
   artifact.tagged_chunk_count = artifact.mappings.filter(
     (m) => m.decided_subtopic_ids.length > 0 || m.decided_clo_ids.length > 0
   ).length;
-  saveCourseArtifact(courseCode, ARTIFACT_FILE, artifact);
+  await saveCourseArtifact(courseCode, ARTIFACT_FILE, artifact);
   return artifact;
 }

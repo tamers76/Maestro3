@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { callAI, parseAIJson, getCouncilInfo, resolveStage1IntakeConfig, type CouncilProgressCallback } from './ai.service.js';
 import { assertAIConfigured } from './council.service.js';
-import * as neo4j from './neo4j.service.js';
+import * as neo4j from './curriculumStore.service.js';
 import * as fileService from './file.service.js';
 import { buildStage1Prompt, buildCLOAnalysisPrompt } from '../utils/prompts.js';
 import { startStageProgress, updateProgress, completeStageProgress, errorStageProgress, type CouncilInfo } from './progress.service.js';
@@ -251,11 +251,11 @@ export async function runStage1(
     });
     
     fileService.initCourseDirectories(courseCode);
-    fileService.saveExtractedSnapshot(courseCode, snapshot);
-    fileService.saveCourseContract(courseCode, contract);
+    await fileService.saveExtractedSnapshot(courseCode, snapshot);
+    await fileService.saveCourseContract(courseCode, contract);
     
     // Clear any existing confirmations when Stage 1 is re-run
-    fileService.clearConfirmations(courseCode);
+    await fileService.clearConfirmations(courseCode);
     
     // Step 7: Save to Neo4j
     // Check if course exists and delete if regenerating
@@ -383,8 +383,8 @@ export async function runStage1FromForm(
     
     // Save files
     fileService.initCourseDirectories(courseCode);
-    fileService.saveExtractedSnapshot(courseCode, snapshot);
-    fileService.saveCourseContract(courseCode, contract);
+    await fileService.saveExtractedSnapshot(courseCode, snapshot);
+    await fileService.saveCourseContract(courseCode, contract);
     
     // Save to Neo4j
     const exists = await neo4j.courseExists(courseCode);

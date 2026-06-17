@@ -112,8 +112,8 @@ function parseCloIdsFromAlignment(alignment: string[]): string[] {
 }
 
 /** Postgraduate is the only level the syllabus signals; default to it. */
-function deriveLevel(courseCode: string): string {
-  const snapshot = fileService.getExtractedSnapshot(courseCode);
+async function deriveLevel(courseCode: string): Promise<string> {
+  const snapshot = await fileService.getExtractedSnapshot(courseCode);
   const haystack = `${snapshot?.raw_text ?? ''} ${snapshot?.description ?? ''}`.toLowerCase();
   if (haystack.includes('postgraduate') || haystack.includes('graduate')) return 'postgraduate';
   if (haystack.includes('undergraduate')) return 'undergraduate';
@@ -129,10 +129,10 @@ function deriveLevel(courseCode: string): string {
  * `assessment_id` and `label`; weighting comes from the approved Layer 4 weight
  * table; clo_ids are parsed from the Layer 3 final refined alignment.
  */
-export function buildV1Assessments(courseCode: string): Assessment[] {
-  const { redesigns } = getAssessmentRedesignContext(courseCode);
-  const weighting = getWeightingRubricContext(courseCode);
-  const snapshot = fileService.getExtractedSnapshot(courseCode);
+export async function buildV1Assessments(courseCode: string): Promise<Assessment[]> {
+  const { redesigns } = await getAssessmentRedesignContext(courseCode);
+  const weighting = await getWeightingRubricContext(courseCode);
+  const snapshot = await fileService.getExtractedSnapshot(courseCode);
   const snapshotAssessments = snapshot?.assessments ?? [];
 
   const approvedWeightById = new Map<string, string>();
@@ -168,12 +168,12 @@ export function buildV1Assessments(courseCode: string): Assessment[] {
  * is a reverse index from the projected assessments; `rationale` joins the
  * refinement rationale lines.
  */
-export function buildV1CLOs(courseCode: string): CLO[] {
-  const { clos, refinements } = getCloRefinementContext(courseCode);
+export async function buildV1CLOs(courseCode: string): Promise<CLO[]> {
+  const { clos, refinements } = await getCloRefinementContext(courseCode);
   const refByClo = new Map(refinements.map((r) => [r.clo_id, r]));
 
   // Reverse-index assessment alignment so each CLO lists the assessments it feeds.
-  const assessments = buildV1Assessments(courseCode);
+  const assessments = await buildV1Assessments(courseCode);
   const assessmentsByClo = new Map<string, string[]>();
   for (const a of assessments) {
     for (const cloId of a.clo_ids) {
@@ -211,8 +211,8 @@ export function buildV1CLOs(courseCode: string): CLO[] {
  * `cognitive_level` is the parent CLO's Bloom level; the grounding context is
  * preserved verbatim (node families have their `_node` suffix stripped).
  */
-export function buildV1Subtopics(courseCode: string): Subtopic[] {
-  const archFile = fileService.getSubtopicArchitectureFile(courseCode);
+export async function buildV1Subtopics(courseCode: string): Promise<Subtopic[]> {
+  const archFile = await fileService.getSubtopicArchitectureFile(courseCode);
   if (!archFile?.clo_sections?.length) return [];
 
   const subtopics: Subtopic[] = [];
@@ -255,12 +255,12 @@ export function buildV1Subtopics(courseCode: string): Subtopic[] {
  * approved (CLO refinement, assessment redesign, weighting/rubric, and all
  * Layer 6 subtopics). This honours the no-auto-proceed gate.
  */
-function deriveContractStatus(courseCode: string): ContractStatus {
-  const cloApproved = getCloRefinementContext(courseCode).summary.all_approved;
-  const assessApproved = getAssessmentRedesignContext(courseCode).summary.all_approved;
-  const weightingApproved = getWeightingRubricContext(courseCode).summary.all_approved;
+async function deriveContractStatus(courseCode: string): Promise<ContractStatus> {
+  const cloApproved = (await getCloRefinementContext(courseCode)).summary.all_approved;
+  const assessApproved = (await getAssessmentRedesignContext(courseCode)).summary.all_approved;
+  const weightingApproved = (await getWeightingRubricContext(courseCode)).summary.all_approved;
 
-  const archFile = fileService.getSubtopicArchitectureFile(courseCode);
+  const archFile = await fileService.getSubtopicArchitectureFile(courseCode);
   const allSubtopics = (archFile?.clo_sections ?? []).flatMap((s) => s.subtopics ?? []);
   const subtopicsApproved =
     allSubtopics.length > 0 && allSubtopics.every((s) => s.approval_status === 'approved');
@@ -271,30 +271,31 @@ function deriveContractStatus(courseCode: string): ContractStatus {
 }
 
 /** V1 CourseAcademicContract — the root of the projected course. */
-export function buildV1Contract(courseCode: string): CourseAcademicContract {
-  const contract = fileService.getCourseContract(courseCode);
+export async function buildV1Contract(courseCode: string): Promise<CourseAcademicContract> {
+  const contract = await fileService.getCourseContract(courseCode);
   if (!contract) {
     throw new Error(`No approved course contract found for "${courseCode}"`);
   }
-  const snapshot = fileService.getExtractedSnapshot(courseCode);
-  const assessments = buildV1Assessments(courseCode);
+  const snapshot = await fileService.getExtractedSnapshot(courseCode);
+  const assessments = await buildV1Assessments(courseCode);
 
   return parseCourseAcademicContract({
     course_id: contract.course_code,
     title: snapshot?.title || contract.course_code,
-    level: deriveLevel(courseCode),
+    level: await deriveLevel(courseCode),
     clo_ids: contract.course_learning_outcomes.map((c) => c.clo_id),
     assessment_ids: assessments.map((a) => a.assessment_id),
-    status: deriveContractStatus(courseCode),
+    status: await deriveContractStatus(courseCode),
   });
 }
 
 /** Aggregate projection: the whole V1 contract bundle for a course code. */
-export function buildV1ContractBundle(courseCode: string): V1ContractBundle {
-  return {
-    contract: buildV1Contract(courseCode),
-    clos: buildV1CLOs(courseCode),
-    assessments: buildV1Assessments(courseCode),
-    subtopics: buildV1Subtopics(courseCode),
-  };
+export async function buildV1ContractBundle(courseCode: string): Promise<V1ContractBundle> {
+  const [contract, clos, assessments, subtopics] = await Promise.all([
+    buildV1Contract(courseCode),
+    buildV1CLOs(courseCode),
+    buildV1Assessments(courseCode),
+    buildV1Subtopics(courseCode),
+  ]);
+  return { contract, clos, assessments, subtopics };
 }

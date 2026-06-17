@@ -361,9 +361,9 @@ function parseAiIntegrity(outputJson: unknown): ParsedAiIntegrity {
 // Build authoritative final-assessment references from Layer 3 + Layer 4
 // ----------------------------------------------------------------------------
 
-function buildFinalRefs(courseCode: string): Map<string, IntegrityFinalAssessmentRef> {
+async function buildFinalRefs(courseCode: string): Promise<Map<string, IntegrityFinalAssessmentRef>> {
   const refs = new Map<string, IntegrityFinalAssessmentRef>();
-  const weighting = getWeightingRubricContext(courseCode);
+  const weighting = await getWeightingRubricContext(courseCode);
 
   for (const review of weighting.assessment_structure_reviews) {
     const final = review.final_assessment_from_layer_3;
@@ -429,13 +429,13 @@ export interface IntegrityReviewContext {
 }
 
 
-export function getIntegrityReviewContext(courseCode: string): IntegrityReviewContext {
-  const finalRefs = buildFinalRefs(courseCode);
+export async function getIntegrityReviewContext(courseCode: string): Promise<IntegrityReviewContext> {
+  const finalRefs = await buildFinalRefs(courseCode);
 
-  const layer5 = fileService.getStage1LayerState(courseCode, LAYER5_ID);
+  const layer5 = await fileService.getStage1LayerState(courseCode, LAYER5_ID);
   const ai = parseAiIntegrity(layer5?.outputJson);
 
-  const saved = fileService.getIntegrityReviewFile(courseCode);
+  const saved = await fileService.getIntegrityReviewFile(courseCode);
   const savedReviewById = new Map<string, AssessmentIntegrityReview>();
   for (const r of saved?.assessment_integrity_reviews ?? []) {
     if (r.assessment_id) savedReviewById.set(r.assessment_id, r);
@@ -521,17 +521,17 @@ export function computeIntegritySummary(
 // Save (whole SME working file)
 // ----------------------------------------------------------------------------
 
-export function saveIntegrityReview(
+export async function saveIntegrityReview(
   courseCode: string,
   payload: {
     course_level_integrity_summary: CourseLevelIntegritySummary;
     assessment_integrity_reviews: AssessmentIntegrityReview[];
   }
-): {
+): Promise<{
   course_level_integrity_summary: CourseLevelIntegritySummary;
   assessment_integrity_reviews: AssessmentIntegrityReview[];
   summary: IntegrityReviewReviewSummary;
-} {
+}> {
   const course = payload.course_level_integrity_summary;
   const reviews = payload.assessment_integrity_reviews ?? [];
 
@@ -540,7 +540,7 @@ export function saveIntegrityReview(
     assessment_integrity_reviews: reviews,
     updated_at: new Date().toISOString(),
   };
-  fileService.saveIntegrityReviewFile(courseCode, file);
+  await fileService.saveIntegrityReviewFile(courseCode, file);
 
   return {
     course_level_integrity_summary: course,
@@ -549,17 +549,17 @@ export function saveIntegrityReview(
   };
 }
 
-export function seedIntegrityFromOutput(courseCode: string): IntegrityReviewContext {
-  const ctx = getIntegrityReviewContext(courseCode);
-  saveIntegrityReview(courseCode, {
+export async function seedIntegrityFromOutput(courseCode: string): Promise<IntegrityReviewContext> {
+  const ctx = await getIntegrityReviewContext(courseCode);
+  await saveIntegrityReview(courseCode, {
     course_level_integrity_summary: ctx.course_level_integrity_summary,
     assessment_integrity_reviews: ctx.assessment_integrity_reviews,
   });
   return ctx;
 }
 
-export function assertLayer5ReadyForApproval(courseCode: string): void {
-  const { summary } = getIntegrityReviewContext(courseCode);
+export async function assertLayer5ReadyForApproval(courseCode: string): Promise<void> {
+  const { summary } = await getIntegrityReviewContext(courseCode);
   if (summary.total_assessments === 0) {
     throw new Error('No assessment integrity reviews to approve. Run Layer 5 first.');
   }
@@ -571,8 +571,8 @@ export function assertLayer5ReadyForApproval(courseCode: string): void {
 }
 
 /** Compact authoritative summary for downstream layers (order > 5). */
-export function buildApprovedIntegrityContext(courseCode: string): string {
-  const saved = fileService.getIntegrityReviewFile(courseCode);
+export async function buildApprovedIntegrityContext(courseCode: string): Promise<string> {
+  const saved = await fileService.getIntegrityReviewFile(courseCode);
   if (!saved) return '';
   const reviews = saved.assessment_integrity_reviews ?? [];
   if (!reviews.length) return '';

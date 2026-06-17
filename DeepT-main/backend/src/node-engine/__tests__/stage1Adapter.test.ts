@@ -8,10 +8,8 @@
  *    frozen A1), preserved grounding context, all-approved gating, and that
  *    the run is deterministic and writes NOTHING (artifacts untouched).
  */
-import test from 'node:test';
+import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { statSync, readdirSync } from 'fs';
-import { join } from 'path';
 
 import {
   parseCourseAcademicContract,
@@ -31,9 +29,24 @@ import {
   buildV1Subtopics,
   buildV1ContractBundle,
 } from '../stage1Adapter.service.js';
+import { dbTestsEnabled, setupTestDb, teardownTestDb } from '../../db/testSupport.js';
 
 const COURSE = 'MDLD602';
-const STAGE1_DIR = join(process.cwd(), '..', 'data', 'courses', COURSE, 'stage1');
+
+// The buildV1* adapter reads a fully-approved Stage 1 course from Postgres. That
+// seeded course is an integration fixture (no MDLD602 source data ships in the
+// repo), so these run only when a course has been pre-seeded (RUN_SEEDED_TESTS=1).
+const dbSkip =
+  dbTestsEnabled && process.env.RUN_SEEDED_TESTS === '1'
+    ? false
+    : 'requires RUN_DB_TESTS=1 + RUN_SEEDED_TESTS=1 (pre-seeded MDLD602)';
+
+before(async () => {
+  if (dbTestsEnabled) await setupTestDb();
+});
+after(async () => {
+  if (dbTestsEnabled) await teardownTestDb();
+});
 
 // ===========================================================================
 // 1. parse* validators — round-trip + enum rejection
@@ -146,8 +159,8 @@ test('parse* validators reject missing required fields', () => {
 // 2. Adapter against the real, all-approved MDLD602 artifacts
 // ===========================================================================
 
-test('buildV1Subtopics: 19 approved subtopics with preserved grounding + IDs', () => {
-  const subtopics = buildV1Subtopics(COURSE);
+test('buildV1Subtopics: 19 approved subtopics with preserved grounding + IDs', { skip: dbSkip }, async () => {
+  const subtopics = await buildV1Subtopics(COURSE);
   assert.equal(subtopics.length, 19, 'MDLD602 has 19 subtopics');
 
   // ID pass-through + order derivation.
@@ -182,8 +195,8 @@ test('buildV1Subtopics: 19 approved subtopics with preserved grounding + IDs', (
   );
 });
 
-test('buildV1CLOs: 5 CLOs with refined statements, rationale, reverse-indexed assessments', () => {
-  const clos = buildV1CLOs(COURSE);
+test('buildV1CLOs: 5 CLOs with refined statements, rationale, reverse-indexed assessments', { skip: dbSkip }, async () => {
+  const clos = await buildV1CLOs(COURSE);
   assert.equal(clos.length, 5);
 
   const clo1 = clos.find((c) => c.clo_id === 'CLO-1')!;
@@ -200,8 +213,8 @@ test('buildV1CLOs: 5 CLOs with refined statements, rationale, reverse-indexed as
   assert.ok(clo4.aligned_assessment_ids.includes('A4'));
 });
 
-test('buildV1Assessments: 4 assessments with frozen positional IDs + approved weights', () => {
-  const assessments = buildV1Assessments(COURSE);
+test('buildV1Assessments: 4 assessments with frozen positional IDs + approved weights', { skip: dbSkip }, async () => {
+  const assessments = await buildV1Assessments(COURSE);
   assert.equal(assessments.length, 4);
 
   const a1 = assessments[0];
@@ -219,8 +232,8 @@ test('buildV1Assessments: 4 assessments with frozen positional IDs + approved we
   assert.deepEqual(a4.clo_ids, ['CLO-5', 'CLO-4']);
 });
 
-test('buildV1Contract: root contract with flattened ids + approved gating', () => {
-  const contract = buildV1Contract(COURSE);
+test('buildV1Contract: root contract with flattened ids + approved gating', { skip: dbSkip }, async () => {
+  const contract = await buildV1Contract(COURSE);
   assert.equal(contract.course_id, COURSE);
   assert.ok(contract.title.length > 0);
   assert.equal(contract.level, 'postgraduate');
@@ -230,20 +243,8 @@ test('buildV1Contract: root contract with flattened ids + approved gating', () =
   assert.equal(contract.status, 'approved');
 });
 
-test('buildV1ContractBundle is deterministic and read-only (no artifact writes)', () => {
-  const fileMtimesBefore = readdirSync(STAGE1_DIR).map((f) => [
-    f,
-    statSync(join(STAGE1_DIR, f)).mtimeMs,
-  ]);
-
-  const a = buildV1ContractBundle(COURSE);
-  const b = buildV1ContractBundle(COURSE);
+test('buildV1ContractBundle is deterministic and read-only', { skip: dbSkip }, async () => {
+  const a = await buildV1ContractBundle(COURSE);
+  const b = await buildV1ContractBundle(COURSE);
   assert.deepEqual(a, b, 'projection is deterministic across repeated runs');
-
-  // No new files and no modified files in the Stage 1 directory.
-  const fileMtimesAfter = readdirSync(STAGE1_DIR).map((f) => [
-    f,
-    statSync(join(STAGE1_DIR, f)).mtimeMs,
-  ]);
-  assert.deepEqual(fileMtimesAfter, fileMtimesBefore, 'Stage 1 artifacts untouched');
 });

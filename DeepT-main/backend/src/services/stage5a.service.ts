@@ -11,7 +11,7 @@
  * No new assets are created. No AI calls are made.
  */
 
-import * as neo4j from './neo4j.service.js';
+import * as neo4j from './curriculumStore.service.js';
 import * as fileService from './file.service.js';
 import {
   startStageProgress,
@@ -100,7 +100,7 @@ async function assembleAdaptiveModel(
 
   // Load Stage 3 logic
   const stage3Map = new Map<string, Stage3NodeLogic>();
-  const snapshot = fileService.getStage3Snapshot(courseCode);
+  const snapshot = await fileService.getStage3Snapshot(courseCode);
   if (snapshot?.nodes) {
     for (const logic of snapshot.nodes) {
       stage3Map.set(logic.node_id, logic);
@@ -126,18 +126,18 @@ async function assembleAdaptiveModel(
   }
 
   // Summative assessment data
-  const summativePack = fileService.getStage4SummativeAssessments(courseCode);
+  const summativePack = await fileService.getStage4SummativeAssessments(courseCode);
   const summativeCoverage = summativePack?.clo_coverage_matrix || [];
 
   // Build node snapshots
-  const adaptiveNodes: AdaptiveNodeSnapshot[] = nodes.map(node => {
+  const adaptiveNodes: AdaptiveNodeSnapshot[] = await Promise.all(nodes.map(async node => {
     const s3 = stage3Map.get(node.node_id);
-    const contentPack = fileService.getStage4NodeContent(courseCode, node.node_id);
-    const hasDiag = fileService.getStage4DiagnosticAssessment(courseCode, node.node_id) !== null;
-    const hasLLM = fileService.getStage4LLMInteractiveSpec(courseCode, node.node_id) !== null;
-    const hasRem = fileService.getStage4RemediationPack(courseCode, node.node_id) !== null;
-    const hasPkg = fileService.getStage4InstructionalPackage(courseCode, node.node_id) !== null;
-    const hasPlan = fileService.getStage4ModalityPlan(courseCode, node.node_id) !== null;
+    const contentPack = await fileService.getStage4NodeContent(courseCode, node.node_id);
+    const hasDiag = (await fileService.getStage4DiagnosticAssessment(courseCode, node.node_id)) !== null;
+    const hasLLM = (await fileService.getStage4LLMInteractiveSpec(courseCode, node.node_id)) !== null;
+    const hasRem = (await fileService.getStage4RemediationPack(courseCode, node.node_id)) !== null;
+    const hasPkg = (await fileService.getStage4InstructionalPackage(courseCode, node.node_id)) !== null;
+    const hasPlan = (await fileService.getStage4ModalityPlan(courseCode, node.node_id)) !== null;
 
     return {
       node_id: node.node_id,
@@ -164,7 +164,7 @@ async function assembleAdaptiveModel(
       has_modality_plan: hasPlan,
       time_on_task_minutes: contentPack?.time_on_task_minutes || 0
     };
-  });
+  }));
 
   const totalWorkloadMinutes = adaptiveNodes.reduce((s, n) => s + n.time_on_task_minutes, 0);
   const HOURS_PER_CREDIT = 15;
@@ -431,10 +431,10 @@ function validateAdaptivePathIntegrity(
 // 2) Mastery Protection
 // ---------------------------------------------------------------------------
 
-function validateMasteryProtection(
+async function validateMasteryProtection(
   model: AdaptiveCourseModel,
   stage3Map: Map<string, Stage3NodeLogic>
-): Stage5ACheckResult[] {
+): Promise<Stage5ACheckResult[]> {
   const results: Stage5ACheckResult[] = [];
   const nodeMap = new Map(model.nodes.map(n => [n.node_id, n]));
 
@@ -531,7 +531,7 @@ function validateMasteryProtection(
 
       // Mastery threshold consistency check
       if (node.has_diagnostic_assessment && s3) {
-        const diagAssessment = fileService.getStage4DiagnosticAssessment(
+        const diagAssessment = await fileService.getStage4DiagnosticAssessment(
           model.course_code,
           node.node_id
         );
@@ -584,10 +584,10 @@ function validateMasteryProtection(
 // 3) Diagnostic Explainability
 // ---------------------------------------------------------------------------
 
-function validateDiagnosticExplainability(
+async function validateDiagnosticExplainability(
   model: AdaptiveCourseModel,
   stage3Map: Map<string, Stage3NodeLogic>
-): Stage5ACheckResult[] {
+): Promise<Stage5ACheckResult[]> {
   const results: Stage5ACheckResult[] = [];
   const violations: Stage5AViolation[] = [];
 
@@ -596,15 +596,15 @@ function validateDiagnosticExplainability(
     if (!s3) continue;
 
     // Load Stage 4 diagnostic to check failure type coverage
-    const diagAssessment = fileService.getStage4DiagnosticAssessment(
+    const diagAssessment = await fileService.getStage4DiagnosticAssessment(
       model.course_code,
       node.node_id
     );
-    const llmSpec = fileService.getStage4LLMInteractiveSpec(
+    const llmSpec = await fileService.getStage4LLMInteractiveSpec(
       model.course_code,
       node.node_id
     );
-    const remPack = fileService.getStage4RemediationPack(
+    const remPack = await fileService.getStage4RemediationPack(
       model.course_code,
       node.node_id
     );
@@ -718,11 +718,11 @@ function validateDiagnosticExplainability(
 // 4) Assessment Trigger Accuracy
 // ---------------------------------------------------------------------------
 
-function validateAssessmentTriggerAccuracy(
+async function validateAssessmentTriggerAccuracy(
   model: AdaptiveCourseModel,
   nodes: LearningNode[],
   stage3Map: Map<string, Stage3NodeLogic>
-): Stage5ACheckResult[] {
+): Promise<Stage5ACheckResult[]> {
   const results: Stage5ACheckResult[] = [];
   const nodeMap = new Map(nodes.map(n => [n.node_id, n]));
 
@@ -791,7 +791,7 @@ function validateAssessmentTriggerAccuracy(
 
     for (const snap of model.nodes) {
       if (!snap.has_llm_interactive_spec) continue;
-      const spec = fileService.getStage4LLMInteractiveSpec(model.course_code, snap.node_id);
+      const spec = await fileService.getStage4LLMInteractiveSpec(model.course_code, snap.node_id);
       if (!spec) continue;
 
       // allowed_scope.node_id should be this node
@@ -1202,7 +1202,7 @@ export async function runStage5A(
     });
 
     const { model, nodes, clos, stage3Map } = await assembleAdaptiveModel(courseCode);
-    fileService.saveStage5aAdaptiveModel(courseCode, model);
+    await fileService.saveStage5aAdaptiveModel(courseCode, model);
 
     console.log(`Stage 5A: Assembled model with ${model.node_count} nodes, ${model.edges.length} edges`);
 
@@ -1233,7 +1233,7 @@ export async function runStage5A(
     });
 
     // 2) Mastery Protection
-    allChecks.push(...validateMasteryProtection(model, stage3Map));
+    allChecks.push(...await validateMasteryProtection(model, stage3Map));
 
     updateProgress({
       courseCode,
@@ -1245,7 +1245,7 @@ export async function runStage5A(
     });
 
     // 3) Diagnostic Explainability
-    allChecks.push(...validateDiagnosticExplainability(model, stage3Map));
+    allChecks.push(...await validateDiagnosticExplainability(model, stage3Map));
 
     updateProgress({
       courseCode,
@@ -1257,7 +1257,7 @@ export async function runStage5A(
     });
 
     // 4) Assessment Trigger Accuracy
-    allChecks.push(...validateAssessmentTriggerAccuracy(model, nodes, stage3Map));
+    allChecks.push(...await validateAssessmentTriggerAccuracy(model, nodes, stage3Map));
 
     updateProgress({
       courseCode,
@@ -1320,9 +1320,9 @@ export async function runStage5A(
     };
 
     // Persist
-    fileService.saveStage5aValidationReport(courseCode, report);
+    await fileService.saveStage5aValidationReport(courseCode, report);
     const markdown = renderReportMarkdown(report, model, simulations);
-    fileService.saveStage5aReportMarkdown(courseCode, markdown);
+    await fileService.saveStage5aReportMarkdown(courseCode, markdown);
 
     const statusLabel = report.is_valid ? 'PASSED' : 'FAILED';
     const summaryMsg = `Stage 5A ${statusLabel}: ${summary.passed_checks}/${summary.total_checks} checks passed | ${summary.error_count} errors, ${summary.warning_count} warnings | Graph: ${graphSummary.total_nodes} nodes, ${graphSummary.total_edges} edges, depth ${graphSummary.max_depth} | Workload: ${Math.round(workloadBounds.min_path_minutes / 60)}h–${Math.round(workloadBounds.max_path_minutes / 60)}h (expected ${model.expected_hours}h)`;
@@ -1449,14 +1449,14 @@ function validateWorkloadAccumulationFull(
 // RETRIEVAL FUNCTIONS
 // ============================================================================
 
-export function getStage5AReport(courseCode: string): Stage5AValidationReport | null {
-  return fileService.getStage5aValidationReport(courseCode);
+export async function getStage5AReport(courseCode: string): Promise<Stage5AValidationReport | null> {
+  return await fileService.getStage5aValidationReport(courseCode);
 }
 
-export function getStage5AModel(courseCode: string): AdaptiveCourseModel | null {
-  return fileService.getStage5aAdaptiveModel(courseCode);
+export async function getStage5AModel(courseCode: string): Promise<AdaptiveCourseModel | null> {
+  return await fileService.getStage5aAdaptiveModel(courseCode);
 }
 
-export function getStage5AReportMarkdown(courseCode: string): string | null {
-  return fileService.getStage5aReportMarkdown(courseCode);
+export async function getStage5AReportMarkdown(courseCode: string): Promise<string | null> {
+  return await fileService.getStage5aReportMarkdown(courseCode);
 }

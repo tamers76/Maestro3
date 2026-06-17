@@ -7,12 +7,17 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "node --import tsx --test src/node-engine/__tests__/phase0.test.ts src/node-engine/__tests__/stage1Adapter.test.ts src/node-engine/__tests__/nodeGeneration.test.ts src/node-engine/__tests__/referenceGrounding.test.ts src/node-engine/__tests__/referenceAnchoringV1.test.ts"
+    "db:migrate": "tsx src/db/migrate.ts --verify",
+    "db:build-vector-index": "tsx src/db/migrate.ts --vector",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "test": "node --import tsx --test src/node-engine/__tests__/phase0.test.ts src/node-engine/__tests__/stage1Adapter.test.ts src/node-engine/__tests__/nodeGeneration.test.ts src/node-engine/__tests__/referenceGrounding.test.ts src/node-engine/__tests__/referenceAnchoringV1.test.ts src/node-engine/__tests__/referenceRepo.pgvector.test.ts src/node-engine/__tests__/outboxRepo.poison.test.ts"
   },
   "dependencies": {
     "archiver": "^7.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.45.2",
     "express": "^4.18.2",
     "html-to-docx": "^1.8.0",
     "mammoth": "^1.6.0",
@@ -20,6 +25,7 @@
     "multer": "^1.4.5-lts.1",
     "neo4j-driver": "^5.17.0",
     "pdf-parse": "^1.1.1",
+    "pg": "^8.21.0",
     "puppeteer": "^22.0.0",
     "uuid": "^9.0.1"
   },
@@ -29,7 +35,9 @@
     "@types/express": "^4.17.21",
     "@types/multer": "^1.4.11",
     "@types/node": "^20.11.0",
+    "@types/pg": "^8.20.0",
     "@types/uuid": "^9.0.7",
+    "drizzle-kit": "^0.31.10",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
   }

@@ -1,5 +1,5 @@
 import { callAI, parseAIJson, getCouncilInfo, getStageConfig, type CouncilProgressCallback } from './ai.service.js';
-import * as neo4j from './neo4j.service.js';
+import * as neo4j from './curriculumStore.service.js';
 import * as fileService from './file.service.js';
 import { buildStage2Prompt, buildStage2PrereqSynthesisPrompt } from '../utils/prompts.js';
 import { startStageProgress, updateItemProgress, updateProgress, completeStageProgress, errorStageProgress, type CouncilInfo } from './progress.service.js';
@@ -141,13 +141,13 @@ export async function runStage2(courseCode: string, executionOverride?: StageExe
     startStageProgress(courseCode, 2, 'Initializing cognitive node decomposition', council);
     
     // Get course contract with CLO analysis
-    const contract = fileService.getCourseContract(courseCode);
+    const contract = await fileService.getCourseContract(courseCode);
     if (!contract) {
       throw new Error('Course contract not found. Please run Stage 1 first.');
     }
     
     // Get snapshot to load approved CLO topics
-    const snapshot = fileService.getExtractedSnapshot(courseCode);
+    const snapshot = await fileService.getExtractedSnapshot(courseCode);
     const cloTopicsMap = new Map<string, Array<{ topic_id: string; title: string; description: string; readings?: string }>>();
     if (snapshot?.clo_topics) {
       for (const group of snapshot.clo_topics) {

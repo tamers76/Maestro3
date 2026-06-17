@@ -42,9 +42,18 @@ function nodeTypeColor(): string {
   return 'bg-primary/10 text-primary'
 }
 
-function Pill({ children, className }: { children: React.ReactNode; className?: string }) {
+function Pill({
+  children,
+  className,
+  title,
+}: {
+  children: React.ReactNode
+  className?: string
+  title?: string
+}) {
   return (
     <span
+      title={title}
       className={cn(
         'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
         className
@@ -66,9 +75,36 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
-function NodeCard({ node, index }: { node: NodeEngineNode; index: number }) {
+/**
+ * Why a node should draw SME attention during batch review. Used to triage which
+ * nodes need a look before approving an entire CLO. Returns an empty list when the
+ * node is clean.
+ */
+export function criticalNodeReasons(node: NodeEngineNode): string[] {
+  const reasons: string[] = []
+  if (node.risk_classification.some((r) => r === 'critical' || r === 'high_risk')) {
+    reasons.push('High-risk')
+  }
+  if (node.grounding_references.length === 0 || node.grounding_strength === 'weak') {
+    reasons.push('Weak grounding')
+  }
+  if (node.misconception_slots === 'pending' && node.candidate_misconceptions.length > 0) {
+    reasons.push('Misconceptions pending')
+  }
+  if (node.evidence_map?.some((c) => c.critical)) {
+    reasons.push('Critical evidence')
+  }
+  return reasons
+}
+
+export function isCriticalNode(node: NodeEngineNode): boolean {
+  return criticalNodeReasons(node).length > 0
+}
+
+export function NodeCard({ node, index }: { node: NodeEngineNode; index: number }) {
   const [open, setOpen] = useState(index === 0)
   const ec = node.primary_evidence_check_requirement
+  const attentionReasons = criticalNodeReasons(node)
 
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -84,12 +120,24 @@ function NodeCard({ node, index }: { node: NodeEngineNode; index: number }) {
             </span>
             <span className="font-medium">{node.node_title}</span>
             <Pill className={nodeTypeColor()}>{humanize(node.node_type)}</Pill>
+            {node.is_core && (
+              <Pill className="bg-primary/10 text-primary">Core</Pill>
+            )}
             {node.risk_classification.map((r) => (
               <Pill key={r} className={riskColor(r)}>
                 {r === 'standard' ? null : <ShieldAlert className="h-3 w-3" />}
                 {humanize(r)}
               </Pill>
             ))}
+            {attentionReasons.length > 0 && (
+              <Pill
+                className="bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                title={attentionReasons.join(' · ')}
+              >
+                <AlertTriangle className="h-3 w-3" />
+                Needs review
+              </Pill>
+            )}
             {node.status === 'approved' && (
               <Pill className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
                 <Check className="h-3 w-3" />

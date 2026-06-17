@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Textarea'
 import { showToast } from '@/components/ui/Toaster'
@@ -147,6 +147,8 @@ function AssessmentRedesignZone({
   onUpdate,
   onApproveItem,
   onSaveNote,
+  expanded,
+  onToggle,
 }: {
   item: AssessmentRedesignItem
   colorIndex: number
@@ -156,8 +158,9 @@ function AssessmentRedesignZone({
   onUpdate: (item: AssessmentRedesignItem) => void
   onApproveItem?: (item: AssessmentRedesignItem) => void | Promise<void>
   onSaveNote?: () => void | Promise<void>
+  expanded: boolean
+  onToggle: () => void
 }) {
-  const [expanded, setExpanded] = useState(true)
   const colors = CARD_COLORS[colorIndex % CARD_COLORS.length]
   const original = item.original_assessment
   const ai = item.ai_suggested_redesign
@@ -225,7 +228,7 @@ function AssessmentRedesignZone({
     <div className={cn('rounded-xl border-2 overflow-hidden', colors.border)}>
       <div
         className={cn('px-5 py-4 border-b cursor-pointer', colors.border, colors.bg)}
-        onClick={() => setExpanded(!expanded)}
+        onClick={onToggle}
       >
         <div className="flex items-start gap-3">
           <div className={cn('p-2.5 rounded-lg', colors.badge)}>
@@ -636,6 +639,18 @@ export default function AssessmentRedesignEditor({
     if (draftSummary) onSummaryChange?.(draftSummary)
   }, [draftSummary, onSummaryChange])
 
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const zoneRefs = useRef<Record<string, HTMLDivElement | null>>({})
+
+  const toggleExpanded = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   const handleUpdate = (id: string, item: AssessmentRedesignItem) => {
     setDraft((prev) => prev.map((r) => (r.assessment_id === id ? item : r)))
   }
@@ -669,6 +684,36 @@ export default function AssessmentRedesignEditor({
   const handleApproveItem = async (id: string, updated: AssessmentRedesignItem) => {
     const next = draft.map((r) => (r.assessment_id === id ? updated : r))
     setDraft(next)
+
+    // Auto-advance UI: collapse the just-approved item and open the next
+    // not-yet-approved assessment by rendered order (none if all later are approved).
+    const approvedIndex = next.findIndex((r) => r.assessment_id === id)
+    let nextId: string | null = null
+    for (let i = approvedIndex + 1; i < next.length; i++) {
+      if (next[i].approval_status !== 'approved') {
+        nextId = next[i].assessment_id
+        break
+      }
+    }
+    setExpandedIds((prev) => {
+      const updatedSet = new Set(prev)
+      updatedSet.delete(id)
+      if (nextId) updatedSet.add(nextId)
+      return updatedSet
+    })
+
+    // When a next item auto-expands, scroll its header to the top of the viewport.
+    // Defer past the collapse/expand re-render and layout shift so the scroll lands
+    // on the correct zone even as the approved body collapses above it.
+    if (nextId) {
+      const scrollToNext = () => {
+        const el = zoneRefs.current[nextId]
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+      requestAnimationFrame(scrollToNext)
+      ;[120, 300].forEach((ms) => setTimeout(scrollToNext, ms))
+    }
+
     await handleSave(next)
   }
 
@@ -751,19 +796,28 @@ export default function AssessmentRedesignEditor({
             const noteChanged =
               (item.sme_internal_note || '') !== (initial?.sme_internal_note || '')
             return (
-              <AssessmentRedesignZone
+              <div
                 key={item.assessment_id}
-                item={item}
-                colorIndex={index}
-                readOnlyRedesign={layerApproved}
-                saving={saving}
-                noteChanged={noteChanged}
-                onUpdate={(updated) => handleUpdate(item.assessment_id, updated)}
-                onApproveItem={(updated) => handleApproveItem(item.assessment_id, updated)}
-                onSaveNote={async () => {
-                  await handleSave()
+                ref={(el) => {
+                  zoneRefs.current[item.assessment_id] = el
                 }}
-              />
+                style={{ scrollMarginTop: 16 }}
+              >
+                <AssessmentRedesignZone
+                  item={item}
+                  colorIndex={index}
+                  readOnlyRedesign={layerApproved}
+                  saving={saving}
+                  noteChanged={noteChanged}
+                  onUpdate={(updated) => handleUpdate(item.assessment_id, updated)}
+                  onApproveItem={(updated) => handleApproveItem(item.assessment_id, updated)}
+                  onSaveNote={async () => {
+                    await handleSave()
+                  }}
+                  expanded={expandedIds.has(item.assessment_id)}
+                  onToggle={() => toggleExpanded(item.assessment_id)}
+                />
+              </div>
             )
           })}
         </div>

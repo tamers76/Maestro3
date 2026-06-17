@@ -1,5 +1,3 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { join } from 'path';
 import type { Settings, CouncilConfig, StageExecution, StageConfigs, StageModelConfig, CouncilSettings, Stage1LayerConfig, NodeEngineDefaults } from './models/schemas.js';
 import { defaultStage1Layers } from './config/stage1Layers.defaults.js';
 import {
@@ -9,8 +7,6 @@ import {
   STAGE3_ADAPTIVE_PROMPT,
   STAGE4_CONTENT_PROMPT
 } from './utils/prompts.js';
-
-const CONFIG_PATH = join(process.cwd(), '..', 'config', 'settings.json');
 
 // Default council member system prompt (global fallback)
 const DEFAULT_MEMBER_SYSTEM_PROMPT = `You are a helpful AI assistant participating in a council deliberation.
@@ -315,6 +311,10 @@ const defaultSettings: Settings = {
     user: 'neo4j',
     password: ''
   },
+  postgres: {
+    connectionString: 'postgresql://maestro:maestro@127.0.0.1:5432/maestronexus',
+    poolMax: 10,
+  },
   // NEW: Per-stage model configurations
   stageConfigs: defaultStageConfigs,
   councilSettings: defaultCouncilSettings,
@@ -356,6 +356,15 @@ function overlayEnvSecrets(settings: Settings): Settings {
       user: process.env.NEO4J_USER || settings.neo4j.user,
       password: process.env.NEO4J_PASSWORD || settings.neo4j.password,
     },
+    postgres: {
+      ...settings.postgres,
+      connectionString: process.env.DATABASE_URL || settings.postgres.connectionString,
+      host: process.env.PGHOST || settings.postgres.host,
+      port: process.env.PGPORT ? Number(process.env.PGPORT) : settings.postgres.port,
+      user: process.env.PGUSER || settings.postgres.user,
+      password: process.env.PGPASSWORD || settings.postgres.password,
+      database: process.env.PGDATABASE || settings.postgres.database,
+    },
     embedding: {
       ...settings.embedding,
       provider: (process.env.EMBEDDING_PROVIDER as Settings['embedding']['provider']) || settings.embedding.provider,
@@ -375,14 +384,20 @@ function overlayEnvSecrets(settings: Settings): Settings {
   };
 }
 
-// Load settings from file with deep merge for nested objects
+/**
+ * Non-secret persisted settings, hydrated from the `app_settings` table at boot
+ * (see hydrateSettings). Holds the last-saved overlay so synchronous getSettings()
+ * can rebuild the merged settings without an async Postgres read on the hot path.
+ */
+let persistedOverlay: (Partial<Settings> & Record<string, unknown>) | null = null;
+
+// Load settings (defaults + persisted app_settings overlay + env secrets overlay).
 export function loadSettings(): Settings {
   let mergedSettings = defaultSettings;
   
   try {
-    if (existsSync(CONFIG_PATH)) {
-      const data = readFileSync(CONFIG_PATH, 'utf-8');
-      const settings = JSON.parse(data) as Partial<Settings> & Record<string, unknown>;
+    if (persistedOverlay) {
+      const settings = persistedOverlay;
       
       // Migrate old councilMode if present
       const migratedCouncil = migrateCouncilSettings(settings);
@@ -402,6 +417,7 @@ export function loadSettings(): Settings {
         embedding: { ...defaultSettings.embedding, ...settings.embedding },
         models: { ...defaultSettings.models, ...settings.models },
         neo4j: { ...defaultSettings.neo4j, ...settings.neo4j },
+        postgres: { ...defaultSettings.postgres, ...settings.postgres },
         // NEW: Per-stage configs with deep merge
         stageConfigs: {
           stage1: { ...defaultStageConfigs.stage1, ...settings.stageConfigs?.stage1 },
@@ -440,30 +456,47 @@ export function loadSettings(): Settings {
   return overlayEnvSecrets(mergedSettings);
 }
 
-// Save settings to file (secrets are sanitized - never written to disk)
-export function saveSettings(settings: Settings): void {
+/** Strip secrets — they are sourced from env at runtime and never persisted. */
+function sanitizeSettings(settings: Settings): Settings {
+  return {
+    ...settings,
+    openrouter: { ...settings.openrouter, apiKey: '' },
+    openai: { ...settings.openai, apiKey: '' },
+    neo4j: { ...settings.neo4j, password: '' },
+    postgres: { ...settings.postgres, connectionString: '', password: '' },
+  };
+}
+
+// Persist settings to the `app_settings` table (secrets are sanitized out).
+export async function saveSettings(settings: Settings): Promise<void> {
+  const sanitizedSettings = sanitizeSettings(settings);
+  persistedOverlay = sanitizedSettings as Partial<Settings> & Record<string, unknown>;
   try {
-    // Sanitize secrets before writing - never persist API keys or passwords to disk
-    const sanitizedSettings: Settings = {
-      ...settings,
-      openrouter: {
-        ...settings.openrouter,
-        apiKey: '', // Never persist API keys
-      },
-      openai: {
-        ...settings.openai,
-        apiKey: '', // Never persist API keys
-      },
-      neo4j: {
-        ...settings.neo4j,
-        password: '', // Never persist passwords
-      },
-    };
-    
-    writeFileSync(CONFIG_PATH, JSON.stringify(sanitizedSettings, null, 2), 'utf-8');
+    // Dynamic import avoids a static config <-> db/client import cycle.
+    const configRepo = await import('./db/repos/configRepo.js');
+    await configRepo.set(configRepo.CONFIG_KEYS.appSettings, sanitizedSettings);
   } catch (error) {
-    console.error('Error saving settings:', error);
+    console.error('Error saving settings to app_settings:', error);
     throw new Error('Failed to save settings');
+  }
+}
+
+/**
+ * Hydrate the persisted (non-secret) settings overlay from `app_settings` at boot.
+ * Call AFTER initPostgres(). Clears the cache so the next getSettings() rebuilds.
+ */
+export async function hydrateSettings(): Promise<void> {
+  try {
+    const configRepo = await import('./db/repos/configRepo.js');
+    const stored = await configRepo.get<Partial<Settings> & Record<string, unknown>>(
+      configRepo.CONFIG_KEYS.appSettings
+    );
+    if (stored) {
+      persistedOverlay = stored;
+      cachedSettings = null;
+    }
+  } catch (error) {
+    console.error('[Config] Failed to hydrate settings from app_settings:', error);
   }
 }
 
@@ -479,8 +512,8 @@ export function getSettings(): Settings {
   return cachedSettings;
 }
 
-// Update settings and clear cache
-export function updateSettings(newSettings: Partial<Settings>): Settings {
+// Update settings, persist to app_settings, and refresh cache
+export async function updateSettings(newSettings: Partial<Settings>): Promise<Settings> {
   const current = loadSettings();
   const updated: Settings = {
     ...current,
@@ -495,6 +528,7 @@ export function updateSettings(newSettings: Partial<Settings>): Settings {
     embedding: { ...current.embedding, ...newSettings.embedding },
     models: { ...current.models, ...newSettings.models },
     neo4j: { ...current.neo4j, ...newSettings.neo4j },
+    postgres: { ...current.postgres, ...newSettings.postgres },
     // NEW: Per-stage configs with deep merge
     stageConfigs: {
       stage1: { ...current.stageConfigs.stage1, ...newSettings.stageConfigs?.stage1 },
@@ -512,7 +546,7 @@ export function updateSettings(newSettings: Partial<Settings>): Settings {
       ? mergeStage1Layers(newSettings.stage1Layers, current.stage1Layers)
       : current.stage1Layers,
   };
-  saveSettings(updated);
+  await saveSettings(updated);
   cachedSettings = updated;
   return updated;
 }
@@ -619,6 +653,40 @@ export function getNodeEngineDefaultModel(): string {
 export function getContextHeaderModel(): string {
   const settings = getSettings();
   return settings.nodeEngineDefaults?.contextHeaderModel || CONTEXT_HEADER_DEFAULT_MODEL;
+}
+
+/**
+ * Resolve the Postgres connection config from settings/env. Prefers an explicit
+ * connection string (DATABASE_URL); otherwise assembles one from discrete fields.
+ */
+export function getPostgresConfig(): {
+  connectionString: string;
+  max: number;
+  schema: string;
+  options: string;
+} {
+  const settings = getSettings();
+  const pg = settings.postgres;
+  let connectionString = pg.connectionString?.trim();
+  if (!connectionString) {
+    const user = encodeURIComponent(pg.user || 'maestro');
+    const password = encodeURIComponent(pg.password || '');
+    const host = pg.host || '127.0.0.1';
+    const port = pg.port || 5432;
+    const database = pg.database || 'maestronexus';
+    const auth = password ? `${user}:${password}` : user;
+    connectionString = `postgresql://${auth}@${host}:${port}/${database}`;
+  }
+  // `maestronexus` may host other applications in `public`, so all Maestro-V1
+  // tables live in a dedicated schema (default `maestro_v1`). search_path keeps
+  // every pooled connection scoped to it (then public for the `vector` type).
+  const schema = (process.env.APP_DB_SCHEMA || 'maestro_v1').replace(/[^a-zA-Z0-9_]/g, '');
+  return {
+    connectionString,
+    max: pg.poolMax ?? 10,
+    schema,
+    options: `-c search_path=${schema},public`,
+  };
 }
 
 // Clear settings cache (useful after external changes)

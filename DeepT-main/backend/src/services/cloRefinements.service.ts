@@ -282,8 +282,8 @@ function suggestionToItem(
   };
 }
 
-function loadSavedItems(courseCode: string, clos: CLO[]): Map<string, CloRefinementItem> {
-  const file = fileService.getCloRefinementsFile(courseCode);
+async function loadSavedItems(courseCode: string, clos: CLO[]): Promise<Map<string, CloRefinementItem>> {
+  const file = await fileService.getCloRefinementsFile(courseCode);
   const map = new Map<string, CloRefinementItem>();
   for (const raw of file?.items ?? []) {
     const entry = raw as CloRefinementItem & Record<string, unknown>;
@@ -323,20 +323,20 @@ function mergeItem(
   return suggestionToItem(clo, suggestion, saved);
 }
 
-export function getCloRefinementContext(courseCode: string): {
+export async function getCloRefinementContext(courseCode: string): Promise<{
   clos: CLO[];
   suggestions: SuggestedCloRefinement[];
   refinements: CloRefinementItem[];
   summary: CloRefinementReviewSummary;
   layer2GeneratedAt?: string;
-} {
-  const contract = fileService.getCourseContract(courseCode);
+}> {
+  const contract = await fileService.getCourseContract(courseCode);
   const clos = contract?.course_learning_outcomes ?? [];
-  const layer2 = fileService.getStage1LayerState(courseCode, LAYER2_ID);
+  const layer2 = await fileService.getStage1LayerState(courseCode, LAYER2_ID);
   const suggestions = layer2?.outputJson
     ? parseLayer2Suggestions(layer2.outputJson, clos)
     : [];
-  const savedMap = loadSavedItems(courseCode, clos);
+  const savedMap = await loadSavedItems(courseCode, clos);
   const suggestionMap = new Map(suggestions.map((s) => [s.clo_id, s]));
 
   const refinements = clos.map((clo) =>
@@ -379,11 +379,11 @@ export function computeSummary(items: CloRefinementItem[]): CloRefinementReviewS
   };
 }
 
-export function saveCloRefinements(
+export async function saveCloRefinements(
   courseCode: string,
   items: CloRefinementItem[]
-): { refinements: CloRefinementItem[]; summary: CloRefinementReviewSummary } {
-  const contract = fileService.getCourseContract(courseCode);
+): Promise<{ refinements: CloRefinementItem[]; summary: CloRefinementReviewSummary }> {
+  const contract = await fileService.getCourseContract(courseCode);
   const clos = contract?.course_learning_outcomes ?? [];
   const validIds = new Set(clos.map((c) => c.clo_id));
 
@@ -403,7 +403,7 @@ export function saveCloRefinements(
     items: normalized,
     updated_at: new Date().toISOString(),
   };
-  fileService.saveCloRefinementsFile(courseCode, file);
+  await fileService.saveCloRefinementsFile(courseCode, file);
 
   return { refinements: normalized, summary: computeSummary(normalized) };
 }
@@ -422,15 +422,15 @@ export function assertLayer2ReadyForApproval(items: CloRefinementItem[]): void {
   }
 }
 
-export function applyApprovedRefinementsToContract(courseCode: string): void {
-  const file = fileService.getCloRefinementsFile(courseCode);
+export async function applyApprovedRefinementsToContract(courseCode: string): Promise<void> {
+  const file = await fileService.getCloRefinementsFile(courseCode);
   if (!file?.items.length) {
     throw new Error('No CLO refinements saved. Review and save refinements before approving.');
   }
 
   assertLayer2ReadyForApproval(file.items);
 
-  const contract = fileService.getCourseContract(courseCode);
+  const contract = await fileService.getCourseContract(courseCode);
   if (!contract) throw new Error('Course contract not found');
 
   const decisionMap = new Map(file.items.map((i) => [i.clo_id, i]));
@@ -445,20 +445,20 @@ export function applyApprovedRefinementsToContract(courseCode: string): void {
     return { ...clo, clo_text: text };
   });
 
-  fileService.saveCourseContract(courseCode, {
+  await fileService.saveCourseContract(courseCode, {
     ...contract,
     course_learning_outcomes: updatedClos,
   });
 }
 
-export function seedRefinementsFromSuggestions(courseCode: string): CloRefinementItem[] {
-  const contract = fileService.getCourseContract(courseCode);
+export async function seedRefinementsFromSuggestions(courseCode: string): Promise<CloRefinementItem[]> {
+  const contract = await fileService.getCourseContract(courseCode);
   const clos = contract?.course_learning_outcomes ?? [];
-  const layer2 = fileService.getStage1LayerState(courseCode, LAYER2_ID);
+  const layer2 = await fileService.getStage1LayerState(courseCode, LAYER2_ID);
   const suggestions = layer2?.outputJson
     ? parseLayer2Suggestions(layer2.outputJson, clos)
     : [];
-  const savedMap = loadSavedItems(courseCode, clos);
+  const savedMap = await loadSavedItems(courseCode, clos);
 
   const items = clos.map((clo) => {
     const s = suggestions.find((x) => x.clo_id === clo.clo_id);
@@ -467,6 +467,6 @@ export function seedRefinementsFromSuggestions(courseCode: string): CloRefinemen
     return mergeItem(clo, saved, s);
   });
 
-  saveCloRefinements(courseCode, items);
+  await saveCloRefinements(courseCode, items);
   return items;
 }

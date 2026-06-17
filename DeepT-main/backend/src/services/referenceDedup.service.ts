@@ -15,7 +15,7 @@
 
 import { createHash } from 'node:crypto';
 import type { ReferenceChunk, ReferenceDocument } from '../models/schemas.js';
-import * as fileService from './file.service.js';
+import * as referenceRepo from '../db/repos/referenceRepo.js';
 
 /** Jaccard threshold at/above which two docs are considered duplicates. */
 export const DUPLICATE_JACCARD_THRESHOLD = 0.9;
@@ -95,12 +95,12 @@ function pickCanonical(docs: ReferenceDocument[]): string {
  * Detect duplicate reference documents for a course. Non-destructive: returns a
  * report of groups with a suggested canonical doc; does NOT modify any state.
  */
-export function detectDuplicateDocuments(courseCode: string): DuplicateReport {
-  const docs = fileService.getReferenceManifest(courseCode)?.documents ?? [];
+export async function detectDuplicateDocuments(courseCode: string): Promise<DuplicateReport> {
+  const docs = await referenceRepo.listDocuments(courseCode);
 
   const fingerprints = new Map<string, Set<string>>();
   for (const doc of docs) {
-    fingerprints.set(doc.doc_id, fingerprintDoc(fileService.getReferenceChunks(courseCode, doc.doc_id)));
+    fingerprints.set(doc.doc_id, fingerprintDoc(await referenceRepo.getChunksByDoc(doc.doc_id)));
   }
 
   // Union-find over docs, unioning any pair that meets either duplicate criterion.

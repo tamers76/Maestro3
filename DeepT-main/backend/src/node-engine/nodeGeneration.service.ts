@@ -780,7 +780,7 @@ export async function generateNodeSet(
 ): Promise<NodeSet> {
   const { ground = true, persist = true, persistGraph = false, maxTokens = 8000 } = options;
 
-  const bundle = buildV1ContractBundle(courseCode);
+  const bundle = await buildV1ContractBundle(courseCode);
   const context = buildNodeGenerationContext(bundle, subtopicId);
 
   const agg = newGroundingAggregate();
@@ -831,7 +831,7 @@ export async function generateNodeSet(
   nodeSet.grounding_summary = buildGroundingSummary(agg);
 
   if (persist) {
-    saveNodeSetArtifact(courseCode, subtopicId, nodeSet);
+    await saveNodeSetArtifact(courseCode, subtopicId, nodeSet);
   }
 
   if (persistGraph && isNeo4jConnected()) {
@@ -847,8 +847,8 @@ export async function generateNodeSet(
 }
 
 /** Read a previously generated node-set artifact (null if none). */
-export function getNodeSet(courseCode: string, subtopicId: string): NodeSet | null {
-  const raw = getNodeSetArtifact(courseCode, subtopicId);
+export async function getNodeSet(courseCode: string, subtopicId: string): Promise<NodeSet | null> {
+  const raw = await getNodeSetArtifact(courseCode, subtopicId);
   return raw ? parseNodeSet(raw) : null;
 }
 
@@ -883,12 +883,12 @@ export function isNodeSetAcademicallyReady(nodeSet: NodeSet): boolean {
  * Academic-approval guard: a set with NO reference grounding cannot be approved
  * unless an explicit `overrideReason` is recorded (persisted for audit).
  */
-export function approveNodeSet(
+export async function approveNodeSet(
   courseCode: string,
   subtopicId: string,
   input: ApproveNodeSetInput
-): NodeSet {
-  const existing = getNodeSet(courseCode, subtopicId);
+): Promise<NodeSet> {
+  const existing = await getNodeSet(courseCode, subtopicId);
   if (!existing) {
     throw new Error(`No node-set found for course "${courseCode}" subtopic "${subtopicId}"`);
   }
@@ -920,13 +920,13 @@ export function approveNodeSet(
   }
 
   const validated = parseNodeSet(JSON.parse(JSON.stringify(existing)));
-  saveNodeSetArtifact(courseCode, subtopicId, validated);
+  await saveNodeSetArtifact(courseCode, subtopicId, validated);
   return validated;
 }
 
 /** Only approved nodes emit to M8 (the scope guard). */
-export function getApprovedNodesForM8(courseCode: string, subtopicId: string): Node[] {
-  const nodeSet = getNodeSet(courseCode, subtopicId);
+export async function getApprovedNodesForM8(courseCode: string, subtopicId: string): Promise<Node[]> {
+  const nodeSet = await getNodeSet(courseCode, subtopicId);
   if (!nodeSet || nodeSet.status !== 'approved') return [];
   return nodeSet.nodes.filter((n) => n.status === 'approved');
 }

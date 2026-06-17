@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
-import * as neo4j from '../services/neo4j.service.js';
+import * as neo4j from '../services/curriculumStore.service.js';
 import * as fileService from '../services/file.service.js';
 import { extractTextFromBuffer } from '../services/extraction.service.js';
 import { runStage1, runStage1FromForm } from '../services/stage1.service.js';
@@ -138,9 +138,9 @@ router.get('/:code', async (req: Request, res: Response) => {
     
     const clos = await neo4j.getCLOs(code);
     const nodes = await neo4j.getLearningNodes(code);
-    const contract = fileService.getCourseContract(code);
-    let snapshot = fileService.getExtractedSnapshot(code);
-    const confirmations = fileService.getConfirmations(code);
+    const contract = await fileService.getCourseContract(code);
+    let snapshot = await fileService.getExtractedSnapshot(code);
+    const confirmations = await fileService.getConfirmations(code);
     
     // ── Auto-migration: weekly_plan → clo_topics ──────────────────
     // If snapshot has legacy weekly_plan with CLO mappings but no clo_topics,
@@ -187,7 +187,7 @@ router.get('/:code', async (req: Request, res: Response) => {
         clo_topics: migratedTopics,
         clo_topic_coverage: coverage,
       };
-      fileService.saveExtractedSnapshot(code, snapshot);
+      await fileService.saveExtractedSnapshot(code, snapshot);
       
       console.log(`[Migration] Migrated ${snapshot.weekly_plan.length} weeks → ${coverage.total_topics} topics for ${code}`);
     }
@@ -367,7 +367,7 @@ router.delete('/:code', async (req: Request, res: Response) => {
     await neo4j.deleteCourse(code);
     
     // Delete files
-    fileService.deleteCourseDirectory(code);
+    await fileService.deleteCourseDirectory(code);
     
     res.json({ message: `Course ${code} deleted successfully` });
   } catch (error) {
@@ -425,11 +425,11 @@ router.post('/:code/stage/:num', async (req: Request, res: Response) => {
     }
     
     // Get confirmations for gate checks
-    const confirmations = fileService.getConfirmations(code);
+    const confirmations = await fileService.getConfirmations(code);
     
     // Stage 2 requires all Stage 1 internal layers approved (or legacy CLO topic confirmation)
     if (stageNum === 2) {
-      const layersApproved = allStage1LayersApproved(code);
+      const layersApproved = await allStage1LayersApproved(code);
       const legacyConfirmed =
         !!confirmations?.clo_topics_confirmed_at || !!confirmations?.weekly_plan_confirmed_at;
       if (!layersApproved && !legacyConfirmed) {
@@ -468,7 +468,7 @@ router.post('/:code/stage/:num', async (req: Request, res: Response) => {
     switch (stageNum) {
       case 1:
         // For Stage 1 regeneration, use existing raw text
-        const snapshot = fileService.getExtractedSnapshot(code);
+        const snapshot = await fileService.getExtractedSnapshot(code);
         if (!snapshot) {
           return res.status(400).json({ error: 'No extracted data found for regeneration' });
         }
@@ -523,7 +523,7 @@ router.get('/:code/stage/3/snapshot', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Course not found' });
     }
     
-    const snapshot = fileService.getStage3Snapshot(code);
+    const snapshot = await fileService.getStage3Snapshot(code);
     if (!snapshot) {
       return res.status(404).json({ 
         error: 'Stage 3 snapshot not found. Please run Stage 3 first.' 
@@ -547,7 +547,7 @@ router.get('/:code/stage/3/incomplete-report', async (req: Request, res: Respons
       return res.status(404).json({ error: 'Course not found' });
     }
     
-    const report = fileService.getStage3IncompleteReport(code);
+    const report = await fileService.getStage3IncompleteReport(code);
     if (!report) {
       // No report means Stage 3 hasn't run yet or no incomplete nodes
       return res.json({ 
@@ -603,7 +603,7 @@ router.get('/:code/stage/4/errors', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Course not found' });
     }
     
-    const errors = getStage4Errors(code);
+    const errors = await getStage4Errors(code);
     res.json({
       course_code: code,
       error_count: errors.length,
@@ -655,7 +655,7 @@ router.put('/:code/weekly-plan/mapping', async (req: Request, res: Response) => 
     }
     
     // Get existing snapshot
-    const snapshot = fileService.getExtractedSnapshot(code);
+    const snapshot = await fileService.getExtractedSnapshot(code);
     if (!snapshot) {
       return res.status(400).json({ error: 'No extracted snapshot found. Please run Stage 1 first.' });
     }
@@ -718,12 +718,12 @@ router.put('/:code/weekly-plan/mapping', async (req: Request, res: Response) => 
     };
     
     // Save updated snapshot
-    fileService.saveExtractedSnapshot(code, updatedSnapshot);
+    await fileService.saveExtractedSnapshot(code, updatedSnapshot);
     
     // Invalidate weekly plan confirmation since mapping changed
-    const confirmations = fileService.getConfirmations(code);
+    const confirmations = await fileService.getConfirmations(code);
     if (confirmations?.weekly_plan_confirmed_at) {
-      fileService.updateConfirmations(code, {
+      await fileService.updateConfirmations(code, {
         weekly_plan_confirmed_at: undefined,
         weekly_plan_summary: undefined
       });
@@ -793,7 +793,7 @@ router.put('/:code/clo-topics', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Course not found' });
     }
     
-    const snapshot = fileService.getExtractedSnapshot(code);
+    const snapshot = await fileService.getExtractedSnapshot(code);
     if (!snapshot) {
       return res.status(400).json({ error: 'No extracted snapshot found. Please run Stage 1 first.' });
     }
@@ -832,12 +832,12 @@ router.put('/:code/clo-topics', async (req: Request, res: Response) => {
       } : {}),
     };
     
-    fileService.saveExtractedSnapshot(code, updatedSnapshot);
+    await fileService.saveExtractedSnapshot(code, updatedSnapshot);
     
     // Invalidate CLO topics confirmation since topics changed
-    const confirmations = fileService.getConfirmations(code);
+    const confirmations = await fileService.getConfirmations(code);
     if (confirmations?.clo_topics_confirmed_at) {
-      fileService.updateConfirmations(code, {
+      await fileService.updateConfirmations(code, {
         clo_topics_confirmed_at: undefined,
         clo_topics_summary: undefined,
       });
@@ -867,7 +867,7 @@ router.post('/:code/clo-topics/suggest', async (req: Request, res: Response) => 
       return res.status(404).json({ error: 'Course not found' });
     }
     
-    const snapshot = fileService.getExtractedSnapshot(code);
+    const snapshot = await fileService.getExtractedSnapshot(code);
     if (!snapshot) {
       return res.status(400).json({ error: 'No extracted snapshot found. Please run Stage 1 first.' });
     }
@@ -895,13 +895,13 @@ router.post('/:code/clo-topics/suggest', async (req: Request, res: Response) => 
         );
         
         // Save into snapshot
-        const currentSnapshot = fileService.getExtractedSnapshot(code);
+        const currentSnapshot = await fileService.getExtractedSnapshot(code);
         if (currentSnapshot) {
           const updatedSnapshot = {
             ...currentSnapshot,
             suggested_clo_topics: suggestedTopics,
           };
-          fileService.saveExtractedSnapshot(code, updatedSnapshot);
+          await fileService.saveExtractedSnapshot(code, updatedSnapshot);
         }
         
         const topicCount = suggestedTopics.topics_by_clo.reduce(
@@ -929,8 +929,8 @@ router.get('/:code/stage1/layers', async (req: Request, res: Response) => {
     if (!exists) {
       return res.status(404).json({ error: 'Course not found' });
     }
-    const layers = getLayerStateViews(code);
-    const allApproved = allStage1LayersApproved(code);
+    const layers = await getLayerStateViews(code);
+    const allApproved = await allStage1LayersApproved(code);
     res.json({ layers, allApproved, stage1Complete: allApproved });
   } catch (error) {
     console.error('Error fetching Stage 1 layers:', error);
@@ -952,7 +952,7 @@ router.post('/:code/stage1/layers/:layerId/run', async (req: Request, res: Respo
     }
 
     const state = await runStage1Layer(code, layerId, execution);
-    const layers = getLayerStateViews(code);
+    const layers = await getLayerStateViews(code);
     res.json({ success: state.status !== 'blocked', layer: state, layers });
   } catch (error) {
     console.error('Error running Stage 1 layer:', error);
@@ -972,13 +972,14 @@ router.post('/:code/stage1/layers/:layerId/approve', async (req: Request, res: R
       return res.status(404).json({ error: 'Course not found' });
     }
 
-    const state = approveStage1Layer(code, layerId);
-    const layers = getLayerStateViews(code);
+    const state = await approveStage1Layer(code, layerId);
+    const layers = await getLayerStateViews(code);
+    const allApproved = await allStage1LayersApproved(code);
     res.json({
       message: 'Layer approved',
       layer: state,
       layers,
-      allApproved: allStage1LayersApproved(code),
+      allApproved,
     });
   } catch (error) {
     console.error('Error approving Stage 1 layer:', error);
@@ -997,8 +998,8 @@ router.post('/:code/stage1/layers/:layerId/reject', async (req: Request, res: Re
       return res.status(404).json({ error: 'Course not found' });
     }
 
-    const state = rejectStage1Layer(code, layerId);
-    const layers = getLayerStateViews(code);
+    const state = await rejectStage1Layer(code, layerId);
+    const layers = await getLayerStateViews(code);
     res.json({ message: 'Layer marked for revision', layer: state, layers });
   } catch (error) {
     console.error('Error rejecting Stage 1 layer:', error);
@@ -1023,8 +1024,8 @@ router.put('/:code/stage1/layers/:layerId/output', async (req: Request, res: Res
       return res.status(404).json({ error: 'Course not found' });
     }
 
-    const state = saveStage1LayerOutput(code, layerId, reportMarkdown);
-    const layers = getLayerStateViews(code);
+    const state = await saveStage1LayerOutput(code, layerId, reportMarkdown);
+    const layers = await getLayerStateViews(code);
     res.json({ message: 'Layer output saved', layer: state, layers });
   } catch (error) {
     console.error('Error saving Stage 1 layer output:', error);
@@ -1042,7 +1043,7 @@ router.get('/:code/stage1/clo-refinements', async (req: Request, res: Response) 
     if (!exists) {
       return res.status(404).json({ error: 'Course not found' });
     }
-    res.json(getCloRefinementContext(code));
+    res.json(await getCloRefinementContext(code));
   } catch (error) {
     console.error('Error fetching CLO refinements:', error);
     res.status(500).json({
@@ -1066,7 +1067,7 @@ router.put('/:code/stage1/clo-refinements', async (req: Request, res: Response) 
       return res.status(404).json({ error: 'Course not found' });
     }
 
-    const result = saveCloRefinements(code, items);
+    const result = await saveCloRefinements(code, items);
     res.json(result);
   } catch (error) {
     console.error('Error saving CLO refinements:', error);
@@ -1084,7 +1085,7 @@ router.get('/:code/stage1/assessment-redesigns', async (req: Request, res: Respo
     if (!exists) {
       return res.status(404).json({ error: 'Course not found' });
     }
-    res.json(getAssessmentRedesignContext(code));
+    res.json(await getAssessmentRedesignContext(code));
   } catch (error) {
     console.error('Error fetching assessment redesigns:', error);
     res.status(500).json({
@@ -1108,7 +1109,7 @@ router.put('/:code/stage1/assessment-redesigns', async (req: Request, res: Respo
       return res.status(404).json({ error: 'Course not found' });
     }
 
-    const result = saveAssessmentRedesigns(code, items);
+    const result = await saveAssessmentRedesigns(code, items);
     res.json(result);
   } catch (error) {
     console.error('Error saving assessment redesigns:', error);
@@ -1126,7 +1127,7 @@ router.get('/:code/stage1/weighting-rubric', async (req: Request, res: Response)
     if (!exists) {
       return res.status(404).json({ error: 'Course not found' });
     }
-    res.json(getWeightingRubricContext(code));
+    res.json(await getWeightingRubricContext(code));
   } catch (error) {
     console.error('Error fetching weighting rubric:', error);
     res.status(500).json({
@@ -1157,7 +1158,7 @@ router.put('/:code/stage1/weighting-rubric', async (req: Request, res: Response)
       return res.status(404).json({ error: 'Course not found' });
     }
 
-    const result = saveWeightingRubric(code, {
+    const result = await saveWeightingRubric(code, {
       course_level_weighting_summary: courseLevelWeightingSummary,
       assessment_structure_reviews: assessmentStructureReviews,
       full_assessment_structure_report: fullAssessmentStructureReport,
@@ -1179,7 +1180,7 @@ router.get('/:code/stage1/integrity-review', async (req: Request, res: Response)
     if (!exists) {
       return res.status(404).json({ error: 'Course not found' });
     }
-    res.json(getIntegrityReviewContext(code));
+    res.json(await getIntegrityReviewContext(code));
   } catch (error) {
     console.error('Error fetching integrity review:', error);
     res.status(500).json({
@@ -1208,7 +1209,7 @@ router.put('/:code/stage1/integrity-review', async (req: Request, res: Response)
       return res.status(404).json({ error: 'Course not found' });
     }
 
-    const result = saveIntegrityReview(code, {
+    const result = await saveIntegrityReview(code, {
       course_level_integrity_summary: courseLevelIntegritySummary,
       assessment_integrity_reviews: assessmentIntegrityReviews,
     });
@@ -1229,7 +1230,7 @@ router.get('/:code/stage1/subtopic-architecture', async (req: Request, res: Resp
     if (!exists) {
       return res.status(404).json({ error: 'Course not found' });
     }
-    res.json(getSubtopicArchitectureContext(code));
+    res.json(await getSubtopicArchitectureContext(code));
   } catch (error) {
     console.error('Error fetching subtopic architecture:', error);
     res.status(500).json({
@@ -1258,7 +1259,7 @@ router.put('/:code/stage1/subtopic-architecture', async (req: Request, res: Resp
       return res.status(404).json({ error: 'Course not found' });
     }
 
-    const result = saveSubtopicArchitecture(code, {
+    const result = await saveSubtopicArchitecture(code, {
       course_summary: courseSummary,
       clo_sections: cloSections,
     });
@@ -1290,12 +1291,12 @@ router.put('/:code/references', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Course not found' });
     }
 
-    const snapshot = fileService.getExtractedSnapshot(code);
+    const snapshot = await fileService.getExtractedSnapshot(code);
     if (!snapshot) {
       return res.status(404).json({ error: 'Course snapshot not found. Run intake first.' });
     }
 
-    fileService.saveExtractedSnapshot(code, { ...snapshot, references: cleaned });
+    await fileService.saveExtractedSnapshot(code, { ...snapshot, references: cleaned });
     res.json({ references: cleaned });
   } catch (error) {
     console.error('Error saving references:', error);
@@ -1315,7 +1316,7 @@ router.post('/:code/confirm/clo-topics', async (req: Request, res: Response) => 
       return res.status(404).json({ error: 'Course not found' });
     }
     
-    const snapshot = fileService.getExtractedSnapshot(code);
+    const snapshot = await fileService.getExtractedSnapshot(code);
     const cloTopics = snapshot?.clo_topics;
     
     if (!cloTopics || cloTopics.length === 0) {
@@ -1328,7 +1329,7 @@ router.post('/:code/confirm/clo-topics', async (req: Request, res: Response) => 
     const coverage = computeCloTopicCoverage(cloTopics, clos);
     
     // Update confirmations
-    const updated = fileService.updateConfirmations(code, {
+    const updated = await fileService.updateConfirmations(code, {
       clo_topics_confirmed_at: new Date().toISOString(),
       clo_topics_summary: `Confirmed: ${coverage.total_topics} topics across ${coverage.total_clos} CLOs. All covered: ${coverage.all_clos_covered}`,
     });
@@ -1356,7 +1357,7 @@ router.post('/:code/confirm/weekly-plan', async (req: Request, res: Response) =>
     }
     
     // Get snapshot to check if CLO distribution exists
-    const snapshot = fileService.getExtractedSnapshot(code);
+    const snapshot = await fileService.getExtractedSnapshot(code);
     if (!snapshot?.clo_distribution) {
       return res.status(400).json({ 
         error: 'No CLO distribution data available. Please run Stage 1 first.' 
@@ -1364,7 +1365,7 @@ router.post('/:code/confirm/weekly-plan', async (req: Request, res: Response) =>
     }
     
     // Update confirmations
-    const updated = fileService.updateConfirmations(code, {
+    const updated = await fileService.updateConfirmations(code, {
       weekly_plan_confirmed_at: new Date().toISOString(),
       weekly_plan_summary: `Confirmed: ${snapshot.clo_distribution.total_clos} CLOs across ${snapshot.clo_distribution.total_weeks} weeks. Fair distribution: ${snapshot.clo_distribution.overall_is_fair}`
     });
@@ -1404,7 +1405,7 @@ router.post('/:code/confirm/graph', async (req: Request, res: Response) => {
     const skippableCount = nodes.filter(n => n.skippable).length;
     
     // Update confirmations
-    const updated = fileService.updateConfirmations(code, {
+    const updated = await fileService.updateConfirmations(code, {
       graph_confirmed_at: new Date().toISOString(),
       graph_summary: `Confirmed: ${nodes.length} nodes (${mandatoryCount} required, ${skippableCount} skippable)`
     });
@@ -1526,9 +1527,9 @@ router.put('/:code/clos/:cloId/nodes', async (req: Request, res: Response) => {
     );
     
     // Clear node graph confirmation since structure changed
-    const confirmations = fileService.getConfirmations(code);
+    const confirmations = await fileService.getConfirmations(code);
     if (confirmations?.node_graph_confirmed_at) {
-      fileService.updateConfirmations(code, {
+      await fileService.updateConfirmations(code, {
         node_graph_confirmed_at: undefined,
         node_graph_summary: undefined
       });
@@ -1609,9 +1610,9 @@ router.put('/:code/clos/:cloId/prerequisites', async (req: Request, res: Respons
     await neo4j.replaceCloPrerequisites(cloId, validEdges);
     
     // Clear node graph confirmation since structure changed
-    const confirmations = fileService.getConfirmations(code);
+    const confirmations = await fileService.getConfirmations(code);
     if (confirmations?.node_graph_confirmed_at) {
-      fileService.updateConfirmations(code, {
+      await fileService.updateConfirmations(code, {
         node_graph_confirmed_at: undefined,
         node_graph_summary: undefined
       });
@@ -1661,7 +1662,7 @@ router.post('/:code/confirm/node-graph', async (req: Request, res: Response) => 
     }
     
     // Update confirmations
-    const updated = fileService.updateConfirmations(code, {
+    const updated = await fileService.updateConfirmations(code, {
       node_graph_confirmed_at: new Date().toISOString(),
       node_graph_summary: `Confirmed: ${nodes.length} nodes across ${cloCount} CLOs, ${edgeCount} prerequisite edges`
     });
@@ -1800,7 +1801,7 @@ router.get('/:code/nodes/:nodeId/content', async (req: Request, res: Response) =
     const { code, nodeId } = req.params;
     
     // Try new Stage 4 content first
-    const stage4Content = getStage4NodeContent(code, nodeId);
+    const stage4Content = await getStage4NodeContent(code, nodeId);
     if (stage4Content) {
       return res.json({ 
         node_id: nodeId, 
@@ -1809,7 +1810,7 @@ router.get('/:code/nodes/:nodeId/content', async (req: Request, res: Response) =
     }
     
     // Fall back to legacy content
-    const content = fileService.getNodeContent(code, nodeId);
+    const content = await fileService.getNodeContent(code, nodeId);
     if (!content) {
       return res.status(404).json({ error: 'Node content not found' });
     }
@@ -1871,7 +1872,7 @@ router.get('/:code/nodes/:nodeId/assessments', async (req: Request, res: Respons
   try {
     const { code, nodeId } = req.params;
     
-    const assessments = getNodeAssessments(code, nodeId);
+    const assessments = await getNodeAssessments(code, nodeId);
     if (assessments.length === 0) {
       return res.status(404).json({ error: 'No assessments found for this node' });
     }
@@ -1938,7 +1939,7 @@ router.get('/:code/workload', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Course not found' });
     }
     
-    const workloadMap = getStage4WorkloadMap(code);
+    const workloadMap = await getStage4WorkloadMap(code);
     if (!workloadMap) {
       return res.status(404).json({ 
         error: 'Workload map not found. Please run Stage 4 first.' 
@@ -1962,7 +1963,7 @@ router.get('/:code/workload/validate', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Course not found' });
     }
     
-    const workloadMap = getStage4WorkloadMap(code);
+    const workloadMap = await getStage4WorkloadMap(code);
     if (!workloadMap) {
       return res.status(404).json({ 
         error: 'Workload map not found. Please run Stage 4 first.' 
@@ -2032,14 +2033,14 @@ router.get('/:code/assessments', async (req: Request, res: Response) => {
     
     // Get all nodes and their assessments
     const nodes = await neo4j.getLearningNodes(code);
-    const allAssessments = nodes.flatMap(node => {
-      const assessments = getNodeAssessments(code, node.node_id);
+    const allAssessments = (await Promise.all(nodes.map(async node => {
+      const assessments = await getNodeAssessments(code, node.node_id);
       return assessments.map(a => ({
         ...a,
         node_learning_intent: node.learning_intent,
         node_type: node.node_type
       }));
-    });
+    }))).flat();
     
     // Group by assessment type
     const byType = {
@@ -2075,9 +2076,9 @@ router.get('/:code/video-scripts', async (req: Request, res: Response) => {
     }
     
     const nodes = await neo4j.getLearningNodes(code);
-    const videoScripts = nodes
-      .map(node => {
-        const script = getNodeVideoScript(code, node.node_id);
+    const videoScripts = (await Promise.all(nodes
+      .map(async node => {
+        const script = await getNodeVideoScript(code, node.node_id);
         if (script) {
           return {
             ...script,
@@ -2086,7 +2087,7 @@ router.get('/:code/video-scripts', async (req: Request, res: Response) => {
           };
         }
         return null;
-      })
+      })))
       .filter(script => script !== null);
     
     res.json({
@@ -2289,7 +2290,7 @@ router.post('/:code/stage/5a', async (req: Request, res: Response) => {
     }
 
     // Gate: graph must be confirmed
-    const confirmations = fileService.getConfirmations(code);
+    const confirmations = await fileService.getConfirmations(code);
     if (!confirmations?.graph_confirmed_at) {
       return res.status(400).json({
         error: 'Graph structure must be confirmed before running Stage 5A. Please confirm the graph on the Graph tab.'

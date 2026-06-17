@@ -106,35 +106,35 @@ function getPreviousLayer(config: Stage1LayerConfig): Stage1LayerConfig | undefi
   return configs.find((c) => c.order === config.order - 1);
 }
 
-function isPreviousLayerApproved(courseCode: string, config: Stage1LayerConfig): boolean {
+async function isPreviousLayerApproved(courseCode: string, config: Stage1LayerConfig): Promise<boolean> {
   if (config.order === 1) return true;
   const prev = getPreviousLayer(config);
   if (!prev) return true;
-  const state = fileService.getStage1LayerState(courseCode, prev.id);
+  const state = await fileService.getStage1LayerState(courseCode, prev.id);
   return state?.status === 'approved';
 }
 
-function computeEffectiveStatus(
+async function computeEffectiveStatus(
   courseCode: string,
   config: Stage1LayerConfig,
   stored?: Stage1LayerState | null
-): Stage1LayerStatus {
+): Promise<Stage1LayerStatus> {
   const raw = stored?.status ?? 'not_started';
   if (raw === 'running') return 'running';
-  if (config.order > 1 && !isPreviousLayerApproved(courseCode, config)) {
+  if (config.order > 1 && !(await isPreviousLayerApproved(courseCode, config))) {
     return 'locked';
   }
   return raw;
 }
 
-export function ensureStage1LayerStates(courseCode: string): Stage1LayerState[] {
+export async function ensureStage1LayerStates(courseCode: string): Promise<Stage1LayerState[]> {
   const configs = getOrderedConfigs();
-  const existing = fileService.getStage1LayersFile(courseCode);
+  const existing = await fileService.getStage1LayersFile(courseCode);
   const states: Stage1LayerState[] = [];
 
   for (const config of configs) {
     const found = existing?.layers.find((l) => l.layerId === config.id);
-    const status = computeEffectiveStatus(courseCode, config, found);
+    const status = await computeEffectiveStatus(courseCode, config, found);
     states.push({
       layerId: config.id,
       status,
@@ -148,7 +148,7 @@ export function ensureStage1LayerStates(courseCode: string): Stage1LayerState[] 
   }
 
   if (!existing) {
-    fileService.saveStage1LayersFile(courseCode, {
+    await fileService.saveStage1LayersFile(courseCode, {
       layers: states.map((s) => ({ ...s, status: s.status === 'locked' ? 'not_started' : s.status })),
       updatedAt: new Date().toISOString(),
     });
@@ -157,17 +157,17 @@ export function ensureStage1LayerStates(courseCode: string): Stage1LayerState[] 
   return states;
 }
 
-export function getLayerStateViews(courseCode: string): LayerStateView[] {
-  ensureStage1LayerStates(courseCode);
+export async function getLayerStateViews(courseCode: string): Promise<LayerStateView[]> {
+  await ensureStage1LayerStates(courseCode);
   const configs = getOrderedConfigs();
 
-  return configs.map((config) => {
-    const stored = fileService.getStage1LayerState(courseCode, config.id);
-    const status = computeEffectiveStatus(courseCode, config, stored);
+  return Promise.all(configs.map(async (config) => {
+    const stored = await fileService.getStage1LayerState(courseCode, config.id);
+    const status = await computeEffectiveStatus(courseCode, config, stored);
     const canRun =
       status !== 'running' &&
       status !== 'locked' &&
-      isPreviousLayerApproved(courseCode, config);
+      (await isPreviousLayerApproved(courseCode, config));
     const canApprove =
       config.approvalRequired &&
       (status === 'generated' || status === 'needs_review' || status === 'needs_revision');
@@ -186,27 +186,27 @@ export function getLayerStateViews(courseCode: string): LayerStateView[] {
       canEdit: config.editEnabled && !!stored?.reportMarkdown,
       canRegenerate: config.regenerateEnabled && canRun,
     };
-  });
+  }));
 }
 
-export function allStage1LayersApproved(courseCode: string): boolean {
-  const views = getLayerStateViews(courseCode);
+export async function allStage1LayersApproved(courseCode: string): Promise<boolean> {
+  const views = await getLayerStateViews(courseCode);
   return views.length > 0 && views.every((v) => v.status === 'approved');
 }
 
-function buildUpstreamContext(courseCode: string, beforeOrder: number): string {
+async function buildUpstreamContext(courseCode: string, beforeOrder: number): Promise<string> {
   const configs = getOrderedConfigs().filter((c) => c.order < beforeOrder);
   const parts: string[] = [];
 
   for (const config of configs) {
-    const state = fileService.getStage1LayerState(courseCode, config.id);
+    const state = await fileService.getStage1LayerState(courseCode, config.id);
     if (state?.status === 'approved' && state.reportMarkdown) {
       parts.push(`### ${config.productOutput}\n${state.reportMarkdown}`);
     }
   }
 
   if (beforeOrder > 2) {
-    const { refinements } = getCloRefinementContext(courseCode);
+    const { refinements } = await getCloRefinementContext(courseCode);
     if (refinements.length) {
       const lines = refinements
         .map((r) => {
@@ -227,7 +227,7 @@ function buildUpstreamContext(courseCode: string, beforeOrder: number): string {
   }
 
   if (beforeOrder > 3) {
-    const { redesigns } = getAssessmentRedesignContext(courseCode);
+    const { redesigns } = await getAssessmentRedesignContext(courseCode);
     if (redesigns.length) {
       const lines = redesigns
         .map((r) => {
@@ -255,21 +255,21 @@ function buildUpstreamContext(courseCode: string, beforeOrder: number): string {
   }
 
   if (beforeOrder > 4) {
-    const weightingRubricContext = buildApprovedWeightingRubricContext(courseCode);
+    const weightingRubricContext = await buildApprovedWeightingRubricContext(courseCode);
     if (weightingRubricContext) {
       parts.unshift(weightingRubricContext);
     }
   }
 
   if (beforeOrder > 5) {
-    const integrityContext = buildApprovedIntegrityContext(courseCode);
+    const integrityContext = await buildApprovedIntegrityContext(courseCode);
     if (integrityContext) {
       parts.unshift(integrityContext);
     }
   }
 
-  const snapshot = fileService.getExtractedSnapshot(courseCode);
-  const contract = fileService.getCourseContract(courseCode);
+  const snapshot = await fileService.getExtractedSnapshot(courseCode);
+  const contract = await fileService.getCourseContract(courseCode);
   if (snapshot) {
     parts.push(
       `### Syllabus evidence (do not copy weekly structure as course design)\n\`\`\`json\n${JSON.stringify(
@@ -324,7 +324,7 @@ async function buildGroundingSection(
 ): Promise<string> {
   try {
     // Query from refined CLOs when available, else the extracted contract CLOs.
-    const { refinements } = getCloRefinementContext(courseCode);
+    const { refinements } = await getCloRefinementContext(courseCode);
     let cloTexts = refinements
       .map((r) =>
         r.sme_decision === 'keep_official'
@@ -334,7 +334,7 @@ async function buildGroundingSection(
       .filter((t): t is string => !!t && !!t.trim());
 
     if (cloTexts.length === 0) {
-      const contract = fileService.getCourseContract(courseCode);
+      const contract = await fileService.getCourseContract(courseCode);
       cloTexts = (contract?.course_learning_outcomes ?? [])
         .map((c) => c.clo_text ?? '')
         .filter((t) => !!t.trim());
@@ -370,11 +370,11 @@ export async function runStage1Layer(
     throw new Error(`Unknown Stage 1 layer: ${layerId}`);
   }
 
-  if (!isPreviousLayerApproved(courseCode, config)) {
+  if (!(await isPreviousLayerApproved(courseCode, config))) {
     throw new Error(`Layer "${config.name}" is locked until the previous layer is approved`);
   }
 
-  fileService.updateStage1LayerState(courseCode, layerId, {
+  await fileService.updateStage1LayerState(courseCode, layerId, {
     status: 'running',
     error: undefined,
   });
@@ -395,7 +395,7 @@ export async function runStage1Layer(
     let outputJson: unknown;
 
     if (layerId === 'layer1-intake') {
-      const snapshot = fileService.getExtractedSnapshot(courseCode);
+      const snapshot = await fileService.getExtractedSnapshot(courseCode);
       const rawText = snapshot?.raw_text;
       if (!rawText) {
         throw new Error('No syllabus text found. Upload a course first.');
@@ -415,8 +415,8 @@ export async function runStage1Layer(
         throw new Error(result.error || result.message);
       }
 
-      const updatedSnapshot = fileService.getExtractedSnapshot(courseCode);
-      const contract = fileService.getCourseContract(courseCode);
+      const updatedSnapshot = await fileService.getExtractedSnapshot(courseCode);
+      const contract = await fileService.getCourseContract(courseCode);
       if (!updatedSnapshot || !contract) {
         throw new Error('Extraction completed but snapshot/contract missing');
       }
@@ -436,7 +436,7 @@ export async function runStage1Layer(
         },
       };
     } else {
-      const upstream = buildUpstreamContext(courseCode, config.order);
+      const upstream = await buildUpstreamContext(courseCode, config.order);
       const groundingSection = await buildGroundingSection(courseCode, config);
       const userPrompt = `${config.taskPrompt}\n\n---\n\n## Upstream approved outputs and evidence\n\n${upstream}${groundingSection}`;
 
@@ -462,15 +462,15 @@ export async function runStage1Layer(
       outputJson = extracted.json;
 
       if (layerId === 'layer2-clo-review') {
-        const contract = fileService.getCourseContract(courseCode);
+        const contract = await fileService.getCourseContract(courseCode);
         const clos = contract?.course_learning_outcomes ?? [];
         const suggestions = parseLayer2Suggestions(outputJson, clos);
         outputJson = { ...(typeof outputJson === 'object' && outputJson ? outputJson : {}), clos: suggestions };
-        seedRefinementsFromSuggestions(courseCode);
+        await seedRefinementsFromSuggestions(courseCode);
       }
 
       if (layerId === 'layer3-assessment-redesign') {
-        const snapshot = fileService.getExtractedSnapshot(courseCode);
+        const snapshot = await fileService.getExtractedSnapshot(courseCode);
         const originalAssessments = snapshot?.assessments ?? [];
         const suggestions = parseLayer3Suggestions(outputJson, originalAssessments);
         outputJson = {
@@ -478,35 +478,35 @@ export async function runStage1Layer(
           assessments: suggestions,
         };
         // Persist outputJson before seeding so the seed captures fresh suggestions
-        fileService.updateStage1LayerState(courseCode, layerId, { outputJson });
-        seedRedesignsFromSuggestions(courseCode);
+        await fileService.updateStage1LayerState(courseCode, layerId, { outputJson });
+        await seedRedesignsFromSuggestions(courseCode);
       }
 
       if (layerId === 'layer4-weighting-rubric') {
         // Persist raw AI output before seeding so the seed reads fresh suggestions,
         // then build the SME working file from Layer 3 approved finals + AI rubric.
-        fileService.updateStage1LayerState(courseCode, layerId, { outputJson });
-        seedWeightingRubricFromOutput(courseCode);
+        await fileService.updateStage1LayerState(courseCode, layerId, { outputJson });
+        await seedWeightingRubricFromOutput(courseCode);
       }
 
       if (layerId === 'layer5-integrity-ai') {
         // Persist raw AI output before seeding so the seed reads fresh suggestions,
         // then build the SME working file from Layer 3 finals + Layer 4 weights/rubric.
-        fileService.updateStage1LayerState(courseCode, layerId, { outputJson });
-        seedIntegrityFromOutput(courseCode);
+        await fileService.updateStage1LayerState(courseCode, layerId, { outputJson });
+        await seedIntegrityFromOutput(courseCode);
       }
 
       if (layerId === 'layer6-subtopic-architecture') {
         // Persist raw AI output before seeding so the seed reads fresh subtopics,
         // then build the SME working file from refined CLOs + approved assessments.
-        fileService.updateStage1LayerState(courseCode, layerId, { outputJson });
-        seedSubtopicArchitectureFromOutput(courseCode);
+        await fileService.updateStage1LayerState(courseCode, layerId, { outputJson });
+        await seedSubtopicArchitectureFromOutput(courseCode);
       }
     }
 
     completeStageProgress(courseCode, 1, `${config.productOutput} generated`);
 
-    return fileService.updateStage1LayerState(courseCode, layerId, {
+    return await fileService.updateStage1LayerState(courseCode, layerId, {
       status: 'needs_review',
       reportMarkdown,
       outputJson,
@@ -516,51 +516,51 @@ export async function runStage1Layer(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     errorStageProgress(courseCode, 1, message);
-    return fileService.updateStage1LayerState(courseCode, layerId, {
+    return await fileService.updateStage1LayerState(courseCode, layerId, {
       status: 'blocked',
       error: message,
     });
   }
 }
 
-export function approveStage1Layer(courseCode: string, layerId: string): Stage1LayerState {
+export async function approveStage1Layer(courseCode: string, layerId: string): Promise<Stage1LayerState> {
   const config = getStage1LayerConfig(layerId);
   if (!config) throw new Error(`Unknown layer: ${layerId}`);
 
-  const state = fileService.getStage1LayerState(courseCode, layerId);
+  const state = await fileService.getStage1LayerState(courseCode, layerId);
   if (!state?.reportMarkdown) {
     throw new Error('No report to approve. Run the layer first.');
   }
 
-  const updated = fileService.updateStage1LayerState(courseCode, layerId, {
+  const updated = await fileService.updateStage1LayerState(courseCode, layerId, {
     status: 'approved',
     approvedAt: new Date().toISOString(),
   });
 
   if (layerId === 'layer2-clo-review') {
-    const { refinements } = getCloRefinementContext(courseCode);
+    const { refinements } = await getCloRefinementContext(courseCode);
     assertLayer2ReadyForApproval(refinements);
-    applyApprovedRefinementsToContract(courseCode);
+    await applyApprovedRefinementsToContract(courseCode);
   }
 
   if (layerId === 'layer3-assessment-redesign') {
-    const { redesigns } = getAssessmentRedesignContext(courseCode);
+    const { redesigns } = await getAssessmentRedesignContext(courseCode);
     assertLayer3ReadyForApproval(redesigns);
-    applyApprovedRedesignsToContract(courseCode);
+    await applyApprovedRedesignsToContract(courseCode);
   }
 
   if (layerId === 'layer4-weighting-rubric') {
-    assertLayer4ReadyForApproval(courseCode);
+    await assertLayer4ReadyForApproval(courseCode);
   }
 
   if (layerId === 'layer5-integrity-ai') {
-    assertLayer5ReadyForApproval(courseCode);
+    await assertLayer5ReadyForApproval(courseCode);
   }
 
   if (layerId === 'layer6-subtopic-architecture') {
-    assertLayer6ReadyForApproval(courseCode);
-    applySubtopicsToSnapshot(courseCode);
-    fileService.updateConfirmations(courseCode, {
+    await assertLayer6ReadyForApproval(courseCode);
+    await applySubtopicsToSnapshot(courseCode);
+    await fileService.updateConfirmations(courseCode, {
       clo_topics_confirmed_at: new Date().toISOString(),
       clo_topics_summary: 'Approved via Stage 1 Layer 6: Self-Paced Subtopic Architecture',
     });
@@ -569,17 +569,17 @@ export function approveStage1Layer(courseCode: string, layerId: string): Stage1L
   return updated;
 }
 
-export function rejectStage1Layer(courseCode: string, layerId: string): Stage1LayerState {
+export async function rejectStage1Layer(courseCode: string, layerId: string): Promise<Stage1LayerState> {
   return fileService.updateStage1LayerState(courseCode, layerId, {
     status: 'needs_revision',
   });
 }
 
-export function saveStage1LayerOutput(
+export async function saveStage1LayerOutput(
   courseCode: string,
   layerId: string,
   reportMarkdown: string
-): Stage1LayerState {
+): Promise<Stage1LayerState> {
   const config = getStage1LayerConfig(layerId);
   if (!config?.editEnabled) {
     throw new Error('Manual edit is disabled for this layer');
@@ -596,14 +596,14 @@ export function saveStage1LayerOutput(
  * Project the SME-approved Layer 6 subtopic architecture down to the thin
  * `clo_topics` model that Stage 2 still consumes, overwriting any prior topics.
  */
-function applySubtopicsToSnapshot(courseCode: string): void {
-  const snapshot = fileService.getExtractedSnapshot(courseCode);
+async function applySubtopicsToSnapshot(courseCode: string): Promise<void> {
+  const snapshot = await fileService.getExtractedSnapshot(courseCode);
   if (!snapshot) return;
 
-  const cloTopics = buildCloTopicsFromArchitecture(courseCode);
+  const cloTopics = await buildCloTopicsFromArchitecture(courseCode);
   if (!cloTopics) return;
 
-  fileService.saveExtractedSnapshot(courseCode, {
+  await fileService.saveExtractedSnapshot(courseCode, {
     ...snapshot,
     clo_topics: cloTopics,
   });

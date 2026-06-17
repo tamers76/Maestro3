@@ -128,6 +128,8 @@ function CLORefinementZone({
   onUpdate,
   onApproveClo,
   onSaveNote,
+  expanded,
+  onToggle,
 }: {
   clo: CLO
   item: CloRefinementItem
@@ -138,8 +140,9 @@ function CLORefinementZone({
   onUpdate: (item: CloRefinementItem) => void
   onApproveClo?: (item: CloRefinementItem) => void | Promise<void>
   onSaveNote?: () => void | Promise<void>
+  expanded: boolean
+  onToggle: () => void
 }) {
-  const [expanded, setExpanded] = useState(true)
   const colors = CLO_COLORS[colorIndex % CLO_COLORS.length]
 
   const applyDecision = (decision: SmeRefinementDecision) => {
@@ -160,7 +163,7 @@ function CLORefinementZone({
     <div className={cn('rounded-xl border-2 overflow-hidden', colors.border)}>
       <div
         className={cn('px-5 py-4 border-b cursor-pointer', colors.border, colors.bg)}
-        onClick={() => setExpanded(!expanded)}
+        onClick={onToggle}
       >
         <div className="flex items-start gap-3">
           <div className={cn('p-2.5 rounded-lg', colors.badge)}>
@@ -232,16 +235,25 @@ function CLORefinementZone({
             <section>
               <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-2">SME Decision</h4>
               <div className="flex flex-wrap gap-2">
-                {(['keep_official', 'accept_ai_refinement', 'custom_wording'] as const).map((d) => (
-                  <Button
-                    key={d}
-                    size="sm"
-                    variant={item.sme_decision === d ? 'default' : 'outline'}
-                    onClick={() => applyDecision(d)}
-                  >
-                    {DECISION_LABELS[d]}
-                  </Button>
-                ))}
+                {(['keep_official', 'accept_ai_refinement', 'custom_wording'] as const).map((d) => {
+                  const selected = item.sme_decision === d
+                  return (
+                    <Button
+                      key={d}
+                      size="sm"
+                      variant={selected ? 'default' : 'outline'}
+                      onClick={() => applyDecision(d)}
+                      className={cn(
+                        'transition-shadow',
+                        selected
+                          ? 'ring-1 ring-primary/60 dark:shadow-lg dark:shadow-primary/20'
+                          : 'border border-border dark:border-white/15 dark:shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_1px_3px_rgba(0,0,0,0.4)] hover:border-primary/50 dark:hover:border-primary/50 dark:hover:shadow-primary/20',
+                      )}
+                    >
+                      {DECISION_LABELS[d]}
+                    </Button>
+                  )
+                })}
               </div>
             </section>
           )}
@@ -438,6 +450,17 @@ export default function CLORefinementEditor({
     if (draftSummary) onSummaryChange?.(draftSummary)
   }, [draftSummary, onSummaryChange])
 
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+
+  const toggleExpanded = (cloId: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(cloId)) next.delete(cloId)
+      else next.add(cloId)
+      return next
+    })
+  }
+
   const handleUpdate = (cloId: string, item: CloRefinementItem) => {
     setDraft((prev) => prev.map((r) => (r.clo_id === cloId ? item : r)))
   }
@@ -471,6 +494,25 @@ export default function CLORefinementEditor({
   const handleApproveClo = async (cloId: string, updated: CloRefinementItem) => {
     const next = draft.map((r) => (r.clo_id === cloId ? updated : r))
     setDraft(next)
+
+    // Auto-advance UI: collapse the just-approved item and open the next
+    // not-yet-approved CLO by rendered order (none if all later are approved).
+    const approvedIndex = clos.findIndex((c) => c.clo_id === cloId)
+    let nextCloId: string | null = null
+    for (let i = approvedIndex + 1; i < clos.length; i++) {
+      const candidate = next.find((r) => r.clo_id === clos[i].clo_id)
+      if (candidate && candidate.approval_status !== 'approved') {
+        nextCloId = clos[i].clo_id
+        break
+      }
+    }
+    setExpandedIds((prev) => {
+      const updatedSet = new Set(prev)
+      updatedSet.delete(cloId)
+      if (nextCloId) updatedSet.add(nextCloId)
+      return updatedSet
+    })
+
     await handleSave(next)
   }
 
@@ -570,6 +612,8 @@ export default function CLORefinementEditor({
                 onSaveNote={async () => {
                   await handleSave()
                 }}
+                expanded={expandedIds.has(clo.clo_id)}
+                onToggle={() => toggleExpanded(clo.clo_id)}
               />
             )
           })}

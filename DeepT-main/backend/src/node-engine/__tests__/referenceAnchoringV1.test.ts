@@ -15,12 +15,10 @@
  * All filesystem tests use self-cleaning temp courses (mirrors withTempCourse in
  * referenceGrounding.test.ts).
  */
-import test from 'node:test';
+import test, { before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, rmSync } from 'fs';
-import { join } from 'path';
 
-import type { ReferenceChunk, ReferenceDocument, ReferenceManifest } from '../../models/schemas.js';
+import type { ReferenceChunk, ReferenceDocument } from '../../models/schemas.js';
 import { keywordSearch } from '../../services/keywordSearch.service.js';
 import { fuseHybrid } from '../../services/referenceRetrieval.service.js';
 import {
@@ -31,26 +29,22 @@ import {
 } from '../../services/contextualEmbedding.service.js';
 import { detectDuplicateDocuments } from '../../services/referenceDedup.service.js';
 import { reembedCourseWithContext } from '../../services/referenceIngestion.service.js';
-import * as fileService from '../../services/file.service.js';
+import * as referenceRepo from '../../db/repos/referenceRepo.js';
+import { dbTestsEnabled, setupTestDb, resetTestData, teardownTestDb } from '../../db/testSupport.js';
 
-const DATA_DIR = join(process.cwd(), '..', 'data', 'courses');
+// Dedup + re-embed read documents/chunks from Postgres, so they run only under
+// RUN_DB_TESTS=1. BM25, hybrid fusion, and contextual-header helpers are pure.
+const dbSkip = dbTestsEnabled ? false : 'requires RUN_DB_TESTS=1';
 
-function withTempCourse(code: string, fn: () => void | Promise<void>): void | Promise<void> {
-  const dir = join(DATA_DIR, code);
-  const cleanup = () => {
-    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-  };
-  try {
-    const result = fn();
-    if (result instanceof Promise) {
-      return result.finally(cleanup);
-    }
-    cleanup();
-  } catch (error) {
-    cleanup();
-    throw error;
-  }
-}
+before(async () => {
+  if (dbTestsEnabled) await setupTestDb();
+});
+beforeEach(async () => {
+  if (dbTestsEnabled) await resetTestData();
+});
+after(async () => {
+  if (dbTestsEnabled) await teardownTestDb();
+});
 
 function makeChunk(overrides: Partial<ReferenceChunk> & Pick<ReferenceChunk, 'chunk_id' | 'doc_id' | 'text'>): ReferenceChunk {
   return {
@@ -190,108 +184,75 @@ test('batch header helper does NOT regenerate when content_hash matches (cache h
 // 4. Dedup (detect + report only)
 // ===========================================================================
 
-test('detectDuplicateDocuments groups near-identical docs with a deterministic canonical', () => {
+test('detectDuplicateDocuments groups near-identical docs with a deterministic canonical', { skip: dbSkip }, async () => {
   const CODE = 'DEDUPTEST';
-  withTempCourse(CODE, () => {
-    const dupTextA = 'Adaptive leadership requires distributing authority across the school.';
-    const dupTextB = 'Deeper learning is supported by coherent instructional systems.';
+  const dupTextA = 'Adaptive leadership requires distributing authority across the school.';
+  const dupTextB = 'Deeper learning is supported by coherent instructional systems.';
 
-    const docA = makeDoc({
-      doc_id: 'docA',
-      course_code: CODE,
-      uploaded_at: '2026-06-12T10:00:00.000Z',
-      char_count: 120,
-      chunk_count: 2,
-    });
-    const docB = makeDoc({
-      doc_id: 'docB',
-      course_code: CODE,
-      uploaded_at: '2026-06-12T11:00:00.000Z',
-      char_count: 120,
-      chunk_count: 2,
-    });
-    const docC = makeDoc({
-      doc_id: 'docC',
-      course_code: CODE,
-      uploaded_at: '2026-06-12T12:00:00.000Z',
-      char_count: 5000,
-      chunk_count: 2,
-    });
+  const docA = makeDoc({ doc_id: 'docA', course_code: CODE, uploaded_at: '2026-06-12T10:00:00.000Z', char_count: 120, chunk_count: 2 });
+  const docB = makeDoc({ doc_id: 'docB', course_code: CODE, uploaded_at: '2026-06-12T11:00:00.000Z', char_count: 120, chunk_count: 2 });
+  const docC = makeDoc({ doc_id: 'docC', course_code: CODE, uploaded_at: '2026-06-12T12:00:00.000Z', char_count: 5000, chunk_count: 2 });
 
-    const manifest: ReferenceManifest = {
-      course_code: CODE,
-      documents: [docA, docB, docC],
-      vector_backend: 'json',
-      updated_at: '2026-06-12T12:00:00.000Z',
-    };
-    fileService.saveReferenceManifest(CODE, manifest);
+  for (const d of [docA, docB, docC]) await referenceRepo.saveDocument(d, 'text');
 
-    fileService.saveReferenceChunks(CODE, 'docA', [
-      makeChunk({ chunk_id: 'a0', doc_id: 'docA', course_code: CODE, text: dupTextA }),
-      makeChunk({ chunk_id: 'a1', doc_id: 'docA', course_code: CODE, text: dupTextB }),
-    ]);
+  await referenceRepo.upsertChunks([
+    makeChunk({ chunk_id: 'a0', doc_id: 'docA', course_code: CODE, text: dupTextA, embedding: [] }),
+    makeChunk({ chunk_id: 'a1', doc_id: 'docA', course_code: CODE, text: dupTextB, embedding: [] }),
     // docB carries the SAME content (a re-upload) with slightly different whitespace.
-    fileService.saveReferenceChunks(CODE, 'docB', [
-      makeChunk({ chunk_id: 'b0', doc_id: 'docB', course_code: CODE, text: `  ${dupTextA}  ` }),
-      makeChunk({ chunk_id: 'b1', doc_id: 'docB', course_code: CODE, text: dupTextB }),
-    ]);
-    fileService.saveReferenceChunks(CODE, 'docC', [
-      makeChunk({ chunk_id: 'c0', doc_id: 'docC', course_code: CODE, text: 'A completely unrelated discussion of marine biology.' }),
-      makeChunk({ chunk_id: 'c1', doc_id: 'docC', course_code: CODE, text: 'Coral reefs host diverse ecosystems in warm shallow seas.' }),
-    ]);
+    makeChunk({ chunk_id: 'b0', doc_id: 'docB', course_code: CODE, text: `  ${dupTextA}  `, embedding: [] }),
+    makeChunk({ chunk_id: 'b1', doc_id: 'docB', course_code: CODE, text: dupTextB, embedding: [] }),
+    makeChunk({ chunk_id: 'c0', doc_id: 'docC', course_code: CODE, text: 'A completely unrelated discussion of marine biology.', embedding: [] }),
+    makeChunk({ chunk_id: 'c1', doc_id: 'docC', course_code: CODE, text: 'Coral reefs host diverse ecosystems in warm shallow seas.', embedding: [] }),
+  ]);
 
-    const report = detectDuplicateDocuments(CODE);
-    assert.equal(report.duplicate_group_count, 1, 'exactly one duplicate group');
+  const report = await detectDuplicateDocuments(CODE);
+  assert.equal(report.duplicate_group_count, 1, 'exactly one duplicate group');
 
-    const group = report.groups[0];
-    assert.deepEqual(group.doc_ids.sort(), ['docA', 'docB']);
-    assert.ok(!group.doc_ids.includes('docC'), 'unrelated doc is not grouped');
-    // Equal chunk_count → earlier uploaded_at wins → docA.
-    assert.equal(group.suggested_canonical_doc_id, 'docA');
-    assert.ok(group.similarity >= 0.9, 'high similarity reported');
-  });
+  const group = report.groups[0];
+  assert.deepEqual(group.doc_ids.sort(), ['docA', 'docB']);
+  assert.ok(!group.doc_ids.includes('docC'), 'unrelated doc is not grouped');
+  // Equal chunk_count → earlier uploaded_at wins → docA.
+  assert.equal(group.suggested_canonical_doc_id, 'docA');
+  assert.ok(group.similarity >= 0.9, 'high similarity reported');
 });
 
 // ===========================================================================
 // 5. Backfill idempotency
 // ===========================================================================
 
-test('reembedCourseWithContext is idempotent: 0 header calls / 0 re-embeds when nothing changed', async () => {
+test('reembedCourseWithContext is idempotent: 0 header calls / 0 re-embeds when nothing changed', { skip: dbSkip }, async () => {
   const CODE = 'REEMBEDIDEM';
-  await withTempCourse(CODE, async () => {
-    const t0 = 'Foundational concept passage for the course.';
-    const t1 = 'An applied example that builds on the foundation.';
+  const t0 = 'Foundational concept passage for the course.';
+  const t1 = 'An applied example that builds on the foundation.';
 
-    const manifest: ReferenceManifest = {
-      course_code: CODE,
-      documents: [makeDoc({ doc_id: 'd1', course_code: CODE, chunk_count: 2, contextual_embeddings: true })],
-      vector_backend: 'json',
-      updated_at: '2026-01-01T00:00:00.000Z',
-    };
-    fileService.saveReferenceManifest(CODE, manifest);
+  await referenceRepo.saveDocument(
+    makeDoc({ doc_id: 'd1', course_code: CODE, chunk_count: 2, contextual_embeddings: true }),
+    'doc text'
+  );
 
-    // Pre-seed as already-contextualized: header present + content_hash matches text.
-    fileService.saveReferenceChunks(CODE, 'd1', [
-      makeChunk({
-        chunk_id: 'd1-C0', doc_id: 'd1', course_code: CODE, seq: 0, text: t0,
-        context_header: 'Existing header 0', content_hash: computeContentHash(t0),
-      }),
-      makeChunk({
-        chunk_id: 'd1-C1', doc_id: 'd1', course_code: CODE, seq: 1, text: t1,
-        context_header: 'Existing header 1', content_hash: computeContentHash(t1),
-      }),
-    ]);
+  // Pre-seed as already-contextualized + already-embedded (1536-dim so the column
+  // accepts it): header present + content_hash matches → no header gen, no re-embed.
+  const embedded = new Array<number>(1536).fill(0.01);
+  await referenceRepo.upsertChunks([
+    makeChunk({
+      chunk_id: 'd1-C0', doc_id: 'd1', course_code: CODE, seq: 0, text: t0,
+      context_header: 'Existing header 0', content_hash: computeContentHash(t0), embedding: embedded,
+    }),
+    makeChunk({
+      chunk_id: 'd1-C1', doc_id: 'd1', course_code: CODE, seq: 1, text: t1,
+      context_header: 'Existing header 1', content_hash: computeContentHash(t1), embedding: embedded,
+    }),
+  ]);
 
-    const first = await reembedCourseWithContext(CODE);
-    assert.equal(first.docs, 1);
-    assert.equal(first.chunks, 2);
-    assert.equal(first.headersGenerated, 0, 'no header LLM calls when cache is warm');
-    assert.equal(first.reembedded, 0, 'no re-embeds when nothing changed');
-    assert.equal(first.cacheHits, 2);
+  const first = await reembedCourseWithContext(CODE);
+  assert.equal(first.docs, 1);
+  assert.equal(first.chunks, 2);
+  assert.equal(first.headersGenerated, 0, 'no header LLM calls when cache is warm');
+  assert.equal(first.reembedded, 0, 'no re-embeds when nothing changed');
+  assert.equal(first.cacheHits, 2);
 
-    // Second run is likewise a no-op.
-    const second = await reembedCourseWithContext(CODE);
-    assert.equal(second.headersGenerated, 0);
-    assert.equal(second.reembedded, 0);
-  });
+  // Second run is likewise a no-op.
+  const second = await reembedCourseWithContext(CODE);
+  assert.equal(second.headersGenerated, 0);
+  assert.equal(second.reembedded, 0);
 });

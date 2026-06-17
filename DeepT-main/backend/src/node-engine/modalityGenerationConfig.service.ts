@@ -41,18 +41,23 @@ function buildSeedConfig(): ModalityGenerationConfigFile {
   };
 }
 
-/** Load the config document, seeding + persisting it on first run. Cached. */
-function getConfigFile(): ModalityGenerationConfigFile {
-  if (cachedConfig) return cachedConfig;
-
-  const existing = readModalityGenerationConfig();
+/** Hydrate the cache from Postgres at startup, seeding + persisting on first run. */
+export async function hydrateModalityConfig(): Promise<ModalityGenerationConfigFile> {
+  const existing = await readModalityGenerationConfig();
   if (existing && Array.isArray(existing.configs) && existing.configs.length > 0) {
     cachedConfig = existing;
     return existing;
   }
-
   const seeded = buildSeedConfig();
-  writeModalityGenerationConfig(seeded);
+  await writeModalityGenerationConfig(seeded);
+  cachedConfig = seeded;
+  return seeded;
+}
+
+/** The config document (cache-backed, synchronous). Falls back to the in-code seed. */
+function getConfigFile(): ModalityGenerationConfigFile {
+  if (cachedConfig) return cachedConfig;
+  const seeded = buildSeedConfig();
   cachedConfig = seeded;
   return seeded;
 }
@@ -93,10 +98,10 @@ export type ModalityGenerationConfigUpdate = Partial<
  * ONLY — it does NOT touch the prompt-template registry, so no prompt version is
  * minted. Returns the updated, re-validated config.
  */
-export function updateConfigForVehicle(
+export async function updateConfigForVehicle(
   vehicle: Vehicle,
   update: ModalityGenerationConfigUpdate
-): ModalityGenerationConfig {
+): Promise<ModalityGenerationConfig> {
   const file = getConfigFile();
   const index = file.configs.findIndex((c) => c.vehicle === vehicle);
   if (index === -1) {
@@ -109,7 +114,7 @@ export function updateConfigForVehicle(
 
   file.configs[index] = merged;
   file.updated_at = new Date().toISOString();
-  writeModalityGenerationConfig(file);
+  await writeModalityGenerationConfig(file);
   cachedConfig = file;
   return merged;
 }

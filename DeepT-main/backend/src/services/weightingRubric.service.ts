@@ -289,12 +289,12 @@ export interface WeightingRubricContext {
   layer4GeneratedAt?: string;
 }
 
-export function getWeightingRubricContext(courseCode: string): WeightingRubricContext {
-  const snapshot = fileService.getExtractedSnapshot(courseCode);
+export async function getWeightingRubricContext(courseCode: string): Promise<WeightingRubricContext> {
+  const snapshot = await fileService.getExtractedSnapshot(courseCode);
   const snapshotAssessments = snapshot?.assessments ?? [];
-  const { redesigns } = getAssessmentRedesignContext(courseCode);
+  const { redesigns } = await getAssessmentRedesignContext(courseCode);
 
-  const layer4 = fileService.getStage1LayerState(courseCode, LAYER4_ID);
+  const layer4 = await fileService.getStage1LayerState(courseCode, LAYER4_ID);
   const aiWeighting = parseAiWeighting(layer4?.outputJson);
   const aiReviews = parseAiReviews(layer4?.outputJson);
   const fullReport =
@@ -305,7 +305,7 @@ export function getWeightingRubricContext(courseCode: string): WeightingRubricCo
         ])
       : undefined;
 
-  const saved = fileService.getWeightingRubricFile(courseCode);
+  const saved = await fileService.getWeightingRubricFile(courseCode);
   const savedWeightById = new Map<string, WeightEntry>();
   for (const w of saved?.course_level_weighting_summary?.weights ?? []) {
     if (w.assessment_id) savedWeightById.set(w.assessment_id, w);
@@ -461,18 +461,18 @@ export function rubricWeightTotal(rubric: AnalyticRubricCriterion[]): number {
 // Save (whole SME working file)
 // ----------------------------------------------------------------------------
 
-export function saveWeightingRubric(
+export async function saveWeightingRubric(
   courseCode: string,
   payload: {
     course_level_weighting_summary: CourseLevelWeightingSummary;
     assessment_structure_reviews: AssessmentStructureReview[];
     full_assessment_structure_report?: string;
   }
-): {
+): Promise<{
   course_level_weighting_summary: CourseLevelWeightingSummary;
   assessment_structure_reviews: AssessmentStructureReview[];
   summary: WeightingRubricReviewSummary;
-} {
+}> {
   const incoming = payload.course_level_weighting_summary;
   const selectedTotalRaw = (incoming?.weights ?? []).reduce(
     (s, w) => s + parsePct(w.selected_weight),
@@ -525,7 +525,7 @@ export function saveWeightingRubric(
     full_assessment_structure_report: payload.full_assessment_structure_report,
     updated_at: new Date().toISOString(),
   };
-  fileService.saveWeightingRubricFile(courseCode, file);
+  await fileService.saveWeightingRubricFile(courseCode, file);
 
   return {
     course_level_weighting_summary: courseLevel,
@@ -534,9 +534,9 @@ export function saveWeightingRubric(
   };
 }
 
-export function seedWeightingRubricFromOutput(courseCode: string): WeightingRubricContext {
-  const ctx = getWeightingRubricContext(courseCode);
-  saveWeightingRubric(courseCode, {
+export async function seedWeightingRubricFromOutput(courseCode: string): Promise<WeightingRubricContext> {
+  const ctx = await getWeightingRubricContext(courseCode);
+  await saveWeightingRubric(courseCode, {
     course_level_weighting_summary: ctx.course_level_weighting_summary,
     assessment_structure_reviews: ctx.assessment_structure_reviews,
     full_assessment_structure_report: ctx.full_assessment_structure_report,
@@ -544,8 +544,8 @@ export function seedWeightingRubricFromOutput(courseCode: string): WeightingRubr
   return ctx;
 }
 
-export function assertLayer4ReadyForApproval(courseCode: string): void {
-  const ctx = getWeightingRubricContext(courseCode);
+export async function assertLayer4ReadyForApproval(courseCode: string): Promise<void> {
+  const ctx = await getWeightingRubricContext(courseCode);
   const { summary, course_level_weighting_summary, assessment_structure_reviews } = ctx;
 
   if (course_level_weighting_summary.weight_decision === 'pending') {
@@ -580,8 +580,8 @@ export function assertLayer4ReadyForApproval(courseCode: string): void {
 }
 
 /** Compact authoritative summary for downstream layers (order > 4). */
-export function buildApprovedWeightingRubricContext(courseCode: string): string {
-  const saved = fileService.getWeightingRubricFile(courseCode);
+export async function buildApprovedWeightingRubricContext(courseCode: string): Promise<string> {
+  const saved = await fileService.getWeightingRubricFile(courseCode);
   if (!saved) return '';
   const { course_level_weighting_summary: cw, assessment_structure_reviews: reviews } = saved;
   const weightLines = cw.weights

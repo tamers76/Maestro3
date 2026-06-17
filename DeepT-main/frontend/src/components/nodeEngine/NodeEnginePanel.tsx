@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
+  AlertTriangle,
   Boxes,
   Check,
   ChevronDown,
   ChevronRight,
-  Eye,
-  EyeOff,
   Loader2,
   Lock,
   Play,
   RefreshCw,
+  Search,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
@@ -22,11 +22,12 @@ import {
   fetchSubtopicArchitecture,
   generateNodeSet,
   AcademicApprovalRequiredError,
+  type NodeEngineNode,
   type NodeEngineNodeSet,
   type SubtopicArchitectureResponse,
 } from '@/services/api'
 import { NODE_ENGINE_LAYER_MAP, type NodeEngineLayer } from './nodeEngineLayers'
-import NodeSetReport from './NodeSetReport'
+import { NodeCard, isCriticalNode } from './NodeSetReport'
 
 /**
  * Maestro Node Engine — operational layer workflow.
@@ -83,22 +84,30 @@ interface ApprovedSubtopic {
   assessment_connection: string[]
 }
 
-function collectApprovedSubtopics(arch: SubtopicArchitectureResponse | null): ApprovedSubtopic[] {
+interface CloGroup {
+  clo_id: string
+  refined_clo: string
+  subtopics: ApprovedSubtopic[]
+}
+
+/** Group the approved Layer 6 subtopics under their CLO, preserving CLO order
+ *  and wording. CLOs with no approved subtopics are dropped. */
+function buildCloGroups(arch: SubtopicArchitectureResponse | null): CloGroup[] {
   if (!arch) return []
-  const out: ApprovedSubtopic[] = []
-  for (const section of arch.clo_sections) {
-    for (const st of section.subtopics) {
-      if (st.approval_status === 'approved') {
-        out.push({
-          subtopic_id: st.subtopic_id,
-          title: st.proposed_subtopic,
+  return arch.clo_sections
+    .map((section) => ({
+      clo_id: section.clo_id,
+      refined_clo: section.refined_clo,
+      subtopics: section.subtopics
+        .filter((s) => s.approval_status === 'approved')
+        .map((s) => ({
+          subtopic_id: s.subtopic_id,
+          title: s.proposed_subtopic,
           clo_id: section.clo_id,
-          assessment_connection: st.assessment_connection ?? [],
-        })
-      }
-    }
-  }
-  return out
+          assessment_connection: s.assessment_connection ?? [],
+        })),
+    }))
+    .filter((g) => g.subtopics.length > 0)
 }
 
 export default function NodeEnginePanel({ courseCode }: { courseCode: string }) {
@@ -107,18 +116,32 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
   const [arch, setArch] = useState<SubtopicArchitectureResponse | null>(null)
   const [archLoading, setArchLoading] = useState(true)
 
-  const [selectedSubtopicId, setSelectedSubtopicId] = useState<string>('')
-  const [nodeSet, setNodeSet] = useState<NodeEngineNodeSet | null>(null)
-  const [nodeSetLoading, setNodeSetLoading] = useState(false)
-  const [generating, setGenerating] = useState(false)
-  const [approving, setApproving] = useState(false)
+  // Per-subtopic node sets, keyed by subtopic id (null = no set yet).
+  const [nodeSetsBySubtopicId, setNodeSetsBySubtopicId] = useState<
+    Record<string, NodeEngineNodeSet | null>
+  >({})
+  const [hydrating, setHydrating] = useState(false)
+  // Which CLO is currently mid-batch (generate or approve), plus live progress.
+  const [generatingCloId, setGeneratingCloId] = useState<string | null>(null)
+  const [approvingCloId, setApprovingCloId] = useState<string | null>(null)
+  const [batchProgress, setBatchProgress] = useState<{
+    cloId: string
+    done: number
+    total: number
+  } | null>(null)
+  // Whole-course generation (every CLO's subtopics in one sequential run).
+  const [generatingAll, setGeneratingAll] = useState(false)
+  const [courseProgress, setCourseProgress] = useState<{ done: number; total: number } | null>(null)
+  const [query, setQuery] = useState('')
 
   const [expandedLayer, setExpandedLayer] = useState<number | null>(1)
-  const [reportVisible, setReportVisible] = useState(true)
 
-  const approvedSubtopics = useMemo(() => collectApprovedSubtopics(arch), [arch])
-  const selectedSubtopic = approvedSubtopics.find((s) => s.subtopic_id === selectedSubtopicId)
-  const courseTitle = arch?.course_summary.course_title
+  const cloGroups = useMemo(() => buildCloGroups(arch), [arch])
+
+  const allApprovedSubtopicIds = useMemo(
+    () => cloGroups.flatMap((g) => g.subtopics.map((s) => s.subtopic_id)),
+    [cloGroups]
+  )
 
   // Load the approved Course Architect (Layer 6) subtopics.
   useEffect(() => {
@@ -139,49 +162,45 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
     }
   }, [courseCode])
 
-  // Default to the first approved subtopic once they load.
+  // Hydrate any existing node sets for every approved subtopic so prior drafts
+  // and approvals show grouped under their CLO on load.
   useEffect(() => {
-    if (!selectedSubtopicId && approvedSubtopics.length > 0) {
-      setSelectedSubtopicId(approvedSubtopics[0].subtopic_id)
+    if (allApprovedSubtopicIds.length === 0) {
+      setNodeSetsBySubtopicId({})
+      return
     }
-  }, [approvedSubtopics, selectedSubtopicId])
-
-  // Load any existing node-set for the selected subtopic.
-  const loadNodeSet = useCallback(
-    async (subtopicId: string) => {
-      if (!subtopicId) {
-        setNodeSet(null)
-        return
-      }
-      try {
-        setNodeSetLoading(true)
-        const existing = await fetchNodeSet(courseCode, subtopicId)
-        setNodeSet(existing)
-      } catch {
-        setNodeSet(null)
-      } finally {
-        setNodeSetLoading(false)
-      }
-    },
-    [courseCode]
-  )
-
-  useEffect(() => {
-    if (selectedSubtopicId) {
-      void loadNodeSet(selectedSubtopicId)
-      setReportVisible(true)
+    let active = true
+    setHydrating(true)
+    Promise.all(
+      allApprovedSubtopicIds.map(
+        async (id) =>
+          [id, await fetchNodeSet(courseCode, id).catch(() => null)] as const
+      )
+    )
+      .then((entries) => {
+        if (active) setNodeSetsBySubtopicId(Object.fromEntries(entries))
+      })
+      .finally(() => {
+        if (active) setHydrating(false)
+      })
+    return () => {
+      active = false
     }
-  }, [selectedSubtopicId, loadNodeSet])
+  }, [courseCode, allApprovedSubtopicIds])
 
-  const layer1Approved = nodeSet?.status === 'approved'
+  // Layer 1 is honestly "approved" only when every approved subtopic course-wide
+  // has an approved node set.
+  const layer1Approved =
+    allApprovedSubtopicIds.length > 0 &&
+    allApprovedSubtopicIds.every((id) => nodeSetsBySubtopicId[id]?.status === 'approved')
 
   function layerStatus(layer: NodeEngineLayer): LayerStatus {
     if (layer.layer === 1) {
-      if (approvedSubtopics.length === 0) return 'locked'
-      if (generating) return 'running'
-      if (!nodeSet) return 'available'
-      if (nodeSet.status === 'approved') return 'approved'
-      return 'needs_review'
+      if (allApprovedSubtopicIds.length === 0) return 'locked'
+      if (generatingCloId || generatingAll) return 'running'
+      if (layer1Approved) return 'approved'
+      const anyGenerated = allApprovedSubtopicIds.some((id) => nodeSetsBySubtopicId[id])
+      return anyGenerated ? 'needs_review' : 'available'
     }
     // Layers 2–5: unlock only when the previous layer is approved. Only Layer 1
     // can be approved today, so Layer 2 may become 'available' (placeholder) and
@@ -190,75 +209,149 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
     return 'locked'
   }
 
-  async function handleRun() {
-    if (!selectedSubtopicId) return
-    try {
-      setGenerating(true)
-      const result = await generateNodeSet(courseCode, selectedSubtopicId)
-      setNodeSet(result)
-      setReportVisible(true)
+  // Generate node sets for every approved subtopic in one CLO, sequentially.
+  // Each await advances live progress; per-subtopic errors are captured without
+  // aborting the rest of the batch.
+  async function handleGenerateClo(cloId: string) {
+    const group = cloGroups.find((g) => g.clo_id === cloId)
+    if (!group || group.subtopics.length === 0) return
+    setGeneratingCloId(cloId)
+    setBatchProgress({ cloId, done: 0, total: group.subtopics.length })
+    const failures: string[] = []
+    for (let i = 0; i < group.subtopics.length; i++) {
+      const st = group.subtopics[i]
+      try {
+        const result = await generateNodeSet(courseCode, st.subtopic_id)
+        setNodeSetsBySubtopicId((prev) => ({ ...prev, [st.subtopic_id]: result }))
+      } catch (error) {
+        failures.push(st.title)
+        // eslint-disable-next-line no-console
+        console.error(`Node generation failed for ${st.subtopic_id}`, error)
+      }
+      setBatchProgress({ cloId, done: i + 1, total: group.subtopics.length })
+    }
+    setGeneratingCloId(null)
+    setBatchProgress(null)
+    if (failures.length > 0) {
       showToast({
-        title: 'Node set generated',
-        description: 'Draft node set ready. Review each node, then approve to unlock Layer 2.',
-        variant: 'success',
-      })
-    } catch (error) {
-      showToast({
-        title: 'Generation failed',
-        description: error instanceof Error ? error.message : 'Failed to generate node set',
+        title: 'Some subtopics failed',
+        description: `Generated ${group.subtopics.length - failures.length}/${group.subtopics.length}. Failed: ${failures.join(', ')}.`,
         variant: 'destructive',
       })
-    } finally {
-      setGenerating(false)
+    } else {
+      showToast({
+        title: `Nodes generated for ${cloId}`,
+        description: `Draft node sets ready for ${group.subtopics.length} subtopic(s). Review critical nodes, then approve.`,
+        variant: 'success',
+      })
     }
   }
 
-  async function handleApprove(overrideReason?: string) {
-    if (!selectedSubtopicId) return
-    try {
-      setApproving(true)
-      const result = await approveNodeSet(courseCode, selectedSubtopicId, {
-        approver: role,
-        overrideReason,
-      })
-      setNodeSet(result)
+  // Generate node sets for EVERY approved subtopic course-wide, in one sequential
+  // run. Same engine + per-subtopic persistence as the per-CLO batch, so the run
+  // is effectively resumable: completed subtopics are saved even if it's
+  // interrupted. The tab must stay open for the duration.
+  async function handleGenerateAllCourse() {
+    const allSubs = cloGroups.flatMap((g) => g.subtopics)
+    if (allSubs.length === 0) return
+    setGeneratingAll(true)
+    setCourseProgress({ done: 0, total: allSubs.length })
+    const failures: string[] = []
+    for (let i = 0; i < allSubs.length; i++) {
+      const st = allSubs[i]
+      try {
+        const result = await generateNodeSet(courseCode, st.subtopic_id)
+        setNodeSetsBySubtopicId((prev) => ({ ...prev, [st.subtopic_id]: result }))
+      } catch (error) {
+        failures.push(st.title)
+        // eslint-disable-next-line no-console
+        console.error(`Node generation failed for ${st.subtopic_id}`, error)
+      }
+      setCourseProgress({ done: i + 1, total: allSubs.length })
+    }
+    setGeneratingAll(false)
+    setCourseProgress(null)
+    if (failures.length > 0) {
       showToast({
-        title: 'Node set approved',
-        description:
-          result.status === 'approved'
-            ? 'Layer 1 approved. Layer 2 — Experience Blueprint is now unlocked.'
-            : 'Approval recorded.',
+        title: 'Whole-course generation finished with errors',
+        description: `Generated ${allSubs.length - failures.length}/${allSubs.length}. Failed: ${failures.join(', ')}.`,
+        variant: 'destructive',
+      })
+    } else {
+      showToast({
+        title: 'All course nodes generated',
+        description: `Draft node sets ready for ${allSubs.length} subtopic(s) across ${cloGroups.length} CLO(s). Review CLO by CLO, then approve.`,
+        variant: 'success',
+      })
+    }
+  }
+
+  // Approve every draft node set in one CLO. Ungrounded sets surface the academic
+  // guard; collect them and prompt once for a shared, recorded override reason
+  // rather than silently rubber-stamping ungrounded sets.
+  async function handleApproveClo(cloId: string) {
+    const group = cloGroups.find((g) => g.clo_id === cloId)
+    if (!group) return
+    setApprovingCloId(cloId)
+    try {
+      const needOverride: string[] = []
+      for (const st of group.subtopics) {
+        const ns = nodeSetsBySubtopicId[st.subtopic_id]
+        if (!ns || ns.status === 'approved') continue
+        try {
+          const result = await approveNodeSet(courseCode, st.subtopic_id, { approver: role })
+          setNodeSetsBySubtopicId((prev) => ({ ...prev, [st.subtopic_id]: result }))
+        } catch (error) {
+          if (error instanceof AcademicApprovalRequiredError) {
+            needOverride.push(st.subtopic_id)
+          } else {
+            throw error
+          }
+        }
+      }
+
+      if (needOverride.length > 0) {
+        const reason = window.prompt(
+          `${needOverride.length} node set(s) in ${cloId} have NO reference grounding and are not academically approvable.\n\n` +
+            'Recommended: run Reference Alignment first.\n\n' +
+            'To approve them WITHOUT grounding anyway, type an override reason (it will be recorded):'
+        )
+        if (reason && reason.trim()) {
+          for (const id of needOverride) {
+            try {
+              const result = await approveNodeSet(courseCode, id, {
+                approver: role,
+                overrideReason: reason.trim(),
+              })
+              setNodeSetsBySubtopicId((prev) => ({ ...prev, [id]: result }))
+            } catch (error) {
+              // eslint-disable-next-line no-console
+              console.error(`Override approval failed for ${id}`, error)
+            }
+          }
+        } else {
+          showToast({
+            title: 'Some approvals skipped',
+            description: `${needOverride.length} ungrounded node set(s) in ${cloId} were not approved.`,
+          })
+        }
+      }
+
+      showToast({
+        title: `Approvals recorded for ${cloId}`,
+        description: layer1Approved
+          ? 'Layer 1 approved. Layer 2 — Experience Blueprint is now unlocked.'
+          : 'Node sets approved.',
         variant: 'success',
       })
     } catch (error) {
-      // Academic-approval guard: no reference grounding attached. Offer an
-      // explicit, recorded override rather than silently approving ungrounded.
-      if (error instanceof AcademicApprovalRequiredError && !overrideReason) {
-        const reason = window.prompt(
-          'This node set has NO reference grounding and is not academically approvable.\n\n' +
-            'Recommended: run Reference Alignment (Course Architect Layer 7) first.\n\n' +
-            'To approve WITHOUT grounding anyway, type an override reason (it will be recorded):'
-        )
-        if (reason && reason.trim()) {
-          setApproving(false)
-          await handleApprove(reason.trim())
-          return
-        }
-        showToast({
-          title: 'Approval blocked',
-          description:
-            'No reference grounding attached. Run Reference Alignment (Layer 7) or provide an override reason.',
-          variant: 'destructive',
-        })
-        return
-      }
       showToast({
         title: 'Approval failed',
-        description: error instanceof Error ? error.message : 'Failed to approve node set',
+        description: error instanceof Error ? error.message : 'Failed to approve node sets',
         variant: 'destructive',
       })
     } finally {
-      setApproving(false)
+      setApprovingCloId(null)
     }
   }
 
@@ -337,20 +430,19 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
                     {layer.layer === 1 ? (
                       <Layer1Body
                         status={status}
-                        approvedSubtopics={approvedSubtopics}
-                        selectedSubtopicId={selectedSubtopicId}
-                        onSelectSubtopic={setSelectedSubtopicId}
-                        selectedSubtopic={selectedSubtopic}
-                        nodeSet={nodeSet}
-                        nodeSetLoading={nodeSetLoading}
-                        generating={generating}
-                        approving={approving}
-                        reportVisible={reportVisible}
-                        onToggleReport={() => setReportVisible((v) => !v)}
-                        onRun={handleRun}
-                        onApprove={handleApprove}
-                        courseCode={courseCode}
-                        courseTitle={courseTitle}
+                        cloGroups={cloGroups}
+                        nodeSetsBySubtopicId={nodeSetsBySubtopicId}
+                        hydrating={hydrating}
+                        generatingCloId={generatingCloId}
+                        approvingCloId={approvingCloId}
+                        batchProgress={batchProgress}
+                        generatingAll={generatingAll}
+                        courseProgress={courseProgress}
+                        onGenerateAll={handleGenerateAllCourse}
+                        query={query}
+                        onQueryChange={setQuery}
+                        onGenerateClo={handleGenerateClo}
+                        onApproveClo={handleApproveClo}
                       />
                     ) : (
                       <PlaceholderLayerBody status={status} layer={layer} />
@@ -368,38 +460,55 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
 
 interface Layer1BodyProps {
   status: LayerStatus
-  approvedSubtopics: ApprovedSubtopic[]
-  selectedSubtopicId: string
-  onSelectSubtopic: (id: string) => void
-  selectedSubtopic?: ApprovedSubtopic
-  nodeSet: NodeEngineNodeSet | null
-  nodeSetLoading: boolean
-  generating: boolean
-  approving: boolean
-  reportVisible: boolean
-  onToggleReport: () => void
-  onRun: () => void
-  onApprove: () => void
-  courseCode: string
-  courseTitle?: string
+  cloGroups: CloGroup[]
+  nodeSetsBySubtopicId: Record<string, NodeEngineNodeSet | null>
+  hydrating: boolean
+  generatingCloId: string | null
+  approvingCloId: string | null
+  batchProgress: { cloId: string; done: number; total: number } | null
+  generatingAll: boolean
+  courseProgress: { done: number; total: number } | null
+  onGenerateAll: () => void
+  query: string
+  onQueryChange: (q: string) => void
+  onGenerateClo: (cloId: string) => void
+  onApproveClo: (cloId: string) => void
+}
+
+interface FlatNodeMatch {
+  node: NodeEngineNode
+  cloId: string
+  subtopicTitle: string
+}
+
+function Pill({ className, children }: { className?: string; children: React.ReactNode }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
+        className
+      )}
+    >
+      {children}
+    </span>
+  )
 }
 
 function Layer1Body({
   status,
-  approvedSubtopics,
-  selectedSubtopicId,
-  onSelectSubtopic,
-  selectedSubtopic,
-  nodeSet,
-  nodeSetLoading,
-  generating,
-  approving,
-  reportVisible,
-  onToggleReport,
-  onRun,
-  onApprove,
-  courseCode,
-  courseTitle,
+  cloGroups,
+  nodeSetsBySubtopicId,
+  hydrating,
+  generatingCloId,
+  approvingCloId,
+  batchProgress,
+  generatingAll,
+  courseProgress,
+  onGenerateAll,
+  query,
+  onQueryChange,
+  onGenerateClo,
+  onApproveClo,
 }: Layer1BodyProps) {
   if (status === 'locked') {
     return (
@@ -413,106 +522,292 @@ function Layer1Body({
     )
   }
 
+  const busy = generatingCloId !== null || approvingCloId !== null || generatingAll
+  const totalSubtopics = cloGroups.reduce((sum, g) => sum + g.subtopics.length, 0)
+  const totalGenerated = cloGroups.reduce(
+    (sum, g) => sum + g.subtopics.filter((s) => nodeSetsBySubtopicId[s.subtopic_id]).length,
+    0
+  )
+
+  const trimmedQuery = query.trim().toLowerCase()
+  const searchMatches: FlatNodeMatch[] = trimmedQuery
+    ? cloGroups.flatMap((group) =>
+        group.subtopics.flatMap((st) => {
+          const ns = nodeSetsBySubtopicId[st.subtopic_id]
+          if (!ns) return [] as FlatNodeMatch[]
+          return ns.nodes
+            .filter(
+              (n) =>
+                n.node_title.toLowerCase().includes(trimmedQuery) ||
+                n.knowledge_component.toLowerCase().includes(trimmedQuery)
+            )
+            .map((node) => ({ node, cloId: group.clo_id, subtopicTitle: st.title }))
+        })
+      )
+    : []
+
   return (
     <div className="space-y-4">
-      {/* Subtopic selector */}
-      <div className="space-y-2">
-        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Approved subtopic ({approvedSubtopics.length} available)
-        </label>
-        <select
-          value={selectedSubtopicId}
-          onChange={(e) => onSelectSubtopic(e.target.value)}
-          disabled={generating || approving}
-          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          {approvedSubtopics.map((s) => (
-            <option key={s.subtopic_id} value={s.subtopic_id}>
-              {s.clo_id} · {s.title}
-            </option>
-          ))}
-        </select>
-        {selectedSubtopic && (
-          <p className="text-xs text-muted-foreground">
-            CLO {selectedSubtopic.clo_id}
-            {selectedSubtopic.assessment_connection.length > 0
-              ? ` · prepares for ${selectedSubtopic.assessment_connection.join(', ')}`
-              : ' · no assessment connection'}
-          </p>
-        )}
-      </div>
+      <p className="rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">
+        Generate all nodes for a whole CLO in one click, review the subtopics grouped below, then
+        approve the CLO. Nodes that need a closer look (high-risk, weak grounding, pending
+        misconceptions, or a critical evidence criterion) are flagged{' '}
+        <span className="font-medium text-amber-600 dark:text-amber-400">Needs review</span>.
+      </p>
 
-      {/* Actions */}
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" onClick={onRun} disabled={generating || approving || !selectedSubtopicId}>
-          {generating ? (
+      {/* Whole-course generation: kick off every CLO's subtopics in one run.
+          Review still happens CLO by CLO below. */}
+      <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-card p-3">
+        <Button size="sm" variant="default" onClick={onGenerateAll} disabled={busy || totalSubtopics === 0}>
+          {generatingAll ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : nodeSet ? (
+          ) : totalGenerated > 0 ? (
             <RefreshCw className="mr-2 h-4 w-4" />
           ) : (
             <Play className="mr-2 h-4 w-4" />
           )}
-          {nodeSet ? 'Regenerate Node Set' : 'Run Layer 1'}
+          {totalGenerated > 0
+            ? 'Regenerate all nodes (whole course)'
+            : 'Generate all nodes (whole course)'}
         </Button>
-
-        {nodeSet && (
-          <Button size="sm" variant="outline" onClick={onToggleReport}>
-            {reportVisible ? (
-              <>
-                <EyeOff className="mr-2 h-4 w-4" /> Hide Node Set Report
-              </>
-            ) : (
-              <>
-                <Eye className="mr-2 h-4 w-4" /> View Node Set Report
-              </>
-            )}
-          </Button>
-        )}
-
-        {nodeSet && nodeSet.status !== 'approved' && (
-          <Button size="sm" variant="default" onClick={onApprove} disabled={approving || generating}>
-            {approving ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Check className="mr-2 h-4 w-4" />
-            )}
-            Approve Node Set
-          </Button>
+        {generatingAll && courseProgress ? (
+          <span className="text-xs text-muted-foreground">
+            Generating {courseProgress.done}/{courseProgress.total} subtopics across the course…
+            keep this tab open.
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">
+            {totalGenerated}/{totalSubtopics} subtopics generated across {cloGroups.length} CLO(s).
+            Runs sequentially; completed subtopics are saved as it goes.
+          </span>
         )}
       </div>
 
-      {/* Body */}
-      {generating ? (
-        <div className="flex items-center gap-2 rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Generating governed mastery nodes for this
-          subtopic…
-        </div>
-      ) : nodeSetLoading ? (
+      {/* Spot-check search across every generated node in the course. */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => onQueryChange(e.target.value)}
+          placeholder="Spot-check: search nodes by title or knowledge component…"
+          className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        />
+      </div>
+
+      {hydrating && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading node set…
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading existing node sets…
         </div>
-      ) : nodeSet ? (
-        <>
-          {nodeSet.status !== 'approved' && (
-            <p className="rounded-md bg-amber-500/10 p-2 text-xs text-amber-600 dark:text-amber-400">
-              This is a DRAFT node set. Author/SME/admin review is required before any downstream
-              use — auto-proceed eligibility never hides output. Approve the set to unlock Layer 2.
-            </p>
-          )}
-          {reportVisible && (
-            <NodeSetReport
-              nodeSet={nodeSet}
-              courseCode={courseCode}
-              courseTitle={courseTitle}
-              subtopicTitle={selectedSubtopic?.title}
-              assessmentConnection={selectedSubtopic?.assessment_connection}
-            />
-          )}
-        </>
+      )}
+
+      {trimmedQuery ? (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            {searchMatches.length} node(s) match “{query.trim()}”.
+          </p>
+          {searchMatches.map(({ node, cloId, subtopicTitle }) => (
+            <div key={node.node_id}>
+              <p className="mb-1 text-xs text-muted-foreground">
+                {cloId} · {subtopicTitle}
+              </p>
+              <NodeCard node={node} index={isCriticalNode(node) ? 0 : 1} />
+            </div>
+          ))}
+        </div>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          No node set yet for this subtopic. Run Layer 1 to generate 4–7 governed mastery nodes.
-        </p>
+        cloGroups.map((group) => (
+          <CloGroupCard
+            key={group.clo_id}
+            group={group}
+            nodeSetsBySubtopicId={nodeSetsBySubtopicId}
+            generating={generatingCloId === group.clo_id}
+            approving={approvingCloId === group.clo_id}
+            busy={busy}
+            progress={batchProgress && batchProgress.cloId === group.clo_id ? batchProgress : null}
+            onGenerate={() => onGenerateClo(group.clo_id)}
+            onApprove={() => onApproveClo(group.clo_id)}
+          />
+        ))
+      )}
+    </div>
+  )
+}
+
+interface CloGroupCardProps {
+  group: CloGroup
+  nodeSetsBySubtopicId: Record<string, NodeEngineNodeSet | null>
+  generating: boolean
+  approving: boolean
+  busy: boolean
+  progress: { cloId: string; done: number; total: number } | null
+  onGenerate: () => void
+  onApprove: () => void
+}
+
+function CloGroupCard({
+  group,
+  nodeSetsBySubtopicId,
+  generating,
+  approving,
+  busy,
+  progress,
+  onGenerate,
+  onApprove,
+}: CloGroupCardProps) {
+  const entries = group.subtopics.map((s) => ({
+    subtopic: s,
+    nodeSet: nodeSetsBySubtopicId[s.subtopic_id] ?? null,
+  }))
+  const generatedCount = entries.filter((e) => e.nodeSet).length
+  const approvedCount = entries.filter((e) => e.nodeSet?.status === 'approved').length
+  const allNodes = entries.flatMap((e) => e.nodeSet?.nodes ?? [])
+  const criticalCount = allNodes.filter(isCriticalNode).length
+  const pendingApproval = generatedCount > approvedCount
+
+  return (
+    <div className="rounded-lg border border-border">
+      <div className="space-y-3 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {group.clo_id}
+            </p>
+            <p className="text-sm font-medium">{group.refined_clo}</p>
+          </div>
+          {generatedCount > 0 && approvedCount === group.subtopics.length && (
+            <Pill className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+              <Check className="h-3 w-3" /> All approved
+            </Pill>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Pill className="bg-muted text-muted-foreground">
+            {group.subtopics.length} subtopic(s)
+          </Pill>
+          <Pill className="bg-blue-500/15 text-blue-600 dark:text-blue-400">
+            {generatedCount}/{group.subtopics.length} generated
+          </Pill>
+          <Pill className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+            {approvedCount}/{group.subtopics.length} approved
+          </Pill>
+          {allNodes.length > 0 && (
+            <Pill
+              className={cn(
+                criticalCount > 0
+                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                  : 'bg-muted text-muted-foreground'
+              )}
+            >
+              <AlertTriangle className="h-3 w-3" />
+              {criticalCount} need review
+            </Pill>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" onClick={onGenerate} disabled={busy}>
+            {generating ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : generatedCount > 0 ? (
+              <RefreshCw className="mr-2 h-4 w-4" />
+            ) : (
+              <Play className="mr-2 h-4 w-4" />
+            )}
+            {generatedCount > 0
+              ? `Regenerate all for ${group.clo_id}`
+              : `Generate all nodes for ${group.clo_id}`}
+          </Button>
+
+          {pendingApproval && (
+            <Button size="sm" variant="default" onClick={onApprove} disabled={busy}>
+              {approving ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Check className="mr-2 h-4 w-4" />
+              )}
+              Approve all for {group.clo_id}
+            </Button>
+          )}
+
+          {progress && (
+            <span className="text-xs text-muted-foreground">
+              Generating {progress.done}/{progress.total} subtopics…
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Subtopic-grouped triage. Each subtopic collapses; critical nodes inside
+          start expanded so they draw the eye first. */}
+      {generatedCount > 0 && (
+        <div className="space-y-2 border-t border-border px-4 py-3">
+          {entries.map(({ subtopic, nodeSet }) => {
+            const nodes = nodeSet?.nodes ?? []
+            const subCritical = nodes.filter(isCriticalNode).length
+            return (
+              <details key={subtopic.subtopic_id} className="rounded-md border border-border">
+                <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-sm">
+                  <span className="font-medium">{subtopic.title}</span>
+                  {nodeSet ? (
+                    <>
+                      <Pill className="bg-muted text-muted-foreground">
+                        {nodes.length} node(s)
+                      </Pill>
+                      <Pill
+                        className={
+                          nodeSet.status === 'approved'
+                            ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                        }
+                      >
+                        {nodeSet.status === 'approved' ? (
+                          <>
+                            <Check className="h-3 w-3" /> Approved
+                          </>
+                        ) : (
+                          'Draft'
+                        )}
+                      </Pill>
+                      {nodeSet.grounding_summary && (
+                        <Pill
+                          className={
+                            nodeSet.grounding_summary.academic_ready
+                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                          }
+                        >
+                          {nodeSet.grounding_summary.academic_ready
+                            ? 'Grounded'
+                            : 'Ungrounded'}
+                        </Pill>
+                      )}
+                      {subCritical > 0 && (
+                        <Pill className="bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                          <AlertTriangle className="h-3 w-3" /> {subCritical} need review
+                        </Pill>
+                      )}
+                    </>
+                  ) : (
+                    <Pill className="bg-muted text-muted-foreground">Not generated yet</Pill>
+                  )}
+                </summary>
+                {nodeSet && (
+                  <div className="space-y-2 border-t border-border px-3 py-3">
+                    {nodes.map((node) => (
+                      <NodeCard
+                        key={node.node_id}
+                        node={node}
+                        index={isCriticalNode(node) ? 0 : 1}
+                      />
+                    ))}
+                  </div>
+                )}
+              </details>
+            )
+          })}
+        </div>
       )}
     </div>
   )

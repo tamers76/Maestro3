@@ -2287,7 +2287,7 @@ export async function retrieveReferences(
 }
 
 // ============================================================================
-// Reference Alignment — Course Architect "Layer 7"
+// Reference Alignment — transition between Course Architect and the Node Engine
 // ============================================================================
 
 export type AlignmentStatus = 'locked' | 'no_references' | 'available' | 'proposed' | 'approved';

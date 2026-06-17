@@ -11,10 +11,11 @@
  * The registry test writes/reads the real config/prompt-templates.json (the
  * production seed path) and restores it afterwards so the repo stays clean.
  */
-import test from 'node:test';
+import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, existsSync, rmSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
+import { dbTestsEnabled, setupTestDb, teardownTestDb } from '../../db/testSupport.js';
 
 import {
   assertEnum,
@@ -53,8 +54,17 @@ import type { StageModelConfig, Stage1LayerConfig } from '../../models/schemas.j
 
 // Tests run with cwd = backend/ (npm test), so resolve fixtures from there.
 const FIXTURES_DIR = join(process.cwd(), 'src', 'node-engine', '__fixtures__');
-const REGISTRY_PATH = join(process.cwd(), '..', 'config', 'prompt-templates.json');
-const MODALITY_CONFIG_PATH = join(process.cwd(), '..', 'config', 'modality-generation-config.json');
+
+// Prompt-template + modality config now persist to Postgres (app_config), so the
+// write/version-bump tests run only under RUN_DB_TESTS=1. Pure tests stay DB-free.
+const dbSkip = dbTestsEnabled ? false : 'requires RUN_DB_TESTS=1';
+
+before(async () => {
+  if (dbTestsEnabled) await setupTestDb();
+});
+after(async () => {
+  if (dbTestsEnabled) await teardownTestDb();
+});
 
 function sampleEnvelope(): GeneratedObjectEnvelope {
   return {
@@ -159,42 +169,31 @@ test('governance decision reject maps to terminal rejected status', () => {
   assert.equal(governanceStatusFromDecision('auto_proceed'), 'auto_proceed');
 });
 
-test('prompt-template registry seeds all vehicles and bumps versions immutably', () => {
-  const hadRegistryBefore = existsSync(REGISTRY_PATH);
-  const registrySnapshot = hadRegistryBefore ? readFileSync(REGISTRY_PATH, 'utf-8') : null;
-  try {
-    clearRegistryCache();
-    const registry = getRegistry();
-    assert.ok(registry.templates.length >= 7, 'expected six active templates + simulation placeholder');
+test('prompt-template registry seeds all vehicles and bumps versions immutably', { skip: dbSkip }, async () => {
+  clearRegistryCache();
+  const registry = getRegistry();
+  assert.ok(registry.templates.length >= 7, 'expected six active templates + simulation placeholder');
 
-    // State-independent: capture the current active version then assert a bump.
-    const startActive = getActiveVersion('text_generation_prompt');
-    assert.ok(startActive);
-    const startVersion = startActive!.version;
-    const startPrompt = startActive!.task_prompt;
+  // State-independent: capture the current active version then assert a bump.
+  const startActive = getActiveVersion('text_generation_prompt');
+  assert.ok(startActive);
+  const startVersion = startActive!.version;
+  const startPrompt = startActive!.task_prompt;
 
-    const bumped = updateTemplate('text_generation_prompt', {
-      task_prompt: startPrompt + '\n\n[edited in test]',
-      last_updated_by: 'test',
-      change_note: 'version bump test',
-    });
-    assert.equal(bumped.version, startVersion + 1);
+  const bumped = await updateTemplate('text_generation_prompt', {
+    task_prompt: startPrompt + '\n\n[edited in test]',
+    last_updated_by: 'test',
+    change_note: 'version bump test',
+  });
+  assert.equal(bumped.version, startVersion + 1);
 
-    // Active pointer moved...
-    assert.equal(getActiveVersion('text_generation_prompt')!.version, startVersion + 1);
-    // ...but the previously-published version is preserved unchanged.
-    const priorStillThere = getTemplateVersion('text_generation_prompt', startVersion);
-    assert.ok(priorStillThere);
-    assert.equal(priorStillThere!.task_prompt, startPrompt);
-  } finally {
-    // Restore repo state: put the original file back, or drop a test-created one.
-    if (registrySnapshot !== null) {
-      writeFileSync(REGISTRY_PATH, registrySnapshot, 'utf-8');
-    } else if (existsSync(REGISTRY_PATH)) {
-      rmSync(REGISTRY_PATH, { force: true });
-    }
-    clearRegistryCache();
-  }
+  // Active pointer moved...
+  assert.equal(getActiveVersion('text_generation_prompt')!.version, startVersion + 1);
+  // ...but the previously-published version is preserved unchanged.
+  const priorStillThere = getTemplateVersion('text_generation_prompt', startVersion);
+  assert.ok(priorStillThere);
+  assert.equal(priorStillThere!.task_prompt, startPrompt);
+  clearRegistryCache();
 });
 
 // ===========================================================================
@@ -381,39 +380,28 @@ test('resolveGenerationModel: council mode returns council members + chairman fr
   assert.equal(resolved.chairmanModel, 'chair-x');
 });
 
-test('updating modality config does NOT change the prompt-template active_version', () => {
-  const hadRegistry = existsSync(REGISTRY_PATH);
-  const registrySnapshot = hadRegistry ? readFileSync(REGISTRY_PATH, 'utf-8') : null;
-  const hadModality = existsSync(MODALITY_CONFIG_PATH);
-  const modalitySnapshot = hadModality ? readFileSync(MODALITY_CONFIG_PATH, 'utf-8') : null;
-  try {
-    clearRegistryCache();
-    clearModalityConfigCache();
+test('updating modality config does NOT change the prompt-template active_version', { skip: dbSkip }, async () => {
+  clearRegistryCache();
+  clearModalityConfigCache();
 
-    // Capture the text template's active version pointer BEFORE the model edit.
-    getRegistry();
-    const entryBefore = getTemplateEntry('text_generation_prompt');
-    assert.ok(entryBefore);
-    const activeBefore = entryBefore!.active_version;
-    const versionsBefore = entryBefore!.versions.length;
+  // Capture the text template's active version pointer BEFORE the model edit.
+  getRegistry();
+  const entryBefore = getTemplateEntry('text_generation_prompt');
+  assert.ok(entryBefore);
+  const activeBefore = entryBefore!.active_version;
+  const versionsBefore = entryBefore!.versions.length;
 
-    // Edit the modality (model) config for the 'text' vehicle.
-    const updated = updateConfigForVehicle('text', { singleModel: 'some-pinned-model' });
-    assert.equal(updated.singleModel, 'some-pinned-model');
+  // Edit the modality (model) config for the 'text' vehicle.
+  const updated = await updateConfigForVehicle('text', { singleModel: 'some-pinned-model' });
+  assert.equal(updated.singleModel, 'some-pinned-model');
 
-    // The prompt-template registry must be untouched: same active version, same count.
-    const entryAfter = getTemplateEntry('text_generation_prompt');
-    assert.ok(entryAfter);
-    assert.equal(entryAfter!.active_version, activeBefore, 'active_version must not change');
-    assert.equal(entryAfter!.versions.length, versionsBefore, 'no new prompt version minted');
-  } finally {
-    if (registrySnapshot !== null) writeFileSync(REGISTRY_PATH, registrySnapshot, 'utf-8');
-    else if (existsSync(REGISTRY_PATH)) rmSync(REGISTRY_PATH, { force: true });
-    if (modalitySnapshot !== null) writeFileSync(MODALITY_CONFIG_PATH, modalitySnapshot, 'utf-8');
-    else if (existsSync(MODALITY_CONFIG_PATH)) rmSync(MODALITY_CONFIG_PATH, { force: true });
-    clearRegistryCache();
-    clearModalityConfigCache();
-  }
+  // The prompt-template registry must be untouched: same active version, same count.
+  const entryAfter = getTemplateEntry('text_generation_prompt');
+  assert.ok(entryAfter);
+  assert.equal(entryAfter!.active_version, activeBefore, 'active_version must not change');
+  assert.equal(entryAfter!.versions.length, versionsBefore, 'no new prompt version minted');
+  clearRegistryCache();
+  clearModalityConfigCache();
 });
 
 test('envelope audit fields parse when present and are omitted when absent', () => {

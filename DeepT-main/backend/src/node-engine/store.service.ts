@@ -1,134 +1,88 @@
 /**
- * Node Engine persistence layer.
+ * Node Engine persistence layer — Postgres-backed.
  *
- * Mirrors the conventions of `services/file.service.ts`:
- * - global documents (the prompt-template registry) live under `config/`
- *   alongside `settings.json`;
- * - per-course node-engine artifacts live under
- *   `data/courses/<code>/node-engine/` (artifacts only — the relational web is
- *   written to Neo4j under new labels in later phases per D1).
+ * - Global config documents (prompt-template registry, modality-generation
+ *   config, node-generation prompt) live in `app_config` via `configRepo`.
+ * - Per-course node-engine artifacts (alignment proposals, generated node-sets)
+ *   live in `stage_artifacts` via `artifactRepo`, keyed by the artifact filename.
+ *
+ * All accessors are async (Postgres). The relational web (Node / KnowledgeComponent
+ * / EvidenceMap) is projected to Neo4j separately; this store holds reviewable
+ * JSON artifacts so M7 output is replayable without a live graph DB.
  */
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
-import { join } from 'path';
 import type {
   PromptTemplateRegistryFile,
   ModalityGenerationConfigFile,
 } from '../models/nodeEngine.js';
 import type { NodeGenerationPromptFile } from './nodeGenerationPrompt.service.js';
+import * as configRepo from '../db/repos/configRepo.js';
+import * as artifactRepo from '../db/repos/artifactRepo.js';
 
-const CONFIG_DIR = join(process.cwd(), '..', 'config');
-const DATA_DIR = join(process.cwd(), '..', 'data', 'courses');
-
-const PROMPT_TEMPLATES_PATH = join(CONFIG_DIR, 'prompt-templates.json');
-const MODALITY_GENERATION_CONFIG_PATH = join(CONFIG_DIR, 'modality-generation-config.json');
-const NODE_GENERATION_PROMPT_PATH = join(CONFIG_DIR, 'node-generation-prompt.json');
-
-function ensureDir(path: string): void {
-  if (!existsSync(path)) {
-    mkdirSync(path, { recursive: true });
-  }
-}
+const NODE_ENGINE_ARTIFACT_STAGE = 'node-engine';
 
 // ============== Prompt Template Registry (global document) ==============
 
-export function readPromptTemplateRegistry(): PromptTemplateRegistryFile | null {
-  if (!existsSync(PROMPT_TEMPLATES_PATH)) return null;
-  try {
-    return JSON.parse(readFileSync(PROMPT_TEMPLATES_PATH, 'utf-8')) as PromptTemplateRegistryFile;
-  } catch (error) {
-    console.error('[NodeEngine] Failed to read prompt-template registry:', error);
-    return null;
-  }
+export async function readPromptTemplateRegistry(): Promise<PromptTemplateRegistryFile | null> {
+  return configRepo.get<PromptTemplateRegistryFile>(configRepo.CONFIG_KEYS.promptTemplates);
 }
 
-export function writePromptTemplateRegistry(registry: PromptTemplateRegistryFile): void {
-  ensureDir(CONFIG_DIR);
-  writeFileSync(PROMPT_TEMPLATES_PATH, JSON.stringify(registry, null, 2), 'utf-8');
+export async function writePromptTemplateRegistry(registry: PromptTemplateRegistryFile): Promise<void> {
+  await configRepo.set(configRepo.CONFIG_KEYS.promptTemplates, registry);
 }
 
 // ============== Modality Generation Config (global document) ==============
-// Stored separately from prompt-templates.json so editing per-vehicle model
-// config NEVER mutates a prompt-template version (D3).
 
-export function readModalityGenerationConfig(): ModalityGenerationConfigFile | null {
-  if (!existsSync(MODALITY_GENERATION_CONFIG_PATH)) return null;
-  try {
-    return JSON.parse(
-      readFileSync(MODALITY_GENERATION_CONFIG_PATH, 'utf-8')
-    ) as ModalityGenerationConfigFile;
-  } catch (error) {
-    console.error('[NodeEngine] Failed to read modality-generation config:', error);
-    return null;
-  }
+export async function readModalityGenerationConfig(): Promise<ModalityGenerationConfigFile | null> {
+  return configRepo.get<ModalityGenerationConfigFile>(configRepo.CONFIG_KEYS.modalityGenerationConfig);
 }
 
-export function writeModalityGenerationConfig(file: ModalityGenerationConfigFile): void {
-  ensureDir(CONFIG_DIR);
-  writeFileSync(MODALITY_GENERATION_CONFIG_PATH, JSON.stringify(file, null, 2), 'utf-8');
+export async function writeModalityGenerationConfig(file: ModalityGenerationConfigFile): Promise<void> {
+  await configRepo.set(configRepo.CONFIG_KEYS.modalityGenerationConfig, file);
 }
 
 // ============== Node-Set Generation prompt (global document) ==============
 
-export function readNodeGenerationPromptFile(): NodeGenerationPromptFile | null {
-  if (!existsSync(NODE_GENERATION_PROMPT_PATH)) return null;
-  try {
-    return JSON.parse(readFileSync(NODE_GENERATION_PROMPT_PATH, 'utf-8')) as NodeGenerationPromptFile;
-  } catch (error) {
-    console.error('[NodeEngine] Failed to read node-generation prompt file:', error);
-    return null;
-  }
+export async function readNodeGenerationPromptFile(): Promise<NodeGenerationPromptFile | null> {
+  return configRepo.get<NodeGenerationPromptFile>(configRepo.CONFIG_KEYS.nodeGenerationPrompt);
 }
 
-export function writeNodeGenerationPromptFile(file: NodeGenerationPromptFile): void {
-  ensureDir(CONFIG_DIR);
-  writeFileSync(NODE_GENERATION_PROMPT_PATH, JSON.stringify(file, null, 2), 'utf-8');
+export async function writeNodeGenerationPromptFile(file: NodeGenerationPromptFile): Promise<void> {
+  await configRepo.set(configRepo.CONFIG_KEYS.nodeGenerationPrompt, file);
 }
 
 // ============== Per-course node-engine artifacts ==============
 
-function getNodeEngineDir(courseCode: string): string {
-  return join(DATA_DIR, courseCode, 'node-engine');
+/** Normalize an artifact filename into a stable artifact-type key. */
+function artifactType(fileName: string): string {
+  return `node_engine:${fileName}`;
 }
 
 /** Save an arbitrary node-engine artifact JSON for a course. */
-export function saveCourseArtifact(courseCode: string, fileName: string, data: unknown): void {
-  const dir = getNodeEngineDir(courseCode);
-  ensureDir(dir);
-  writeFileSync(join(dir, fileName), JSON.stringify(data, null, 2), 'utf-8');
+export async function saveCourseArtifact(courseCode: string, fileName: string, data: unknown): Promise<void> {
+  await artifactRepo.save(courseCode, artifactType(fileName), data, { stage: NODE_ENGINE_ARTIFACT_STAGE });
 }
 
 /** Read a previously saved node-engine artifact JSON for a course. */
-export function getCourseArtifact<T = unknown>(courseCode: string, fileName: string): T | null {
-  const path = join(getNodeEngineDir(courseCode), fileName);
-  if (!existsSync(path)) return null;
-  try {
-    return JSON.parse(readFileSync(path, 'utf-8')) as T;
-  } catch (error) {
-    console.error(`[NodeEngine] Failed to read artifact ${fileName} for ${courseCode}:`, error);
-    return null;
-  }
+export async function getCourseArtifact<T = unknown>(courseCode: string, fileName: string): Promise<T | null> {
+  return artifactRepo.get<T>(courseCode, artifactType(fileName));
 }
 
 /** Whether a per-course node-engine artifact exists. */
-export function hasCourseArtifact(courseCode: string, fileName: string): boolean {
-  return existsSync(join(getNodeEngineDir(courseCode), fileName));
+export async function hasCourseArtifact(courseCode: string, fileName: string): Promise<boolean> {
+  return artifactRepo.has(courseCode, artifactType(fileName));
 }
 
 // ============== M7 node-set artifacts (per subtopic) ==============
-//
-// Per the D1 storage split, the relational web (Node / KnowledgeComponent /
-// EvidenceMap) is written to Neo4j; the JSON file store holds the produced
-// node-set ARTIFACT so M7 output is reviewable/replayable without a live DB.
 
 /** Stable artifact filename for one subtopic's generated node-set. */
 export function nodeSetFileName(subtopicId: string): string {
   return `nodeset_${subtopicId}.json`;
 }
 
-export function saveNodeSetArtifact(courseCode: string, subtopicId: string, data: unknown): void {
-  saveCourseArtifact(courseCode, nodeSetFileName(subtopicId), data);
+export async function saveNodeSetArtifact(courseCode: string, subtopicId: string, data: unknown): Promise<void> {
+  await saveCourseArtifact(courseCode, nodeSetFileName(subtopicId), data);
 }
 
-export function getNodeSetArtifact<T = unknown>(courseCode: string, subtopicId: string): T | null {
+export async function getNodeSetArtifact<T = unknown>(courseCode: string, subtopicId: string): Promise<T | null> {
   return getCourseArtifact<T>(courseCode, nodeSetFileName(subtopicId));
 }

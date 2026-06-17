@@ -13,10 +13,8 @@
  * deterministic logic against synthetic, self-cleaning fixtures + the real MDLD602
  * artifacts (read-only).
  */
-import test from 'node:test';
+import test, { before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, rmSync } from 'fs';
-import { join } from 'path';
 
 import { parseNodeSet, type NodeSet } from '../../models/nodeEngine.js';
 import {
@@ -34,11 +32,31 @@ import {
   DEFAULT_ALIGNMENT_THRESHOLD,
   type ReferenceAlignmentArtifact,
 } from '../../services/referenceAlignment.service.js';
-import * as fileService from '../../services/file.service.js';
-import type { ReferenceChunk, ReferenceManifest } from '../../models/schemas.js';
+import * as referenceRepo from '../../db/repos/referenceRepo.js';
+import type { ReferenceChunk, ReferenceDocument } from '../../models/schemas.js';
+import { dbTestsEnabled, setupTestDb, resetTestData, teardownTestDb } from '../../db/testSupport.js';
 
 const SUBTOPIC = 'CLO1-ST2';
-const DATA_DIR = join(process.cwd(), '..', 'data', 'courses');
+
+// These exercise Postgres-backed stores (node-sets, alignment artifacts, reference
+// docs/chunks), so they run only under RUN_DB_TESTS=1. The schema round-trip and
+// the pure academic-readiness checks stay DB-free.
+const dbSkip = dbTestsEnabled ? false : 'requires RUN_DB_TESTS=1';
+// getAlignmentState reads a pre-seeded MDLD602 course (no source data in the repo).
+const seededSkip =
+  dbTestsEnabled && process.env.RUN_SEEDED_TESTS === '1'
+    ? false
+    : 'requires RUN_DB_TESTS=1 + RUN_SEEDED_TESTS=1 (pre-seeded MDLD602)';
+
+before(async () => {
+  if (dbTestsEnabled) await setupTestDb();
+});
+beforeEach(async () => {
+  if (dbTestsEnabled) await resetTestData();
+});
+after(async () => {
+  if (dbTestsEnabled) await teardownTestDb();
+});
 
 // ---------------------------------------------------------------------------
 // A minimal, schema-valid node-set (one node) for guard/schema tests.
@@ -91,15 +109,6 @@ function minimalNodeSet(overrides: Partial<NodeSet> = {}): NodeSet {
     ...overrides,
   };
   return parseNodeSet(JSON.parse(JSON.stringify(base)));
-}
-
-function withTempCourse(code: string, fn: () => void): void {
-  const dir = join(DATA_DIR, code);
-  try {
-    fn();
-  } finally {
-    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-  }
 }
 
 // ===========================================================================
@@ -162,178 +171,161 @@ test('isNodeSetAcademicallyReady: summary flag, then node citations fallback', (
   assert.equal(isNodeSetAcademicallyReady(cited), true);
 });
 
-test('approveNodeSet blocks ungrounded approval, then permits with an override reason', () => {
-  withTempCourse('GUARDTEST', () => {
-    saveNodeSetArtifact('GUARDTEST', SUBTOPIC, minimalNodeSet());
+test('approveNodeSet blocks ungrounded approval, then permits with an override reason', { skip: dbSkip }, async () => {
+  await saveNodeSetArtifact('GUARDTEST', SUBTOPIC, minimalNodeSet());
 
-    assert.throws(
-      () => approveNodeSet('GUARDTEST', SUBTOPIC, { approver: 'sme@test' }),
-      AcademicApprovalRequiredError
-    );
+  await assert.rejects(
+    () => approveNodeSet('GUARDTEST', SUBTOPIC, { approver: 'sme@test' }),
+    AcademicApprovalRequiredError
+  );
 
-    const approved = approveNodeSet('GUARDTEST', SUBTOPIC, {
-      approver: 'sme@test',
-      overrideReason: 'no references for this course yet',
-    });
-    assert.equal(approved.status, 'approved');
-    assert.equal(approved.academic_override_reason, 'no references for this course yet');
-    assert.equal(approved.academic_override_by, 'sme@test');
+  const approved = await approveNodeSet('GUARDTEST', SUBTOPIC, {
+    approver: 'sme@test',
+    overrideReason: 'no references for this course yet',
   });
+  assert.equal(approved.status, 'approved');
+  assert.equal(approved.academic_override_reason, 'no references for this course yet');
+  assert.equal(approved.academic_override_by, 'sme@test');
 });
 
-test('approveNodeSet permits without override when nodes carry citations', () => {
-  withTempCourse('GUARDTEST2', () => {
-    const node = minimalNodeSet().nodes[0];
-    const cited = minimalNodeSet({
-      nodes: [{ ...node, grounding_references: [{ citation: 'Ref A', passage_ref: 'R1' }] }],
-    } as Partial<NodeSet>);
-    saveNodeSetArtifact('GUARDTEST2', SUBTOPIC, cited);
+test('approveNodeSet permits without override when nodes carry citations', { skip: dbSkip }, async () => {
+  const node = minimalNodeSet().nodes[0];
+  const cited = minimalNodeSet({
+    nodes: [{ ...node, grounding_references: [{ citation: 'Ref A', passage_ref: 'R1' }] }],
+  } as Partial<NodeSet>);
+  await saveNodeSetArtifact('GUARDTEST2', SUBTOPIC, cited);
 
-    const approved = approveNodeSet('GUARDTEST2', SUBTOPIC, { approver: 'sme@test' });
-    assert.equal(approved.status, 'approved');
-    assert.equal(approved.academic_override_reason, undefined);
-  });
+  const approved = await approveNodeSet('GUARDTEST2', SUBTOPIC, { approver: 'sme@test' });
+  assert.equal(approved.status, 'approved');
+  assert.equal(approved.academic_override_reason, undefined);
 });
 
 // ===========================================================================
 // 3. Reference Alignment (Layer 7)
 // ===========================================================================
 
-test('getAlignmentState reports dependency counts for MDLD602 (read-only)', () => {
-  const state = getAlignmentState('MDLD602');
+test('getAlignmentState reports dependency counts for MDLD602 (read-only)', { skip: seededSkip }, async () => {
+  const state = await getAlignmentState('MDLD602');
   assert.ok(state.reference_doc_count > 0, 'MDLD602 has reference docs');
   assert.ok(state.chunk_count > 0, 'MDLD602 has reference chunks');
   assert.equal(state.threshold, DEFAULT_ALIGNMENT_THRESHOLD);
   assert.ok(['locked', 'available', 'proposed', 'approved'].includes(state.status));
 });
 
-test('updateAlignmentMapping promotes / reassigns and inherits CLOs only when asked', () => {
-  withTempCourse('ALIGNEDIT', () => {
-    const artifact: ReferenceAlignmentArtifact = {
-      course_code: 'ALIGNEDIT',
-      status: 'proposed',
-      threshold: DEFAULT_ALIGNMENT_THRESHOLD,
-      embedding_model: 'text-embedding-3-small',
-      embedding_dimensions: 1536,
-      subtopic_count: 1,
-      reference_doc_count: 1,
-      chunk_count: 1,
-      tagged_chunk_count: 0,
-      mappings: [
-        {
-          chunk_id: 'c1',
-          doc_id: 'd1',
-          citation: 'Doc 1',
-          text_preview: 'text',
-          subtopic_candidates: [{ id: 'ST-A', label: 'A', score: 0.4 }],
-          clo_candidates: [],
-          confidence: 0.4,
-          decided_subtopic_ids: [],
-          decided_clo_ids: [],
-        },
-      ],
-    };
-    saveCourseArtifact('ALIGNEDIT', 'reference-alignment.json', artifact);
+test('updateAlignmentMapping promotes / reassigns and inherits CLOs only when asked', { skip: dbSkip }, async () => {
+  const artifact: ReferenceAlignmentArtifact = {
+    course_code: 'ALIGNEDIT',
+    status: 'proposed',
+    threshold: DEFAULT_ALIGNMENT_THRESHOLD,
+    embedding_model: 'text-embedding-3-small',
+    embedding_dimensions: 1536,
+    subtopic_count: 1,
+    reference_doc_count: 1,
+    chunk_count: 1,
+    tagged_chunk_count: 0,
+    mappings: [
+      {
+        chunk_id: 'c1',
+        doc_id: 'd1',
+        citation: 'Doc 1',
+        text_preview: 'text',
+        subtopic_candidates: [{ id: 'ST-A', label: 'A', score: 0.4 }],
+        clo_candidates: [],
+        confidence: 0.4,
+        decided_subtopic_ids: [],
+        decided_clo_ids: [],
+      },
+    ],
+  };
+  await saveCourseArtifact('ALIGNEDIT', 'reference-alignment.json', artifact);
 
-    // Promote with explicit CLO ids → no V1 bundle needed (temp course has none).
-    const updated = updateAlignmentMapping('ALIGNEDIT', [
-      { chunk_id: 'c1', subtopic_ids: ['ST-A'], clo_ids: ['CLO-9'] },
-    ]);
-    assert.deepEqual(updated.mappings[0].decided_subtopic_ids, ['ST-A']);
-    assert.deepEqual(updated.mappings[0].decided_clo_ids, ['CLO-9']);
-    assert.equal(updated.mappings[0].edited, true);
-    assert.equal(updated.tagged_chunk_count, 1);
+  // Promote with explicit CLO ids → no V1 bundle needed (temp course has none).
+  const updated = await updateAlignmentMapping('ALIGNEDIT', [
+    { chunk_id: 'c1', subtopic_ids: ['ST-A'], clo_ids: ['CLO-9'] },
+  ]);
+  assert.deepEqual(updated.mappings[0].decided_subtopic_ids, ['ST-A']);
+  assert.deepEqual(updated.mappings[0].decided_clo_ids, ['CLO-9']);
+  assert.equal(updated.mappings[0].edited, true);
+  assert.equal(updated.tagged_chunk_count, 1);
 
-    // Demote to course-level (no tag).
-    const demoted = updateAlignmentMapping('ALIGNEDIT', [{ chunk_id: 'c1', subtopic_ids: [], clo_ids: [] }]);
-    assert.deepEqual(demoted.mappings[0].decided_subtopic_ids, []);
-    assert.equal(demoted.tagged_chunk_count, 0);
-  });
+  // Demote to course-level (no tag).
+  const demoted = await updateAlignmentMapping('ALIGNEDIT', [{ chunk_id: 'c1', subtopic_ids: [], clo_ids: [] }]);
+  assert.deepEqual(demoted.mappings[0].decided_subtopic_ids, []);
+  assert.equal(demoted.tagged_chunk_count, 0);
 });
 
-test('approveAlignment writes scope tags into chunks + manifest, then re-indexes (JSON)', async () => {
+test('approveAlignment writes scope tags into chunks + document, then re-indexes', { skip: dbSkip }, async () => {
   const CODE = 'ALIGNAPPROVE';
-  const dir = join(DATA_DIR, CODE);
-  try {
+
+  const doc: ReferenceDocument = {
+    doc_id: 'd1',
+    course_code: CODE,
+    title: 'Doc 1',
+    source_type: 'textbook_chapter',
+    citation_label: 'Doc 1',
+    scope: { clo_ids: [], subtopic_ids: [] },
+    original_filename: 'd1.pdf',
+    mime_type: 'application/pdf',
+    uploaded_at: '2026-01-01T00:00:00.000Z',
+    char_count: 10,
+    chunk_count: 2,
+    embedding_model: 'text-embedding-3-small',
+    embedding_dimensions: 1536,
+  };
+  await referenceRepo.saveDocument(doc, 'doc text');
+
+  // Empty embeddings: this test asserts scope-tag propagation, not vector search,
+  // so we avoid inserting non-1536-dim vectors into the embedding column.
+  const chunks: ReferenceChunk[] = [
     {
-      const manifest: ReferenceManifest = {
-        course_code: CODE,
-        documents: [
-          {
-            doc_id: 'd1',
-            course_code: CODE,
-            title: 'Doc 1',
-            source_type: 'textbook_chapter',
-            citation_label: 'Doc 1',
-            scope: { clo_ids: [], subtopic_ids: [] },
-            original_filename: 'd1.pdf',
-            mime_type: 'application/pdf',
-            uploaded_at: '2026-01-01T00:00:00.000Z',
-            char_count: 10,
-            chunk_count: 2,
-            embedding_model: 'text-embedding-3-small',
-            embedding_dimensions: 3,
-          },
-        ],
-        vector_backend: 'json',
-        updated_at: '2026-01-01T00:00:00.000Z',
-      };
-      fileService.saveReferenceManifest(CODE, manifest);
+      chunk_id: 'c1', doc_id: 'd1', course_code: CODE, seq: 0, text: 'a', token_estimate: 1,
+      citation: 'Doc 1 p1', clo_ids: [], subtopic_ids: [], embedding: [],
+    },
+    {
+      chunk_id: 'c2', doc_id: 'd1', course_code: CODE, seq: 1, text: 'b', token_estimate: 1,
+      citation: 'Doc 1 p2', clo_ids: [], subtopic_ids: [], embedding: [],
+    },
+  ];
+  await referenceRepo.upsertChunks(chunks);
 
-      const chunks: ReferenceChunk[] = [
-        {
-          chunk_id: 'c1', doc_id: 'd1', course_code: CODE, seq: 0, text: 'a', token_estimate: 1,
-          citation: 'Doc 1 p1', clo_ids: [], subtopic_ids: [], embedding: [0.1, 0.2, 0.3],
-        },
-        {
-          chunk_id: 'c2', doc_id: 'd1', course_code: CODE, seq: 1, text: 'b', token_estimate: 1,
-          citation: 'Doc 1 p2', clo_ids: [], subtopic_ids: [], embedding: [0.4, 0.5, 0.6],
-        },
-      ];
-      fileService.saveReferenceChunks(CODE, 'd1', chunks);
+  const artifact: ReferenceAlignmentArtifact = {
+    course_code: CODE,
+    status: 'proposed',
+    threshold: DEFAULT_ALIGNMENT_THRESHOLD,
+    embedding_model: 'text-embedding-3-small',
+    embedding_dimensions: 1536,
+    subtopic_count: 1,
+    reference_doc_count: 1,
+    chunk_count: 2,
+    tagged_chunk_count: 1,
+    mappings: [
+      {
+        chunk_id: 'c1', doc_id: 'd1', citation: 'Doc 1 p1', text_preview: 'a',
+        subtopic_candidates: [], clo_candidates: [], confidence: 0.5,
+        decided_subtopic_ids: ['ST-A'], decided_clo_ids: ['CLO-1'],
+      },
+      {
+        chunk_id: 'c2', doc_id: 'd1', citation: 'Doc 1 p2', text_preview: 'b',
+        subtopic_candidates: [], clo_candidates: [], confidence: 0.1,
+        decided_subtopic_ids: [], decided_clo_ids: [],
+      },
+    ],
+  };
+  await saveCourseArtifact(CODE, 'reference-alignment.json', artifact);
 
-      const artifact: ReferenceAlignmentArtifact = {
-        course_code: CODE,
-        status: 'proposed',
-        threshold: DEFAULT_ALIGNMENT_THRESHOLD,
-        embedding_model: 'text-embedding-3-small',
-        embedding_dimensions: 3,
-        subtopic_count: 1,
-        reference_doc_count: 1,
-        chunk_count: 2,
-        tagged_chunk_count: 1,
-        mappings: [
-          {
-            chunk_id: 'c1', doc_id: 'd1', citation: 'Doc 1 p1', text_preview: 'a',
-            subtopic_candidates: [], clo_candidates: [], confidence: 0.5,
-            decided_subtopic_ids: ['ST-A'], decided_clo_ids: ['CLO-1'],
-          },
-          {
-            chunk_id: 'c2', doc_id: 'd1', citation: 'Doc 1 p2', text_preview: 'b',
-            subtopic_candidates: [], clo_candidates: [], confidence: 0.1,
-            decided_subtopic_ids: [], decided_clo_ids: [],
-          },
-        ],
-      };
-      saveCourseArtifact(CODE, 'reference-alignment.json', artifact);
-    }
+  await approveAlignment(CODE, { approver: 'sme@test' });
 
-    await approveAlignment(CODE, { approver: 'sme@test' });
+  const written = await referenceRepo.getChunksByDoc('d1');
+  const c1 = written.find((c) => c.chunk_id === 'c1')!;
+  const c2 = written.find((c) => c.chunk_id === 'c2')!;
+  assert.deepEqual(c1.subtopic_ids, ['ST-A']);
+  assert.deepEqual(c1.clo_ids, ['CLO-1']);
+  assert.deepEqual(c2.subtopic_ids, [], 'low-confidence chunk stays course-level');
 
-    const written = fileService.getReferenceChunks(CODE, 'd1');
-    const c1 = written.find((c) => c.chunk_id === 'c1')!;
-    const c2 = written.find((c) => c.chunk_id === 'c2')!;
-    assert.deepEqual(c1.subtopic_ids, ['ST-A']);
-    assert.deepEqual(c1.clo_ids, ['CLO-1']);
-    assert.deepEqual(c2.subtopic_ids, [], 'low-confidence chunk stays course-level');
+  const storedDoc = await referenceRepo.getDocument('d1');
+  assert.ok(storedDoc?.scope.subtopic_ids?.includes('ST-A'));
 
-    const m = fileService.getReferenceManifest(CODE)!;
-    assert.ok(m.documents[0].scope.subtopic_ids?.includes('ST-A'));
-
-    const approved = getAlignmentProposal(CODE)!;
-    assert.equal(approved.status, 'approved');
-    assert.equal(approved.approved_by, 'sme@test');
-  } finally {
-    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-  }
+  const approved = await getAlignmentProposal(CODE);
+  assert.equal(approved?.status, 'approved');
+  assert.equal(approved?.approved_by, 'sme@test');
 });

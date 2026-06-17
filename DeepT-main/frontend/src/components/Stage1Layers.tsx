@@ -83,10 +83,18 @@ function statusColor(status: string): string {
 interface Stage1LayersProps {
   courseCode: string
   onAllApproved?: (allApproved: boolean) => void
+  /** Called once the final Course Architect layer (Layer 6) is approved, so the
+   *  page can guide the SME to the next step (Reference Alignment). */
+  onCourseArchitectComplete?: () => void
   intake?: IntakeSummaryProps
 }
 
-export default function Stage1Layers({ courseCode, onAllApproved, intake }: Stage1LayersProps) {
+export default function Stage1Layers({
+  courseCode,
+  onAllApproved,
+  onCourseArchitectComplete,
+  intake,
+}: Stage1LayersProps) {
   const [layers, setLayers] = useState<Stage1LayerStateView[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -336,7 +344,13 @@ export default function Stage1Layers({ courseCode, onAllApproved, intake }: Stag
   }
 
   async function handleApproveLayer6AndContinue() {
-    await handleApprove('layer6-subtopic-architecture', { skipUnsavedCheck: true })
+    const approved = await handleApprove('layer6-subtopic-architecture', { skipUnsavedCheck: true })
+    if (approved) {
+      // Layer 6 is the last layer — there is no next layer to expand. Guide the
+      // SME onward to Reference Alignment (the Course Architect -> Node Engine
+      // transition) instead.
+      onCourseArchitectComplete?.()
+    }
   }
 
   async function handleReject(layerId: string) {
@@ -386,8 +400,33 @@ export default function Stage1Layers({ courseCode, onAllApproved, intake }: Stag
           const isRunning = clientRunning
           const showRunButton = layer.canRun || staleRunning
 
+          // Once a layer is approved, surface a "continue" affordance to the next
+          // not-yet-approved layer so the frontier layer (e.g. Layer 5 -> Layer 6)
+          // always has the same forward navigation the approve-and-continue buttons
+          // provide at approval time.
+          const layerIndex = layers.findIndex((l) => l.layerId === layer.layerId)
+          const nextLayer = layerIndex >= 0 ? layers[layerIndex + 1] : undefined
+          const showContinueToNext =
+            layer.status === 'approved' && !!nextLayer && nextLayer.status !== 'approved'
+          // The final layer has no successor — once approved, point the SME to the
+          // next stage (Reference Alignment) rather than leaving a dead end.
+          const showContinueToReferenceAlignment =
+            layer.status === 'approved' && !nextLayer
+
           const actionButtons = (
             <div className="flex flex-wrap gap-2">
+              {showContinueToNext && nextLayer && (
+                <Button size="sm" onClick={() => setExpandedId(nextLayer.layerId)}>
+                  Continue to Layer {nextLayer.config.order}
+                  <ChevronRight className="ml-2 h-4 w-4" />
+                </Button>
+              )}
+              {showContinueToReferenceAlignment && (
+                <Button size="sm" onClick={() => onCourseArchitectComplete?.()}>
+                  Continue to Reference Alignment
+                  <ChevronRight className="ml-2 h-4 w-4" />
+                </Button>
+              )}
               {staleRunning && (
                 <p className="w-full rounded-md bg-amber-500/10 p-2 text-xs text-amber-600 dark:text-amber-400">
                   This layer was left in a running state (the previous run may have been interrupted). You can
@@ -500,7 +539,9 @@ export default function Stage1Layers({ courseCode, onAllApproved, intake }: Stag
                       {layer.config.mode === 'council' ? 'LLM Council' : 'Single Agent'}
                     </span>
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">{layer.config.description}</p>
+                  {layer.layerId !== 'layer6-subtopic-architecture' && layer.config.description && (
+                    <p className="mt-1 text-sm text-muted-foreground">{layer.config.description}</p>
+                  )}
                   <p className="text-xs text-muted-foreground">Output: {layer.config.productOutput}</p>
                 </div>
                 {open ? <ChevronDown className="h-5 w-5 shrink-0" /> : <ChevronRight className="h-5 w-5 shrink-0" />}

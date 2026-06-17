@@ -33,10 +33,24 @@ Configure council members and chairman in **Settings > LLM Council**, and choose
 | **Stage 4** | Content generation — full Markdown content per node (Council recommended) |
 | **Stage 5** | Assembly & export — compile to downloadable PDF |
 
+## Data architecture
+
+Maestro uses **PostgreSQL (with the `pgvector` extension) as the primary source of
+truth** for all entity data, pipeline artifacts (JSONB), and reference/RAG vectors.
+**Neo4j is an optional secondary graph projection** (node IDs + relationships only)
+used for traversal/DAG/visualization; it is rebuilt from Postgres via a transactional
+outbox and can be down without affecting entity reads/writes. Binary files (compiled
+PDF/DOCX, uploaded sources) stay on the filesystem with a metadata row in Postgres.
+
+- **Postgres is REQUIRED** at startup (the server fails fast if it is unreachable).
+- **Neo4j is OPTIONAL** (graph visualization degrades gracefully if it is down).
+- **pgvector** is the vector store; the old JSON-cosine and Neo4j vector backends are retired.
+
 ## Prerequisites
 
 - Node.js 18+
-- Neo4j 5.x (running locally)
+- PostgreSQL 15+ with the `pgvector` extension (REQUIRED)
+- Neo4j 5.x (OPTIONAL — graph projection/visualization)
 - OpenRouter API key (or OpenAI API key, or local Ollama)
 
 ## Quick Start
@@ -46,39 +60,67 @@ Configure council members and chairman in **Settings > LLM Council**, and choose
    npm run install:all
    ```
 
-2. **Configure settings**:
-   Copy `config/settings.example.json` to `config/settings.json` and add your credentials:
+2. **Configure the database connection**:
+   Copy `.env.example` to `.env` at the repo root and set `DATABASE_URL` to a
+   **least-privilege** `maestro` role (NOT the `postgres` superuser):
    ```bash
-   cp config/settings.example.json config/settings.json
+   cp .env.example .env
+   # DATABASE_URL=postgresql://maestro:<password>@127.0.0.1:5432/maestronexus
    ```
-   Edit `config/settings.json` with Neo4j credentials and API keys. Do not commit this file.
+   The `vector` extension must be created once by a superuser; the app then connects
+   as `maestro`. API keys / passwords come from env and are never persisted.
 
-3. **Start development servers**:
+3. **Apply the schema** (idempotent; builds tables + GIN indexes):
+   ```bash
+   npm --prefix backend run db:migrate
+   # after a bulk re-ingest, build the HNSW vector index:
+   npm --prefix backend run db:build-vector-index
+   ```
+
+4. **Start development servers**:
    ```bash
    npm run dev
    ```
    - Backend: http://localhost:3001  
    - Frontend: http://localhost:5173
 
+   Check `/api/health` to see both `postgres` and `neo4j` status.
+
 ## Configuration
 
-See `config/settings.example.json` for a template. You can also change settings in the UI (Settings page). Key sections: `aiProvider`, `models`, `neo4j`, and `council` (members, chairman, temperatures). Use `stageExecution` to set Single vs. Council per stage (e.g., `"stage4": "council"` for content generation).
+Connection settings come from `.env` (`DATABASE_URL` for Postgres; `NEO4J_*` for the
+optional projection). Non-secret application settings are persisted in the
+`app_settings` table and editable in the UI (Settings page). Key sections:
+`aiProvider`, `models`, `neo4j`, `postgres`, and `council` (members, chairman,
+temperatures). Use `stageExecution` to set Single vs. Council per stage.
+
+## Testing
+
+```bash
+npm --prefix backend test          # pure-function suite (no database)
+RUN_DB_TESTS=1 APP_DB_SCHEMA=maestro_test npm --prefix backend test   # + repo/pgvector tests in a disposable schema
+```
+
+DB-backed tests run in a disposable, per-process schema and are skipped unless
+`RUN_DB_TESTS=1`. Integration tests that need a fully-seeded course additionally
+require `RUN_SEEDED_TESTS=1`.
 
 ## Project Structure
 
 ```
 ├── backend/           # Express API server
 │   └── src/
+│       ├── db/        # Drizzle schema, repositories, client, bootstrap/migrate
 │       ├── routes/    # API endpoints
-│       ├── services/  # Business logic (stages, council, Neo4j)
+│       ├── services/  # Business logic (stages, council, pgvector RAG, Neo4j projection)
 │       └── models/    # TypeScript interfaces
 ├── frontend/          # React application
 │   └── src/
 │       ├── components/
 │       ├── pages/
 │       └── services/
-├── config/            # settings.json (do not commit)
-└── data/              # Runtime course data
+├── .env               # DATABASE_URL + secrets (do not commit)
+└── data/              # Filesystem binaries (compiled PDF/DOCX, uploads)
 ```
 
 ## API Endpoints

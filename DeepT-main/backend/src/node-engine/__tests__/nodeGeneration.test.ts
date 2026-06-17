@@ -13,9 +13,9 @@
  * proposal into the pure projection, and the orchestrator test injects a canned
  * executor. Any artifact a test writes is cleaned up so the repo stays clean.
  */
-import test from 'node:test';
+import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync, rmSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 
 import {
@@ -38,8 +38,24 @@ import {
   type RawNodeSetProposal,
 } from '../nodeGeneration.service.js';
 import { saveNodeSetArtifact, getNodeSetArtifact } from '../store.service.js';
+import { dbTestsEnabled, setupTestDb, teardownTestDb } from '../../db/testSupport.js';
 
 const COURSE = 'MDLD602';
+
+// The projection + orchestrator tests read the all-approved MDLD602 contract from
+// Postgres (an integration fixture; no MDLD602 source data ships in the repo), so
+// they run only when a course has been pre-seeded. Schema validators stay DB-free.
+const dbSkip =
+  dbTestsEnabled && process.env.RUN_SEEDED_TESTS === '1'
+    ? false
+    : 'requires RUN_DB_TESTS=1 + RUN_SEEDED_TESTS=1 (pre-seeded MDLD602)';
+
+before(async () => {
+  if (dbTestsEnabled) await setupTestDb();
+});
+after(async () => {
+  if (dbTestsEnabled) await teardownTestDb();
+});
 // The MDLD602 "critical-evaluation" subtopic (Analyze, A1-facing): the
 // comparative/criteria framework-analysis subtopic that yields the worked node.
 const CRITICAL_EVAL_SUBTOPIC = 'CLO1-ST2';
@@ -100,8 +116,8 @@ test('parseNodeSet round-trips and rejects an invalid status', () => {
 // 2. Context assembly + deterministic projection (golden reproduction)
 // ===========================================================================
 
-test('buildNodeGenerationContext reads the RICH V1 subtopic, parent CLO, frozen A1', () => {
-  const bundle = buildV1ContractBundle(COURSE);
+test('buildNodeGenerationContext reads the RICH V1 subtopic, parent CLO, frozen A1', { skip: dbSkip }, async () => {
+  const bundle = await buildV1ContractBundle(COURSE);
   const context = buildNodeGenerationContext(bundle, CRITICAL_EVAL_SUBTOPIC);
 
   // Rich grounding context preserved (never the lossy clo_topics projection).
@@ -123,8 +139,8 @@ test('buildNodeGenerationContext reads the RICH V1 subtopic, parent CLO, frozen 
   assert.ok(messages[1].content.includes(context.subtopic.purpose.slice(0, 24)));
 });
 
-test('GOLDEN: projectNodeSet reproduces the critical-evaluation node-set', () => {
-  const bundle = buildV1ContractBundle(COURSE);
+test('GOLDEN: projectNodeSet reproduces the critical-evaluation node-set', { skip: dbSkip }, async () => {
+  const bundle = await buildV1ContractBundle(COURSE);
   const context = buildNodeGenerationContext(bundle, CRITICAL_EVAL_SUBTOPIC);
   const nodeSet = projectNodeSet(loadProposal(), context, { now: '2026-01-01T00:00:00.000Z' });
 
@@ -197,8 +213,8 @@ test('GOLDEN: projectNodeSet reproduces the critical-evaluation node-set', () =>
   assert.ok(distinction.dependent_node_ids.length > 0, 'distinction has dependents');
 });
 
-test('projectNodeSet records grain_justification when the count is outside 4-7', () => {
-  const bundle = buildV1ContractBundle(COURSE);
+test('projectNodeSet records grain_justification when the count is outside 4-7', { skip: dbSkip }, async () => {
+  const bundle = await buildV1ContractBundle(COURSE);
   const context = buildNodeGenerationContext(bundle, CRITICAL_EVAL_SUBTOPIC);
 
   // Three nodes, no justification supplied → projection must flag it.
@@ -218,8 +234,8 @@ test('projectNodeSet records grain_justification when the count is outside 4-7',
   assert.equal(kept.grain_justification, 'Fused two near-duplicate KCs into one node.');
 });
 
-test('projectNodeSet binds an APPROVED misconception (else proposes a candidate)', () => {
-  const bundle = buildV1ContractBundle(COURSE);
+test('projectNodeSet binds an APPROVED misconception (else proposes a candidate)', { skip: dbSkip }, async () => {
+  const bundle = await buildV1ContractBundle(COURSE);
   const context = buildNodeGenerationContext(bundle, CRITICAL_EVAL_SUBTOPIC);
 
   const registry: ApprovedMisconceptionEntry[] = [
@@ -253,7 +269,7 @@ test('projectNodeSet binds an APPROVED misconception (else proposes a candidate)
 // 3. Orchestrator (injected executor) + human approval gate
 // ===========================================================================
 
-test('generateNodeSet runs end-to-end with an injected executor (no model, no DB)', async () => {
+test('generateNodeSet runs end-to-end with an injected executor (no model)', { skip: dbSkip }, async () => {
   const proposalJson = readFileSync(join(FIXTURES_DIR, 'nodeset_proposal_critical-eval.json'), 'utf-8');
 
   const nodeSet = await generateNodeSet(COURSE, CRITICAL_EVAL_SUBTOPIC, {
@@ -274,36 +290,31 @@ test('generateNodeSet runs end-to-end with an injected executor (no model, no DB
   );
 });
 
-test('approveNodeSet gates draft → approved; only approved nodes emit to M8', () => {
+test('approveNodeSet gates draft → approved; only approved nodes emit to M8', { skip: dbSkip }, async () => {
   const TEMP_COURSE = 'M7TEST';
-  const dir = join(process.cwd(), '..', 'data', 'courses', TEMP_COURSE);
-  try {
-    const bundle = buildV1ContractBundle(COURSE);
-    const context = buildNodeGenerationContext(bundle, CRITICAL_EVAL_SUBTOPIC);
-    const draft = projectNodeSet(loadProposal(), context, { now: '2026-01-01T00:00:00.000Z' });
-    saveNodeSetArtifact(TEMP_COURSE, CRITICAL_EVAL_SUBTOPIC, draft);
+  const bundle = await buildV1ContractBundle(COURSE);
+  const context = buildNodeGenerationContext(bundle, CRITICAL_EVAL_SUBTOPIC);
+  const draft = projectNodeSet(loadProposal(), context, { now: '2026-01-01T00:00:00.000Z' });
+  await saveNodeSetArtifact(TEMP_COURSE, CRITICAL_EVAL_SUBTOPIC, draft);
 
-    // Before approval, nothing emits to M8 (scope guard / no auto-proceed).
-    assert.deepEqual(getApprovedNodesForM8(TEMP_COURSE, CRITICAL_EVAL_SUBTOPIC), []);
+  // Before approval, nothing emits to M8 (scope guard / no auto-proceed).
+  assert.deepEqual(await getApprovedNodesForM8(TEMP_COURSE, CRITICAL_EVAL_SUBTOPIC), []);
 
-    // This projected draft has no reference grounding, so the academic-approval
-    // guard requires an explicit override reason (recorded for audit).
-    const approved = approveNodeSet(TEMP_COURSE, CRITICAL_EVAL_SUBTOPIC, {
-      approver: 'sme@test',
-      overrideReason: 'unit test: grounding not exercised here',
-    });
-    assert.equal(approved.status, 'approved');
-    assert.ok(approved.nodes.every((n) => n.status === 'approved'));
-    assert.equal(approved.approved_by, 'sme@test');
-    assert.equal(approved.academic_override_reason, 'unit test: grounding not exercised here');
+  // This projected draft has no reference grounding, so the academic-approval
+  // guard requires an explicit override reason (recorded for audit).
+  const approved = await approveNodeSet(TEMP_COURSE, CRITICAL_EVAL_SUBTOPIC, {
+    approver: 'sme@test',
+    overrideReason: 'unit test: grounding not exercised here',
+  });
+  assert.equal(approved.status, 'approved');
+  assert.ok(approved.nodes.every((n) => n.status === 'approved'));
+  assert.equal(approved.approved_by, 'sme@test');
+  assert.equal(approved.academic_override_reason, 'unit test: grounding not exercised here');
 
-    const emitted = getApprovedNodesForM8(TEMP_COURSE, CRITICAL_EVAL_SUBTOPIC);
-    assert.equal(emitted.length, draft.nodes.length, 'all approved nodes emit to M8');
+  const emitted = await getApprovedNodesForM8(TEMP_COURSE, CRITICAL_EVAL_SUBTOPIC);
+  assert.equal(emitted.length, draft.nodes.length, 'all approved nodes emit to M8');
 
-    // The persisted artifact is schema-valid on re-read.
-    const reread = getNodeSetArtifact(TEMP_COURSE, CRITICAL_EVAL_SUBTOPIC);
-    assert.ok(reread);
-  } finally {
-    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-  }
+  // The persisted artifact is schema-valid on re-read.
+  const reread = await getNodeSetArtifact(TEMP_COURSE, CRITICAL_EVAL_SUBTOPIC);
+  assert.ok(reread);
 });

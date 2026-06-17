@@ -11,11 +11,10 @@ import { v4 as uuidv4 } from 'uuid';
 import type {
   ReferenceChunk,
   ReferenceDocument,
-  ReferenceManifest,
   ReferenceScope,
   ReferenceSourceType,
 } from '../models/schemas.js';
-import * as fileService from './file.service.js';
+import * as referenceRepo from '../db/repos/referenceRepo.js';
 import { extractTextFromBuffer } from './extraction.service.js';
 import { chunkText, buildCitation } from './referenceChunking.service.js';
 import { embedTexts } from './embedding.service.js';
@@ -36,10 +35,6 @@ export interface IngestReferenceParams {
   sourceType?: ReferenceSourceType;
   citationLabel?: string;
   scope?: ReferenceScope;
-}
-
-function emptyManifest(courseCode: string): ReferenceManifest {
-  return { course_code: courseCode, documents: [], vector_backend: 'json', updated_at: new Date().toISOString() };
 }
 
 export async function ingestReferenceDocument(
@@ -104,14 +99,6 @@ export async function ingestReferenceDocument(
     embedding: vectors[i] ?? [],
   }));
 
-  // Persist text + chunks (embeddings included) to disk first.
-  fileService.saveReferenceDocText(courseCode, docId, text);
-  fileService.saveReferenceChunks(courseCode, docId, chunks);
-
-  // Index into the best available backend (Neo4j vector index, else JSON cosine).
-  const store = await resolveStoreForIndexing(dimensions);
-  const backend = await store.indexChunks(chunks);
-
   const doc: ReferenceDocument = {
     doc_id: docId,
     course_code: courseCode,
@@ -129,11 +116,10 @@ export async function ingestReferenceDocument(
     contextual_embeddings: true,
   };
 
-  const manifest = fileService.getReferenceManifest(courseCode) ?? emptyManifest(courseCode);
-  manifest.documents.push(doc);
-  manifest.vector_backend = backend;
-  manifest.updated_at = new Date().toISOString();
-  fileService.saveReferenceManifest(courseCode, manifest);
+  // Persist document (+full text) then index chunks/embeddings into pgvector.
+  await referenceRepo.saveDocument(doc, text);
+  const store = await resolveStoreForIndexing(dimensions);
+  await store.indexChunks(chunks);
 
   return doc;
 }
@@ -202,23 +188,16 @@ export async function ingestReferenceFromUrl(
   });
 }
 
-export function listReferenceDocuments(courseCode: string): ReferenceDocument[] {
-  return fileService.getReferenceManifest(courseCode)?.documents ?? [];
+export async function listReferenceDocuments(courseCode: string): Promise<ReferenceDocument[]> {
+  return referenceRepo.listDocuments(courseCode);
 }
 
 export async function deleteReferenceDocument(courseCode: string, docId: string): Promise<boolean> {
-  const manifest = fileService.getReferenceManifest(courseCode);
-  if (!manifest) return false;
-  const exists = manifest.documents.some((d) => d.doc_id === docId);
-  if (!exists) return false;
-
-  // Remove from whichever backend indexed it, then delete files + manifest entry.
-  await getStoreForBackend(manifest.vector_backend).deleteDoc(courseCode, docId);
-  fileService.deleteReferenceDocFiles(courseCode, docId);
-
-  manifest.documents = manifest.documents.filter((d) => d.doc_id !== docId);
-  manifest.updated_at = new Date().toISOString();
-  fileService.saveReferenceManifest(courseCode, manifest);
+  const doc = await referenceRepo.getDocument(docId);
+  if (!doc) return false;
+  // Remove the vector index rows, then the document (cascades its chunks).
+  await getStoreForBackend('postgres').deleteDoc(courseCode, docId);
+  await referenceRepo.deleteDocument(docId);
   return true;
 }
 
@@ -250,8 +229,8 @@ export async function reembedCourseWithContext(
   courseCode: string
 ): Promise<ReembedContextualResult> {
   const startedAt = Date.now();
-  const manifest = fileService.getReferenceManifest(courseCode);
-  if (!manifest || manifest.documents.length === 0) {
+  const documents = await referenceRepo.listDocuments(courseCode);
+  if (documents.length === 0) {
     return {
       docs: 0,
       chunks: 0,
@@ -273,8 +252,8 @@ export async function reembedCourseWithContext(
 
   const allUpdatedChunks: ReferenceChunk[] = [];
 
-  for (const doc of manifest.documents) {
-    const chunks = fileService.getReferenceChunks(courseCode, doc.doc_id);
+  for (const doc of documents) {
+    const chunks = await referenceRepo.getChunksByDoc(doc.doc_id);
     if (chunks.length === 0) continue;
     totalChunks += chunks.length;
 
@@ -315,27 +294,24 @@ export async function reembedCourseWithContext(
       });
     }
 
-    fileService.saveReferenceChunks(courseCode, doc.doc_id, chunks);
+    await referenceRepo.upsertChunks(chunks);
     allUpdatedChunks.push(...chunks);
     doc.contextual_embeddings = true;
+    await referenceRepo.saveDocument(doc);
   }
 
-  // Re-index all chunks once (JSON backend is a no-op; Neo4j upserts vectors).
+  // Re-index all chunks once into pgvector (ensures the HNSW index too).
   if (allUpdatedChunks.length > 0) {
-    const indexDims = dimensions || manifest.documents[0]?.embedding_dimensions || 0;
+    const indexDims = dimensions || documents[0]?.embedding_dimensions || 0;
     const store = await resolveStoreForIndexing(indexDims);
-    const backend = await store.indexChunks(allUpdatedChunks);
-    manifest.vector_backend = backend;
+    await store.indexChunks(allUpdatedChunks);
   }
 
-  if (!model) model = manifest.documents[0]?.embedding_model ?? '';
-  if (!dimensions) dimensions = manifest.documents[0]?.embedding_dimensions ?? 0;
-
-  manifest.updated_at = new Date().toISOString();
-  fileService.saveReferenceManifest(courseCode, manifest);
+  if (!model) model = documents[0]?.embedding_model ?? '';
+  if (!dimensions) dimensions = documents[0]?.embedding_dimensions ?? 0;
 
   return {
-    docs: manifest.documents.length,
+    docs: documents.length,
     chunks: totalChunks,
     headersGenerated,
     cacheHits,
