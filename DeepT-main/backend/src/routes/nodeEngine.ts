@@ -26,12 +26,17 @@ import {
 } from '../node-engine/modalityGenerationConfig.service.js';
 import { getNodeEngineDefaultModel } from '../config.js';
 import {
+  getReferenceCoverageConfig,
+  updateReferenceCoverageConfig,
+} from '../node-engine/referenceCoverageConfig.service.js';
+import {
   assertEnum,
   parseVideoSettings,
   VEHICLES,
   GENERATION_MODES,
   NodeEngineValidationError,
   type ModalityGenerationConfig,
+  type ReferenceCoverageThresholds,
   type Vehicle,
 } from '../models/nodeEngine.js';
 import { LEGACY_STAGES_ENABLED } from '../config/featureFlags.js';
@@ -251,6 +256,60 @@ router.put('/modality-config/:vehicle', async (req: Request, res: Response) => {
     }
     console.error('Error updating modality config:', error);
     res.status(500).json({ error: 'Failed to update modality config' });
+  }
+});
+
+// ===========================================================================
+// Reference Coverage thresholds (Reference Coverage Check). The numeric
+// evidence-gate config lives in its OWN global document and is tuned here
+// WITHOUT minting any prompt-template version (the coverage-judgment prompt is
+// edited separately via /prompt-templates).
+// ===========================================================================
+
+/** Require a finite number within [min, max] (inclusive), else 400. */
+function requireNumberInRange(value: unknown, field: string, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new NodeEngineValidationError(`${field} must be a number`);
+  }
+  if (value < min || value > max) {
+    throw new NodeEngineValidationError(`${field} must be between ${min} and ${max}`);
+  }
+  return value;
+}
+
+// GET /api/node-engine/reference-coverage-config — current thresholds document
+router.get('/reference-coverage-config', (_req: Request, res: Response) => {
+  try {
+    res.json({ config: getReferenceCoverageConfig() });
+  } catch (error) {
+    console.error('Error fetching reference-coverage config:', error);
+    res.status(500).json({ error: 'Failed to fetch reference-coverage config' });
+  }
+});
+
+// PUT /api/node-engine/reference-coverage-config — update the numeric thresholds
+router.put('/reference-coverage-config', async (req: Request, res: Response) => {
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    // Accept either { thresholds: {...} } or the four fields at the top level.
+    const raw = (body.thresholds ?? body) as Record<string, unknown>;
+    const thresholds: ReferenceCoverageThresholds = {
+      topK: Math.round(requireNumberInRange(raw.topK, 'topK', 1, 100)),
+      relevanceFloor: requireNumberInRange(raw.relevanceFloor, 'relevanceFloor', 0, 1),
+      minPassages: Math.round(requireNumberInRange(raw.minPassages, 'minPassages', 1, 100)),
+      distributionMin: Math.round(requireNumberInRange(raw.distributionMin, 'distributionMin', 1, 100)),
+    };
+    const config = await updateReferenceCoverageConfig(thresholds);
+    res.json({
+      message: 'Reference coverage thresholds updated (no prompt-template version created)',
+      config,
+    });
+  } catch (error) {
+    if (error instanceof NodeEngineValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('Error updating reference-coverage config:', error);
+    res.status(500).json({ error: 'Failed to update reference-coverage config' });
   }
 });
 

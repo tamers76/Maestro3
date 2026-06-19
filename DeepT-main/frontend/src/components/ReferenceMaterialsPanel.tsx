@@ -24,6 +24,15 @@ interface ReferenceMaterialsPanelProps {
   embedded?: boolean
   /** Notify the parent when the ingested-document count changes (e.g. to drive warnings). */
   onDocsChange?: (count: number) => void
+  /** Fired after a reference is successfully ingested (upload OR link) — drives the
+   * coverage re-check loop so the SME sees before/after deltas. */
+  onReferenceUploaded?: () => void
+  /** Prefill the title field (e.g. from an approved AI source suggestion). */
+  initialTitle?: string
+  /** Prefill the "Add from link" URL field (e.g. from an approved AI suggestion). */
+  initialLinkUrl?: string
+  /** Prefill the source-type select (e.g. from an approved AI suggestion). */
+  initialSourceType?: ReferenceSourceType
 }
 
 /**
@@ -35,15 +44,22 @@ export default function ReferenceMaterialsPanel({
   courseCode,
   embedded = false,
   onDocsChange,
+  onReferenceUploaded,
+  initialTitle,
+  initialLinkUrl,
+  initialSourceType,
 }: ReferenceMaterialsPanelProps) {
   const [docs, setDocs] = useState<ReferenceDocument[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [file, setFile] = useState<File | null>(null)
-  const [title, setTitle] = useState('')
-  const [titleEdited, setTitleEdited] = useState(false)
-  const [sourceType, setSourceType] = useState<ReferenceSourceType>('textbook_chapter')
-  const [linkUrl, setLinkUrl] = useState('')
+  const [title, setTitle] = useState(initialTitle ?? '')
+  // A prefilled title counts as SME-provided, so a later file pick won't clobber it.
+  const [titleEdited, setTitleEdited] = useState(!!initialTitle)
+  const [sourceType, setSourceType] = useState<ReferenceSourceType>(
+    initialSourceType ?? 'textbook_chapter'
+  )
+  const [linkUrl, setLinkUrl] = useState(initialLinkUrl ?? '')
   const [linking, setLinking] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -103,6 +119,7 @@ export default function ReferenceMaterialsPanel({
       })
       resetForm()
       await load()
+      onReferenceUploaded?.()
     } catch (error) {
       showToast({
         title: 'Upload failed',
@@ -130,6 +147,7 @@ export default function ReferenceMaterialsPanel({
       })
       setLinkUrl('')
       await load()
+      onReferenceUploaded?.()
     } catch (error) {
       showToast({
         title: 'Link ingest failed',

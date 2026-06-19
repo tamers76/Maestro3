@@ -32,6 +32,7 @@ import { getPostgresConfig, hydrateSettings } from './config.js';
 import { hydrateRegistry } from './node-engine/promptTemplateRegistry.service.js';
 import { hydrateModalityConfig } from './node-engine/modalityGenerationConfig.service.js';
 import { hydrateNodeGenerationPrompt } from './node-engine/nodeGenerationPrompt.service.js';
+import { hydrateReferenceCoverageConfig } from './node-engine/referenceCoverageConfig.service.js';
 import coursesRouter from './routes/courses.js';
 import settingsRouter from './routes/settings.js';
 import referencesRouter from './routes/references.js';
@@ -110,6 +111,7 @@ async function start() {
       hydrateRegistry(),
       hydrateModalityConfig(),
       hydrateNodeGenerationPrompt(),
+      hydrateReferenceCoverageConfig(),
     ]);
     console.log('[Startup] Configuration caches hydrated.');
   } catch (e) {

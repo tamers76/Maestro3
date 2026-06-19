@@ -493,6 +493,61 @@ export interface ModalityGenerationConfigFile {
   configs: ModalityGenerationConfig[];
 }
 
+// ===========================================================================
+// Reference Coverage thresholds (Reference Coverage Check — read-only measurement)
+// ===========================================================================
+
+/**
+ * Numeric thresholds that drive the per-CLO coverage evidence gate. Stored in
+ * their OWN global document so an operator can tune them without touching the
+ * coverage-judgment prompt or any generation config.
+ *
+ * - `topK`           — passages retrieved per CLO (hybrid retrieval cap).
+ * - `relevanceFloor` — fused final_score a passage must meet to "count" as
+ *                      supporting evidence (Layer 2 floor).
+ * - `minPassages`    — minimum supporting passages to clear the evidence gate.
+ * - `distributionMin`— minimum distinct documents among supporting passages
+ *                      (forbids a single source masquerading as broad coverage).
+ */
+export interface ReferenceCoverageThresholds {
+  topK: number;
+  relevanceFloor: number;
+  minPassages: number;
+  distributionMin: number;
+}
+
+/** The own global document holding the reference-coverage thresholds. */
+export interface ReferenceCoverageConfigFile {
+  schema_version: 1;
+  updated_at: string;
+  thresholds: ReferenceCoverageThresholds;
+}
+
+function requirePositiveNumber(obj: Record<string, unknown>, field: string, context: string): number {
+  const v = obj[field];
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {
+    throw new NodeEngineValidationError(`Missing/invalid non-negative number "${field}" in ${context}`);
+  }
+  return v;
+}
+
+/** Typed accessor for the reference-coverage thresholds document. */
+export function parseReferenceCoverageConfig(input: unknown): ReferenceCoverageConfigFile {
+  const obj = asRecord(input, 'ReferenceCoverageConfigFile');
+  const thresholdsRaw = asRecord(obj.thresholds ?? {}, 'ReferenceCoverageConfigFile.thresholds');
+  const thresholds: ReferenceCoverageThresholds = {
+    topK: requirePositiveNumber(thresholdsRaw, 'topK', 'ReferenceCoverageThresholds'),
+    relevanceFloor: requirePositiveNumber(thresholdsRaw, 'relevanceFloor', 'ReferenceCoverageThresholds'),
+    minPassages: requirePositiveNumber(thresholdsRaw, 'minPassages', 'ReferenceCoverageThresholds'),
+    distributionMin: requirePositiveNumber(thresholdsRaw, 'distributionMin', 'ReferenceCoverageThresholds'),
+  };
+  return {
+    schema_version: 1,
+    updated_at: optionalString(obj, 'updated_at') ?? new Date().toISOString(),
+    thresholds,
+  };
+}
+
 export function parsePromptTemplate(input: unknown): PromptTemplate {
   const obj = asRecord(input, 'PromptTemplate');
   const status = assertEnum(PROMPT_TEMPLATE_STATUSES, obj.status, 'PromptTemplate.status');

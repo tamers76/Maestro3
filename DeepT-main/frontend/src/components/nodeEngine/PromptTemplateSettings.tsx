@@ -101,7 +101,21 @@ function ModelSelect({
  * editor revise the task prompt. Saving never mutates a published version — the
  * backend appends a NEW version and moves the active pointer (D3).
  */
-export default function PromptTemplateSettings() {
+export interface PromptTemplateSettingsProps {
+  /** When set, only these template ids are shown (focused/embedded variant). */
+  filterTemplateIds?: string[]
+  /** Hide the per-vehicle Model & Generation Settings block (focused variant). */
+  hideModelSettings?: boolean
+  /** Override the section heading (focused variant). */
+  heading?: { title?: string; description?: string }
+}
+
+export default function PromptTemplateSettings({
+  filterTemplateIds,
+  hideModelSettings = false,
+  heading,
+}: PromptTemplateSettingsProps = {}) {
+  const focused = !!filterTemplateIds && filterTemplateIds.length > 0
   const [templates, setTemplates] = useState<PromptTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -117,6 +131,19 @@ export default function PromptTemplateSettings() {
   const [modelsLoaded, setModelsLoaded] = useState(false)
   const [modelDraft, setModelDraft] = useState<ModalityGenerationConfig | null>(null)
   const [savingModel, setSavingModel] = useState(false)
+
+  const visibleTemplates = useMemo(
+    () =>
+      focused
+        ? templates.filter((t) => filterTemplateIds!.includes(t.prompt_template_id))
+        : templates,
+    [templates, focused, filterTemplateIds]
+  )
+
+  // Show the template list/switcher whenever there is more than one template to
+  // choose between — including the focused (embedded) variant when it filters to
+  // multiple ids (e.g. the coverage-judgment + source-suggestion prompts).
+  const showList = !focused || visibleTemplates.length > 1
 
   const selected = useMemo(
     () => templates.find((t) => t.prompt_template_id === selectedId) ?? null,
@@ -139,10 +166,14 @@ export default function PromptTemplateSettings() {
       setTemplates(list)
       setModalityEntries(modality.configs)
       setGlobalDefaultModel(modality.global_default_model)
-      if (list.length > 0 && !selectedId) {
-        setSelectedId(list[0].prompt_template_id)
-        setDraftPrompt(list[0].task_prompt)
-        setModelDraft(findConfigForVehicle(modality.configs, list[0].vehicle))
+      const initialList =
+        filterTemplateIds && filterTemplateIds.length > 0
+          ? list.filter((t) => filterTemplateIds.includes(t.prompt_template_id))
+          : list
+      if (initialList.length > 0 && !selectedId) {
+        setSelectedId(initialList[0].prompt_template_id)
+        setDraftPrompt(initialList[0].task_prompt)
+        setModelDraft(findConfigForVehicle(modality.configs, initialList[0].vehicle))
       }
     } catch (error) {
       showToast({
@@ -292,22 +323,24 @@ export default function PromptTemplateSettings() {
       <div>
         <h2 className="text-lg font-semibold flex items-center gap-2">
           <FileText className="h-5 w-5" />
-          Prompt Template Registry
+          {heading?.title ?? 'Prompt Template Registry'}
         </h2>
         <p className="text-sm text-muted-foreground">
-          One template per production vehicle (Build Spec §8.14). Editing a template creates a new
-          immutable version and moves the active pointer — published versions are never overwritten.
+          {heading?.description ??
+            'One template per production vehicle (Build Spec §8.14). Editing a template creates a new immutable version and moves the active pointer — published versions are never overwritten.'}
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Template list */}
+      <div className={showList ? 'grid grid-cols-1 md:grid-cols-3 gap-4' : 'grid grid-cols-1 gap-4'}>
+        {/* Template list — shown whenever there is more than one template (incl.
+            the focused variant filtered to multiple ids). */}
+        {showList && (
         <Card className="md:col-span-1">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Templates</CardTitle>
           </CardHeader>
           <CardContent className="space-y-1.5">
-            {templates.map((t) => (
+            {visibleTemplates.map((t) => (
               <button
                 key={t.prompt_template_id}
                 type="button"
@@ -338,9 +371,10 @@ export default function PromptTemplateSettings() {
             ))}
           </CardContent>
         </Card>
+        )}
 
         {/* Editor */}
-        <Card className="md:col-span-2">
+        <Card className={showList ? 'md:col-span-2' : ''}>
           {selected ? (
             <>
               <CardHeader className="pb-3">
@@ -405,7 +439,7 @@ export default function PromptTemplateSettings() {
                 </div>
 
                 {/* Model & Generation Settings — saved SEPARATELY from the prompt body. */}
-                {modelDraft && (
+                {!hideModelSettings && modelDraft && (
                   <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3 mt-2">
                     <div className="flex items-center gap-2">
                       <Cpu className="h-4 w-4 text-primary" />

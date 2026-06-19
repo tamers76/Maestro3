@@ -25,6 +25,12 @@ import {
   approveAlignment,
   type AlignmentMappingEdit,
 } from '../services/referenceAlignment.service.js';
+import {
+  getCoverageState,
+  getCoverageReport,
+  recomputeCoverageWithDelta,
+} from '../services/referenceCoverage.service.js';
+import { suggestSourcesForClo } from '../services/referenceSourceSuggestion.service.js';
 
 const router = Router();
 
@@ -309,6 +315,60 @@ router.post('/:code/references/alignment/approve', async (req: Request, res: Res
     return res
       .status(400)
       .json({ error: error instanceof Error ? error.message : 'Failed to approve alignment' });
+  }
+});
+
+// ===========================================================================
+// Reference Coverage — read-only, per-CLO measurement of how well the corpus
+// teaches each approved CLO. Writes NO scope tags; persists a report artifact.
+// ===========================================================================
+
+// GET /api/courses/:code/references/coverage — coverage state + current report
+router.get('/:code/references/coverage', async (req: Request, res: Response) => {
+  try {
+    const { code } = req.params;
+    const state = await getCoverageState(code);
+    const report = await getCoverageReport(code);
+    return res.json({ state, report });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ error: error instanceof Error ? error.message : 'Failed to read coverage state' });
+  }
+});
+
+// POST /api/courses/:code/references/coverage/compute — recompute + persist report.
+// Returns the new report plus a per-CLO before/after `delta` (null on first run).
+router.post('/:code/references/coverage/compute', async (req: Request, res: Response) => {
+  try {
+    const { code } = req.params;
+    const { report, delta } = await recomputeCoverageWithDelta(code);
+    return res.json({ report, delta });
+  } catch (error) {
+    console.error('[references] coverage compute failed:', error);
+    return res
+      .status(500)
+      .json({ error: error instanceof Error ? error.message : 'Failed to compute coverage' });
+  }
+});
+
+// POST /api/courses/:code/references/coverage/suggest-sources — AI source
+// suggestions for ONE weak/uncovered CLO (Phase C). AI PROPOSES, SME APPROVES:
+// this returns candidate sources only and NEVER ingests. Body: { clo_id }.
+router.post('/:code/references/coverage/suggest-sources', async (req: Request, res: Response) => {
+  try {
+    const { code } = req.params;
+    const cloId = typeof req.body?.clo_id === 'string' ? req.body.clo_id.trim() : '';
+    if (!cloId) {
+      return res.status(400).json({ error: 'clo_id (string) is required' });
+    }
+    const result = await suggestSourcesForClo(code, cloId);
+    return res.json({ suggestions: result.suggestions, reason: result.reason, clo_id: result.clo_id });
+  } catch (error) {
+    console.error('[references] source suggestion failed:', error);
+    return res
+      .status(500)
+      .json({ error: error instanceof Error ? error.message : 'Failed to suggest sources' });
   }
 });
 

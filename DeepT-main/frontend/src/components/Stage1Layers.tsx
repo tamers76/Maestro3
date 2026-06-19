@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/Button'
@@ -20,6 +20,7 @@ import Layer4WeightingRubricEditor from '@/components/Layer4WeightingRubricEdito
 import Layer5IntegrityEditor from '@/components/Layer5IntegrityEditor'
 import Layer6SubtopicEditor from '@/components/Layer6SubtopicEditor'
 import IntakeSummaryView, { type IntakeSummaryProps } from '@/components/IntakeSummaryView'
+import ReferenceCoveragePanel from '@/components/ReferenceCoveragePanel'
 import type {
   CloRefinementReviewSummary,
   AssessmentRedesignReviewSummary,
@@ -111,7 +112,11 @@ export default function Stage1Layers({
   const [layer6HasChanges, setLayer6HasChanges] = useState(false)
   const [layer6Summary, setLayer6Summary] = useState<SubtopicArchitectureReviewSummary | null>(null)
   const layerRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const coverageRef = useRef<HTMLDivElement | null>(null)
   const autoRunAttempted = useRef<Set<string>>(new Set())
+  // Bumped whenever a reference is ingested (Layer 1 intake) so the sibling
+  // Reference Coverage panel auto-re-runs and surfaces before/after deltas.
+  const [coverageRefreshSignal, setCoverageRefreshSignal] = useState(0)
 
   // When a layer is expanded, bring its header to the top of the viewport so the
   // newly revealed content opens in place instead of leaving the user scrolled away.
@@ -511,8 +516,8 @@ export default function Stage1Layers({
           )
 
           return (
+            <Fragment key={layer.layerId}>
             <div
-              key={layer.layerId}
               ref={(el) => {
                 layerRefs.current[layer.layerId] = el
               }}
@@ -682,7 +687,10 @@ export default function Stage1Layers({
                       layer.status === 'needs_revision' ||
                       layer.status === 'approved') ? (
                     <>
-                      <IntakeSummaryView {...intake} />
+                      <IntakeSummaryView
+                        {...intake}
+                        onReferenceUploaded={() => setCoverageRefreshSignal((n) => n + 1)}
+                      />
                       {viewingReportId === layer.layerId && layer.reportMarkdown && (
                         <FormattedReport markdown={layer.reportMarkdown} />
                       )}
@@ -701,6 +709,16 @@ export default function Stage1Layers({
                 </div>
               )}
             </div>
+
+            {/* Reference Coverage Check — read-only corpus-adequacy measurement
+                that appears once CLO Refinement (Layer 2) is approved. It does
+                NOT tag references or alter Reference Alignment. */}
+            {layer.layerId === 'layer2-clo-review' && layer.status === 'approved' && (
+              <div ref={coverageRef} className="scroll-mt-4">
+                <ReferenceCoveragePanel courseCode={courseCode} refreshSignal={coverageRefreshSignal} />
+              </div>
+            )}
+            </Fragment>
           )
         })}
       </CardContent>

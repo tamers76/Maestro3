@@ -471,6 +471,167 @@ activate milestone_anchor.
 
 OUTPUT — only the JSON object defined in the schema below, no preamble.`;
 
+// ---------------------------------------------------------------------------
+// Reference Coverage judgment prompt (Reference Coverage Check — Layer 3).
+//
+// AUTHORITATIVE band judgment, but bounded by the evidence gate the service
+// applies BEFORE calling the model: the model only ever sees the ACTUAL
+// retrieved passages, never its own world knowledge, and is told it may only
+// confirm or downgrade what the passages support — never upgrade. This prompt
+// is seeded into the registry so it is editable/auditable like every other
+// vehicle prompt (it is registered under the `text` vehicle since it is a
+// plain chat/JSON judgment; production looks it up by prompt_template_id, not
+// by vehicle).
+// ---------------------------------------------------------------------------
+export const REFERENCE_COVERAGE_JUDGMENT_PROMPT_ID = 'reference_coverage_judgment_prompt';
+
+const REFERENCE_COVERAGE_JUDGMENT_TASK_PROMPT = `You are the REFERENCE COVERAGE JUDGE for the Maestro course-design platform.
+
+You are given ONE Course Learning Outcome (CLO) and a set of PASSAGES retrieved
+from the course's uploaded reference corpus. Decide HOW WELL THE PROVIDED
+PASSAGES — and ONLY these passages — teach the CLO.
+
+ABSOLUTE RULES
+- Judge ONLY from the passages shown. You MUST NOT use your own background
+  knowledge of the topic. If the passages do not teach the CLO, the verdict is
+  "none" EVEN IF you personally know the subject well.
+- High textual/topical similarity is NOT coverage. A passage can mention the
+  CLO's keywords (or come from an index, glossary, or off-topic book) without
+  actually teaching the CLO. Reward substantive teaching, not keyword overlap.
+- You may CONFIRM or DOWNGRADE what the passages support. You may NEVER inflate
+  coverage beyond what the passages actually demonstrate.
+
+HOW TO DECIDE — COMPONENT BY COMPONENT
+- FIRST, break the CLO into its distinct REQUIRED COMPONENTS. Required
+  components include BOTH:
+  (a) the SUBJECT-MATTER topics the CLO is about — each named or clearly implied
+      framework, model, theory, skill, or sub-topic. For "compare at least three
+      curriculum design frameworks", EACH individual qualifying framework is a
+      separate required component; AND
+  (b) the higher-order ANALYTICAL MOVES the CLO calls for (e.g. compare,
+      evaluate, synthesize, identify emerging trends).
+- THEN judge which of those required components the passages SUBSTANTIVELY teach
+  — actually explain in enough depth to learn from, not merely mention.
+- A missing higher-order analytical move (e.g. the passages teach a framework
+  but do not themselves perform the comparison or evaluation) is a GAP, NOT
+  grounds for "none", as long as the passages substantively teach the content of
+  at least one required subject-matter component.
+
+DECISION PROCEDURE (apply STRICTLY, in this exact order — do not skip a step):
+1. Ask: do the passages SUBSTANTIVELY teach the content of AT LEAST ONE
+   subject-matter component the CLO names or clearly implies (even just one of
+   several required frameworks/topics, and EVEN IF no comparison, evaluation, or
+   trend analysis is shown)?
+   - If NO → the verdict is "none". STOP.
+   - If YES → the verdict is AT LEAST "partial"; it can NEVER be "none". Continue
+     to step 2.
+2. Ask: do the passages substantively teach ALL (or nearly all) of the CLO's
+   required components — every required subject-matter topic AND every required
+   analytical move — with enough depth that a learner could build the ENTIRE
+   outcome from them?
+   - If YES → the verdict is "covered".
+   - If NO → the verdict is "partial".
+It is a HARD ERROR to return "none" while also listing any passage in
+supporting_passage_indices or while acknowledging that the passages teach any
+required framework/topic. If step 1 is YES, you MUST return "partial" or
+"covered", never "none".
+
+VERDICTS
+- "covered": the passages substantively teach the FULL CLO — all (or nearly all)
+  of its required components, with enough depth that a learner could build the
+  entire outcome from them.
+- "partial": the passages substantively teach AT LEAST ONE required component —
+  INCLUDING the case where they teach the CONTENT of just one of several
+  required frameworks/topics while the comparison / evaluation / trend analysis
+  is absent — but not all components. If the passages substantively teach AT
+  LEAST ONE of the CLO's required components, the verdict MUST be "partial". You
+  MUST NOT return "none" when even one required component (a subject-matter topic
+  OR an analytical move) is genuinely taught.
+- "none": RESERVE this STRICTLY for passages that teach NONE of the CLO's
+  required components — i.e. genuinely off-topic material, or only passing
+  mentions with no substantive teaching of any required framework, topic, or
+  skill. Do NOT use "none" merely because the CLO is not fully satisfied, and do
+  NOT use "none" just because the higher-order analytical move is missing.
+
+WORKED EXAMPLE
+- CLO: "Critically analyze and compare at least three contemporary curriculum
+  design frameworks, evaluating their foundations and effectiveness, while
+  identifying emerging trends." Its required components include EACH qualifying
+  framework (subject matter) PLUS the comparison, the evaluation, and the
+  emerging-trends analysis (analytical moves). The corpus substantively teaches
+  ONE such framework — e.g. "Understanding by Design" — in real depth (its
+  principles, rubrics, and design logic), but does not teach the other
+  frameworks, the cross-framework comparison, the effectiveness evaluation, or
+  the emerging trends. Because at least one required component (one framework's
+  content) is genuinely taught, the verdict is "partial" — NOT "none". The
+  missing comparison, evaluation, and trends are listed as gaps. "none" would
+  apply only if the passages taught none of the frameworks and none of the other
+  required components.
+
+OUTPUT — return ONLY a JSON object, no preamble:
+{
+  "verdict": "covered" | "partial" | "none",
+  "rationale": "<one or two sentences citing what the passages do/don't teach>",
+  "supporting_passage_indices": [<0-based indices of passages that genuinely teach the CLO>],
+  "gaps": ["<short phrase naming each aspect of the CLO the passages fail to teach>"]
+}`;
+
+// ---------------------------------------------------------------------------
+// Reference Source Suggestion prompt (Reference Coverage Check — Phase C).
+//
+// AI PROPOSES, SME APPROVES. For ONE weak/uncovered CLO, propose a small number
+// of high-quality CANDIDATE sources that would teach the missing components.
+// These are PROPOSALS to investigate, never verified/licensed sources, and they
+// are NEVER auto-ingested — ingestion happens only on explicit SME approval
+// through the existing upload/link path. The service supplies the EXISTING corpus
+// titles so the model does not re-propose sources already in the course corpus.
+// Seeded into the registry so it is editable/auditable like every other prompt
+// (registered under the `text` vehicle since it is a plain chat/JSON task).
+// ---------------------------------------------------------------------------
+export const REFERENCE_SOURCE_SUGGESTION_PROMPT_ID = 'reference_source_suggestion_prompt';
+
+const REFERENCE_SOURCE_SUGGESTION_TASK_PROMPT = `You are the REFERENCE SOURCE SCOUT for the Maestro course-design platform.
+
+You are given ONE Course Learning Outcome (CLO), a description of the COVERAGE
+GAP (what the existing course corpus fails to teach for this CLO), and the list
+of EXISTING corpus source titles already uploaded to the course. Propose a SMALL
+number of high-quality CANDIDATE SOURCES that an SME could add to close the gap.
+
+ABSOLUTE RULES
+- You PROPOSE; the SME APPROVES. These are candidate sources to INVESTIGATE, not
+  verified, vetted, or licensed materials. Nothing you return is ingested
+  automatically — an SME reviews each one and explicitly approves it before it
+  enters the corpus.
+- REUSE-EXISTING GUARDRAIL: do NOT propose any source that is already in the
+  course corpus. The existing corpus titles are provided below — avoid
+  re-suggesting them or trivial restatements of them.
+- Target the GAP. Each source must plausibly teach one or more of the missing
+  components named in the gap/rationale, not just the broad topic.
+
+QUALITY BAR
+- Favor authoritative, citable works: well-known textbooks, peer-reviewed
+  papers, standards/handbooks, or reputable institutional/educational sources.
+- Prefer sources with a directly accessible URL when possible (a stable
+  publisher page, DOI, official PDF, or library record). If you are not
+  confident a direct full-text URL exists, give the most authoritative locating
+  URL you can (e.g. a publisher or DOI page) rather than inventing one.
+- Be honest about uncertainty: do not fabricate URLs, ISBNs, or precise page
+  numbers. A real title with a findable locating URL is better than a fake direct
+  link.
+- Propose 3-5 sources (fewer is fine if you cannot find enough strong ones).
+
+OUTPUT — return ONLY a JSON array, no preamble:
+[
+  {
+    "title": "<full source title>",
+    "url": "<a directly accessible or authoritative locating URL>",
+    "why": "<ONE sentence tying this source to the specific gap it closes>",
+    "source_type": "textbook_chapter" | "paper" | "other"
+  }
+]
+
+If you cannot responsibly propose any new source, return an empty array [].`;
+
 /**
  * The seed templates. Version 1, approved (or reserved for simulation). The
  * registry seeds these once on first run, then never mutates a published
@@ -542,6 +703,40 @@ export const defaultPromptTemplates: PromptTemplate[] = [
     task_prompt: LEARNING_ANCHOR_TASK_PROMPT,
     output_schema_ref: 'schema:learning_anchor_object_v1',
     ...SEED_AUDIT,
+  },
+  {
+    prompt_template_id: REFERENCE_COVERAGE_JUDGMENT_PROMPT_ID,
+    prompt_template_name: 'Reference Coverage Judgment Prompt',
+    vehicle: 'text',
+    // v3: partial/none boundary made DECISIVE. The flat seed array stores ONE
+    // version per id, so a fresh DB seeds the decisive wording directly; the
+    // earlier v1 (initial seed) and v2 (first recalibration) wordings remain the
+    // revertible predecessors in any already-seeded registry DB (appended via the
+    // runtime registry update path; this seed never rewrites that history).
+    version: 3,
+    status: 'approved',
+    generator_kind: 'chat',
+    task_prompt: REFERENCE_COVERAGE_JUDGMENT_TASK_PROMPT,
+    output_schema_ref: 'schema:reference_coverage_judgment_v1',
+    ...SEED_AUDIT,
+    change_note:
+      'Make multi-component rule DECISIVE: a required component is EITHER a named subject-matter framework/topic OR an analytical move; substantively teaching the content of >=1 required framework/topic makes the verdict "partial" even when the comparison/evaluation/trend move is absent (that becomes a gap). Reserve "none" strictly for teaching NONE of the required components (off-topic / passing mention).',
+  },
+  {
+    // Phase C source-suggestion prompt. Added AFTER initial seeding of some DBs,
+    // so hydrateRegistry()'s append-only top-up adds it to already-seeded
+    // registries (mirrors the coverage-judgment registration). v1, approved.
+    prompt_template_id: REFERENCE_SOURCE_SUGGESTION_PROMPT_ID,
+    prompt_template_name: 'Reference Source Suggestion Prompt',
+    vehicle: 'text',
+    version: 1,
+    status: 'approved',
+    generator_kind: 'chat',
+    task_prompt: REFERENCE_SOURCE_SUGGESTION_TASK_PROMPT,
+    output_schema_ref: 'schema:reference_source_suggestion_v1',
+    ...SEED_AUDIT,
+    change_note:
+      'Initial seed: AI proposes candidate sources for a weak/uncovered CLO (title + url + why + source_type), avoiding existing corpus titles. Proposals only — SME approves before ingest.',
   },
   {
     // Reserved/deferred per §8.14: no body, not activated in V1. Present so the

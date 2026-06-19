@@ -13,6 +13,7 @@
 import type {
   PromptTemplateRegistryFile,
   ModalityGenerationConfigFile,
+  ReferenceCoverageConfigFile,
 } from '../models/nodeEngine.js';
 import type { NodeGenerationPromptFile } from './nodeGenerationPrompt.service.js';
 import * as configRepo from '../db/repos/configRepo.js';
@@ -38,6 +39,16 @@ export async function readModalityGenerationConfig(): Promise<ModalityGeneration
 
 export async function writeModalityGenerationConfig(file: ModalityGenerationConfigFile): Promise<void> {
   await configRepo.set(configRepo.CONFIG_KEYS.modalityGenerationConfig, file);
+}
+
+// ============== Reference Coverage thresholds (global document) ==============
+
+export async function readReferenceCoverageConfig(): Promise<ReferenceCoverageConfigFile | null> {
+  return configRepo.get<ReferenceCoverageConfigFile>(configRepo.CONFIG_KEYS.referenceCoverageConfig);
+}
+
+export async function writeReferenceCoverageConfig(file: ReferenceCoverageConfigFile): Promise<void> {
+  await configRepo.set(configRepo.CONFIG_KEYS.referenceCoverageConfig, file);
 }
 
 // ============== Node-Set Generation prompt (global document) ==============

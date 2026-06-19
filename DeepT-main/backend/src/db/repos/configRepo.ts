@@ -12,6 +12,7 @@ export const CONFIG_KEYS = {
   promptTemplates: 'prompt_templates',
   modalityGenerationConfig: 'modality_generation_config',
   nodeGenerationPrompt: 'node_generation_prompt',
+  referenceCoverageConfig: 'reference_coverage_config',
 } as const;
 
 export async function get<T = unknown>(key: string, tx?: Executor): Promise<T | null> {

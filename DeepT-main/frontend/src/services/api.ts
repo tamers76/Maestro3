@@ -2396,6 +2396,200 @@ export async function approveAlignment(
 }
 
 // ============================================================================
+// Reference Coverage — read-only, per-CLO measurement of corpus adequacy
+// ============================================================================
+
+export type CoverageBand = 'well_covered' | 'partial' | 'not_covered';
+export type CoverageVerdict = 'covered' | 'partial' | 'none';
+export type CoverageStatus = 'locked' | 'no_references' | 'available' | 'computed';
+
+export interface ReferenceCoverageThresholds {
+  topK: number;
+  relevanceFloor: number;
+  minPassages: number;
+  distributionMin: number;
+}
+
+export interface CoverageSignals {
+  top_score: number;
+  median_score: number;
+  retrieved_count: number;
+  supporting_count: number;
+  distinct_sources: number;
+}
+
+export interface CoveragePassage {
+  chunk_id: string;
+  doc_id: string;
+  citation: string;
+  text_preview: string;
+  score: number;
+}
+
+export type CoverageDocStrength = 'strong' | 'partial';
+
+export interface CoverageDocRef {
+  doc_id: string;
+  title: string;
+  strength: CoverageDocStrength;
+}
+
+export interface CoverageCloResult {
+  clo_id: string;
+  statement: string;
+  /** Short 2-4 word label (statement-derived fallback when missing on older reports). */
+  short_label: string;
+  band: CoverageBand;
+  /** Integer percentage derived from the top similarity signal (0-100). */
+  coverage_pct: number;
+  verdict: CoverageVerdict | null;
+  evidence_gate_passed: boolean;
+  signals: CoverageSignals;
+  rationale: string;
+  supporting_passages: CoveragePassage[];
+  /** Supporting documents rolled up from supporting passages (strong-first). */
+  covered_by: CoverageDocRef[];
+  gaps: string[];
+}
+
+export interface CoverageSummary {
+  total_clos: number;
+  well_covered: number;
+  partial: number;
+  not_covered: number;
+}
+
+export interface ReferenceCoverageReport {
+  course_code: string;
+  status: CoverageStatus;
+  thresholds: ReferenceCoverageThresholds;
+  reference_doc_count: number;
+  chunk_count: number;
+  summary: CoverageSummary;
+  clos: CoverageCloResult[];
+  generated_at?: string;
+  lock_reason?: string;
+}
+
+export interface CoverageStateSummary {
+  status: CoverageStatus;
+  lock_reason?: string;
+  approved_clo_count: number;
+  reference_doc_count: number;
+  chunk_count: number;
+  thresholds: ReferenceCoverageThresholds;
+  summary?: CoverageSummary;
+  generated_at?: string;
+}
+
+export type CoverageDirection = 'improved' | 'regressed' | 'unchanged';
+
+export interface CoverageDeltaEntry {
+  clo_id: string;
+  from_band: CoverageBand | null;
+  to_band: CoverageBand;
+  direction: CoverageDirection;
+}
+
+export interface CoverageDelta {
+  entries: CoverageDeltaEntry[];
+  improved: number;
+  regressed: number;
+  unchanged: number;
+}
+
+export async function fetchCoverage(
+  code: string
+): Promise<{ state: CoverageStateSummary; report: ReferenceCoverageReport | null }> {
+  const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/references/coverage`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to load reference coverage');
+  return data;
+}
+
+/**
+ * Recompute coverage and return the new report plus a per-CLO before/after
+ * `delta` (null on the first measurement, when there is no prior to diff).
+ */
+export async function computeCoverage(
+  code: string
+): Promise<{ report: ReferenceCoverageReport; delta: CoverageDelta | null }> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/references/coverage/compute`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to compute reference coverage');
+  return { report: data.report, delta: data.delta ?? null };
+}
+
+// ----------------------------------------------------------------------------
+// Reference Coverage — Phase C AI source suggestions.
+// AI PROPOSES, SME APPROVES: these are candidate sources to verify, never
+// auto-ingested. Approval routes through the EXISTING reference ingest path.
+// ----------------------------------------------------------------------------
+
+export interface CoverageSourceSuggestion {
+  title: string;
+  url: string;
+  /** One sentence tying the source to the CLO's gap. */
+  why: string;
+  source_type: ReferenceSourceType;
+}
+
+/**
+ * Ask the AI to propose candidate sources for ONE weak/uncovered CLO. Returns a
+ * (possibly empty) list plus an optional `reason` when empty (fail-soft). Nothing
+ * is ingested by this call — the SME approves each suggestion separately.
+ */
+export async function suggestSources(
+  code: string,
+  cloId: string
+): Promise<{ suggestions: CoverageSourceSuggestion[]; reason?: string; clo_id: string }> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/references/coverage/suggest-sources`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clo_id: cloId }),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to suggest sources');
+  return { suggestions: data.suggestions ?? [], reason: data.reason, clo_id: data.clo_id ?? cloId };
+}
+
+// ----------------------------------------------------------------------------
+// Reference cross-referencing config — the numeric evidence-gate thresholds.
+// ----------------------------------------------------------------------------
+
+export interface ReferenceCoverageConfigFile {
+  schema_version: number;
+  updated_at: string;
+  thresholds: ReferenceCoverageThresholds;
+}
+
+export async function fetchReferenceCoverageConfig(): Promise<ReferenceCoverageConfigFile> {
+  const response = await fetch(`${API_BASE}/node-engine/reference-coverage-config`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to load reference coverage config');
+  return data.config;
+}
+
+export async function updateReferenceCoverageConfig(
+  thresholds: ReferenceCoverageThresholds
+): Promise<ReferenceCoverageConfigFile> {
+  const response = await fetch(`${API_BASE}/node-engine/reference-coverage-config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ thresholds }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to update reference coverage config');
+  return data.config;
+}
+
+// ============================================================================
 // Maestro Node Engine (M1/M2) — prompt template registry + status
 // ============================================================================
 

@@ -49,7 +49,13 @@ interface ResponsesAPIResponse {
 
 // ─── Call OpenAI Responses API ─────────────────────────────────────────────
 
-async function callResponsesAPI(
+/**
+ * Call the OpenAI Responses API with the web_search tool. Exported so other
+ * features (e.g. the Reference Coverage Phase-C source suggestions) can reuse the
+ * SAME grounded web-search path instead of replicating the fetch. Requires
+ * `settings.openai.apiKey`; throws when it is not configured.
+ */
+export async function callResponsesAPI(
   input: string,
   model: string = 'gpt-4o',
 ): Promise<ResponsesAPIResponse> {
@@ -142,7 +148,7 @@ async function callResponsesAPI(
 
 // ─── Extract URL citations ─────────────────────────────────────────────────
 
-function extractCitations(output: ResponsesAPIOutput[]): Array<{ title: string; url: string }> {
+export function extractCitations(output: ResponsesAPIOutput[]): Array<{ title: string; url: string }> {
   const citations: Array<{ title: string; url: string }> = [];
   const seen = new Set<string>();
 

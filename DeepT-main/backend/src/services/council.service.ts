@@ -26,6 +26,13 @@ export interface CouncilProgressCallback {
 export interface CouncilOptions {
   maxTokens?: number;
   jsonMode?: boolean;
+  /**
+   * Sampling temperature. DEFAULT-PRESERVING: when undefined, the provider request
+   * omits `temperature` entirely and behaves exactly as before. Only set this when
+   * you explicitly need deterministic/controlled sampling (e.g. the coverage judge
+   * pins it to 0). Providers that do not support a temperature field skip it.
+   */
+  temperature?: number;
   progressCallback?: CouncilProgressCallback;
 }
 
@@ -72,7 +79,7 @@ async function callOpenRouter(
   options: CouncilOptions
 ): Promise<string> {
   const settings = getSettings();
-  const { maxTokens = 4096, jsonMode = false } = options;
+  const { maxTokens = 4096, jsonMode = false, temperature } = options;
   
   // Reasoning models need much higher token limits
   const isReasoning = isReasoningModel(model);
@@ -87,6 +94,12 @@ async function callOpenRouter(
     messages,
     max_tokens: effectiveMaxTokens,
   };
+  
+  // DEFAULT-PRESERVING: only pin temperature when explicitly provided. Reasoning
+  // models ignore/forbid temperature overrides, so skip them gracefully.
+  if (temperature !== undefined && !isReasoning) {
+    requestBody.temperature = temperature;
+  }
   
   // Reasoning models don't support response_format
   if (jsonMode && !isReasoning) {
@@ -130,7 +143,7 @@ async function callOpenAI(
   options: CouncilOptions
 ): Promise<string> {
   const settings = getSettings();
-  const { maxTokens = 4096, jsonMode = false } = options;
+  const { maxTokens = 4096, jsonMode = false, temperature } = options;
   
   // Reasoning models need much higher token limits because they use tokens for internal thinking
   // before producing output. Default 4096 is often not enough.
@@ -146,6 +159,12 @@ async function callOpenAI(
     messages,
     max_completion_tokens: effectiveMaxTokens,
   };
+  
+  // DEFAULT-PRESERVING: only pin temperature when explicitly provided. Reasoning
+  // models (o1, gpt-5) reject temperature overrides, so skip them gracefully.
+  if (temperature !== undefined && !isReasoning) {
+    requestBody.temperature = temperature;
+  }
   
   // Note: Reasoning models (o1, gpt-5) don't support response_format
   if (jsonMode && !isReasoning) {
@@ -187,19 +206,26 @@ async function callOllama(
   options: CouncilOptions
 ): Promise<string> {
   const settings = getSettings();
-  const { maxTokens = 4096, jsonMode = false } = options;
+  const { maxTokens = 4096, jsonMode = false, temperature } = options;
   
   // Ollama timeout: 10 minutes (local LLMs can be slow, especially when loading models)
   const OLLAMA_TIMEOUT_MS = 600000;
+  
+  // DEFAULT-PRESERVING: only set Ollama's options.temperature when explicitly
+  // provided, so existing callers keep Ollama's own default sampling.
+  const ollamaOptions: Record<string, unknown> = {
+    num_predict: maxTokens,
+    num_ctx: settings.ollama?.options?.numCtx || 4096,
+  };
+  if (temperature !== undefined) {
+    ollamaOptions.temperature = temperature;
+  }
   
   const requestBody: Record<string, unknown> = {
     model,
     messages,
     stream: false,
-    options: {
-      num_predict: maxTokens,
-      num_ctx: settings.ollama?.options?.numCtx || 4096,
-    }
+    options: ollamaOptions,
   };
   
   if (jsonMode) {

@@ -42,6 +42,8 @@ export interface IntakeSummaryProps {
   references: string[]
   accreditationTags: string[]
   assessmentStrategy?: string
+  /** Fired after a grounding reference is ingested — drives the coverage re-check loop. */
+  onReferenceUploaded?: () => void
 }
 
 function bloomBadgeClass() {
@@ -139,13 +141,16 @@ function StatTile({
 function ReferencesSection({
   code,
   references,
+  onReferenceUploaded,
 }: {
   code: string
   references: string[]
+  onReferenceUploaded?: () => void
 }) {
   const [items, setItems] = useState<string[]>(references)
   const [input, setInput] = useState('')
   const [saving, setSaving] = useState(false)
+  const [ingestedCount, setIngestedCount] = useState(0)
 
   useEffect(() => {
     setItems(references)
@@ -186,7 +191,7 @@ function ReferencesSection({
   }
 
   return (
-    <CollapsibleCard icon={BookMarked} title="References" count={items.length}>
+    <CollapsibleCard icon={BookMarked} title="References" count={ingestedCount}>
       {items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No references yet. Add references below — Maestro will use them as source material when
@@ -234,7 +239,12 @@ function ReferencesSection({
         Saved references are added to this course and used as source material for downstream layers.
       </p>
 
-      <ReferenceMaterialsPanel courseCode={code} embedded />
+      <ReferenceMaterialsPanel
+        courseCode={code}
+        embedded
+        onDocsChange={setIngestedCount}
+        onReferenceUploaded={onReferenceUploaded}
+      />
     </CollapsibleCard>
   )
 }
@@ -251,6 +261,7 @@ export default function IntakeSummaryView({
   references,
   accreditationTags,
   assessmentStrategy,
+  onReferenceUploaded,
 }: IntakeSummaryProps) {
   const totalWeight = assessments.reduce((sum, a) => sum + (Number(a.weight) || 0), 0)
   const weightIsBalanced = Math.round(totalWeight) === 100
@@ -440,7 +451,7 @@ export default function IntakeSummaryView({
       </CollapsibleCard>
 
       {/* References (includes grounding-materials upload/link subsection) */}
-      <ReferencesSection code={code} references={references} />
+      <ReferencesSection code={code} references={references} onReferenceUploaded={onReferenceUploaded} />
 
       {/* Delivery & Accreditation */}
       <CollapsibleCard icon={Award} title="Delivery & Accreditation">

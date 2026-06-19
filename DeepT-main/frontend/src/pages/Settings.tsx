@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
@@ -15,12 +16,20 @@ import {
   testOllamaConnection,
   testOpenAIConnection,
   fetchEmbeddingHealth,
+  fetchReferenceCoverageConfig,
+  updateReferenceCoverageConfig,
   type Settings as SettingsType,
   type AIProvider,
   type EmbeddingHealth,
+  type ReferenceCoverageThresholds,
 } from '@/services/api'
-import { Loader2, Check, X, Save, RefreshCw, Database, Key, Cpu, Server, Users, Sparkles, Layers, Activity } from 'lucide-react'
+import { Loader2, Check, X, Save, RefreshCw, Database, Key, Cpu, Server, Users, Sparkles, Layers, Activity, Network } from 'lucide-react'
 import { cn } from '@/lib/utils'
+
+/** The coverage-judgment prompt id in the node-engine registry (Phase A seed). */
+const REFERENCE_COVERAGE_JUDGMENT_PROMPT_ID = 'reference_coverage_judgment_prompt'
+/** The AI source-suggestion prompt id (Phase C seed). */
+const REFERENCE_SOURCE_SUGGESTION_PROMPT_ID = 'reference_source_suggestion_prompt'
 
 export default function Settings() {
   const [settings, setSettings] = useState<SettingsType | null>(null)
@@ -36,11 +45,56 @@ export default function Settings() {
   const [openAIStatus, setOpenAIStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [embeddingHealth, setEmbeddingHealth] = useState<EmbeddingHealth | null>(null)
   const [checkingEmbedding, setCheckingEmbedding] = useState(false)
-  
+  const [coverageThresholds, setCoverageThresholds] = useState<ReferenceCoverageThresholds | null>(null)
+  const [savingCoverage, setSavingCoverage] = useState(false)
+  const location = useLocation()
+
   useEffect(() => {
     loadSettings()
     handleCheckEmbedding()
+    loadCoverageConfig()
   }, [])
+
+  // Deep-link from the Reference Coverage panel's "Cross-referencing settings"
+  // button (/settings#reference-cross-referencing) scrolls to the section.
+  useEffect(() => {
+    if (loading) return
+    const hash = location.hash?.replace('#', '')
+    if (!hash) return
+    const el = document.getElementById(hash)
+    if (el) requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }, [loading, location.hash])
+
+  async function loadCoverageConfig() {
+    try {
+      const config = await fetchReferenceCoverageConfig()
+      setCoverageThresholds(config.thresholds)
+    } catch {
+      // Non-fatal: the card shows a retry-on-save path if the config can't load.
+    }
+  }
+
+  async function handleSaveCoverageConfig() {
+    if (!coverageThresholds) return
+    try {
+      setSavingCoverage(true)
+      const config = await updateReferenceCoverageConfig(coverageThresholds)
+      setCoverageThresholds(config.thresholds)
+      showToast({
+        title: 'Thresholds saved',
+        description: 'Reference cross-referencing thresholds updated. Re-run coverage to apply.',
+        variant: 'success',
+      })
+    } catch (error) {
+      showToast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to save thresholds',
+        variant: 'destructive',
+      })
+    } finally {
+      setSavingCoverage(false)
+    }
+  }
 
   async function handleCheckEmbedding() {
     try {
@@ -629,6 +683,153 @@ export default function Settings() {
               )}
               Re-check
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Reference cross-referencing — coverage thresholds + embedding (read-only)
+          + the reused coverage-judgment prompt editor. */}
+      <Card id="reference-cross-referencing">
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-500">
+              <Network className="h-5 w-5" />
+            </div>
+            <div>
+              <CardTitle>Reference cross-referencing</CardTitle>
+              <CardDescription>
+                Tune the evidence-gate thresholds, review the embedding model, and edit the
+                coverage-judgment prompt used by the Reference Coverage Check.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Numeric thresholds */}
+          <div>
+            <h3 className="text-sm font-semibold text-foreground mb-1">Evidence-gate thresholds</h3>
+            <p className="text-xs text-muted-foreground mb-3">
+              A CLO reaches "Well covered / Partial" only when enough on-topic passages exist across
+              enough distinct sources. These control that gate; the judgment can only confirm or
+              downgrade within it.
+            </p>
+            {coverageThresholds ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-foreground">Top-K passages</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={coverageThresholds.topK}
+                    onChange={(e) =>
+                      setCoverageThresholds((p) => (p ? { ...p, topK: Number(e.target.value) } : p))
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">Passages retrieved per CLO (≥ 1).</p>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-foreground">Relevance floor</label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    max={1}
+                    value={coverageThresholds.relevanceFloor}
+                    onChange={(e) =>
+                      setCoverageThresholds((p) =>
+                        p ? { ...p, relevanceFloor: Number(e.target.value) } : p
+                      )
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Fused score a passage must clear to count (0–1).
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-foreground">Min passages</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={coverageThresholds.minPassages}
+                    onChange={(e) =>
+                      setCoverageThresholds((p) =>
+                        p ? { ...p, minPassages: Number(e.target.value) } : p
+                      )
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Supporting passages needed to open the gate (≥ 1).
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-foreground">Distribution min</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={coverageThresholds.distributionMin}
+                    onChange={(e) =>
+                      setCoverageThresholds((p) =>
+                        p ? { ...p, distributionMin: Number(e.target.value) } : p
+                      )
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Distinct documents required among supporting passages (≥ 1).
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Loading thresholds…</p>
+            )}
+            <div className="mt-3 flex justify-end">
+              <Button onClick={handleSaveCoverageConfig} disabled={savingCoverage || !coverageThresholds} className="gap-2">
+                {savingCoverage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                Save thresholds
+              </Button>
+            </div>
+          </div>
+
+          {/* Embedding model (read-only) */}
+          <div className="rounded-lg border border-border bg-muted/20 p-3">
+            <h3 className="text-sm font-semibold text-foreground mb-1">Embedding model (read-only)</h3>
+            <p className="text-xs text-muted-foreground mb-2">
+              Coverage retrieval reuses the configured embedding model. Change it under the AI provider
+              settings; it is shown here for reference.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-3 text-sm">
+              <div className="text-muted-foreground">
+                Provider: <span className="text-foreground">{embeddingHealth?.provider ?? '—'}</span>
+              </div>
+              <div className="text-muted-foreground">
+                Model: <span className="text-foreground">{embeddingHealth?.model || '—'}</span>
+              </div>
+              <div className="text-muted-foreground">
+                Dimensions:{' '}
+                <span className="text-foreground">
+                  {embeddingHealth
+                    ? embeddingHealth.liveDimensions || embeddingHealth.configuredDimensions || '—'
+                    : '—'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Coverage prompts — reuses the versioned PromptTemplateSettings editor for
+              BOTH the Layer-3 coverage-judgment prompt and the Phase-C AI
+              source-suggestion prompt. */}
+          <div className="border-t border-border pt-4">
+            <PromptTemplateSettings
+              filterTemplateIds={[
+                REFERENCE_COVERAGE_JUDGMENT_PROMPT_ID,
+                REFERENCE_SOURCE_SUGGESTION_PROMPT_ID,
+              ]}
+              hideModelSettings
+              heading={{
+                title: 'Coverage prompts',
+                description:
+                  'The authoritative Layer-3 coverage-judgment prompt and the AI source-suggestion prompt. Editing either creates a new immutable version and moves the active pointer — published versions are never overwritten.',
+              }}
+            />
           </div>
         </CardContent>
       </Card>

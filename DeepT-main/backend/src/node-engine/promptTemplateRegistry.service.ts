@@ -48,6 +48,25 @@ function buildSeedRegistry(): PromptTemplateRegistryFile {
 export async function hydrateRegistry(): Promise<PromptTemplateRegistryFile> {
   const existing = await readPromptTemplateRegistry();
   if (existing && Array.isArray(existing.templates) && existing.templates.length > 0) {
+    // Append-only top-up: a seed template added AFTER this DB was first seeded
+    // (e.g. a newly-introduced vehicle/judgment prompt) must still appear. We add
+    // ONLY ids that are missing — existing entries and their immutable version
+    // history are never mutated, so this is safe to run on every boot.
+    const present = new Set(existing.templates.map((t) => t.prompt_template_id));
+    const missing = defaultPromptTemplates.filter((tpl) => !present.has(tpl.prompt_template_id));
+    if (missing.length > 0) {
+      for (const tpl of missing) {
+        const validated = parsePromptTemplate(tpl);
+        existing.templates.push({
+          prompt_template_id: validated.prompt_template_id,
+          vehicle: validated.vehicle,
+          active_version: validated.version,
+          versions: [validated],
+        });
+      }
+      existing.updated_at = new Date().toISOString();
+      await writePromptTemplateRegistry(existing);
+    }
     cachedRegistry = existing;
     return existing;
   }
