@@ -51,7 +51,7 @@ export const NODE_ENGINE_LAYER_MAP: NodeEngineLayer[] = [
     label: 'Experience Blueprint',
     module: 'M8',
     specReference: 'Build Spec §8.0',
-    active: false,
+    active: true,
     job: 'Shape each approved node into a learning experience blueprint.',
     output: 'Experience Blueprint',
     lockReason: 'Approve Layer 1 — Node Generation first.',

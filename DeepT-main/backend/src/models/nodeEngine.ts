@@ -1470,6 +1470,109 @@ export interface MilestoneAssessmentPack {
   status: NodeEngineStatus;
 }
 
+// ===========================================================================
+// M8 — Node Experience Blueprint (Level 1, Build Spec §8.0).
+// A governed object sequence (purposes + suggested vehicles) per approved node.
+// The mandatory primary Evidence Check object is flagged explicitly.
+// ===========================================================================
+
+/** One Level-1 blueprint row — not yet a produced envelope (that is M10). */
+export interface BlueprintObject {
+  object_id: string;
+  object_family: ObjectFamily;
+  sequence_order: number;
+  parent_node_id: string;
+  parent_milestone_pack_id?: string | null;
+  kc_ids: string[];
+  node_object_purpose: NodeObjectPurpose | null;
+  milestone_support_purpose: MilestoneSupportPurpose | null;
+  suggested_vehicle: Vehicle;
+  content_pattern: ContentPattern;
+  is_primary_evidence_check: boolean;
+  title: string;
+  design_rationale: string;
+  estimated_effort_minutes: number;
+  addresses_misconception_ids: string[];
+}
+
+/** Persisted M8 artifact for one approved node. */
+export interface NodeExperienceBlueprint {
+  blueprint_id: string;
+  course_id: string;
+  subtopic_id: string;
+  node_id: string;
+  node_title: string;
+  objects: BlueprintObject[];
+  status: NodeEngineStatus;
+  created_at: string;
+  updated_at: string;
+  approved_by?: string;
+  approved_at?: string;
+}
+
+function parseBlueprintObject(input: unknown, context: string): BlueprintObject {
+  const obj = asRecord(input, context);
+  const family = assertEnum(OBJECT_FAMILIES, obj.object_family, `${context}.object_family`);
+  return {
+    object_id: requireString(obj, 'object_id', context),
+    object_family: family,
+    sequence_order: typeof obj.sequence_order === 'number' && Number.isFinite(obj.sequence_order)
+      ? obj.sequence_order
+      : 0,
+    parent_node_id: requireString(obj, 'parent_node_id', context),
+    parent_milestone_pack_id:
+      typeof obj.parent_milestone_pack_id === 'string' ? obj.parent_milestone_pack_id : null,
+    kc_ids: optionalStringArray(obj, 'kc_ids') ?? [],
+    node_object_purpose:
+      obj.node_object_purpose == null
+        ? null
+        : assertEnum(NODE_OBJECT_PURPOSES, obj.node_object_purpose, `${context}.node_object_purpose`),
+    milestone_support_purpose:
+      obj.milestone_support_purpose == null
+        ? null
+        : assertEnum(
+            MILESTONE_SUPPORT_PURPOSES,
+            obj.milestone_support_purpose,
+            `${context}.milestone_support_purpose`
+          ),
+    suggested_vehicle: assertEnum(VEHICLES, obj.suggested_vehicle, `${context}.suggested_vehicle`),
+    content_pattern: isEnumMember(CONTENT_PATTERNS, obj.content_pattern)
+      ? obj.content_pattern
+      : 'none',
+    is_primary_evidence_check: obj.is_primary_evidence_check === true,
+    title: optionalString(obj, 'title') ?? '',
+    design_rationale: optionalString(obj, 'design_rationale') ?? '',
+    estimated_effort_minutes:
+      typeof obj.estimated_effort_minutes === 'number' && Number.isFinite(obj.estimated_effort_minutes)
+        ? obj.estimated_effort_minutes
+        : 0,
+    addresses_misconception_ids: optionalStringArray(obj, 'addresses_misconception_ids') ?? [],
+  };
+}
+
+export function parseNodeExperienceBlueprint(input: unknown): NodeExperienceBlueprint {
+  const obj = asRecord(input, 'NodeExperienceBlueprint');
+  const objects = Array.isArray(obj.objects)
+    ? obj.objects.map((entry, i) => parseBlueprintObject(entry, `NodeExperienceBlueprint.objects[${i}]`))
+    : [];
+  const blueprint: NodeExperienceBlueprint = {
+    blueprint_id: requireString(obj, 'blueprint_id', 'NodeExperienceBlueprint'),
+    course_id: requireString(obj, 'course_id', 'NodeExperienceBlueprint'),
+    subtopic_id: requireString(obj, 'subtopic_id', 'NodeExperienceBlueprint'),
+    node_id: requireString(obj, 'node_id', 'NodeExperienceBlueprint'),
+    node_title: optionalString(obj, 'node_title') ?? '',
+    objects,
+    status: assertEnum(NODE_ENGINE_STATUSES, obj.status, 'NodeExperienceBlueprint.status'),
+    created_at: optionalString(obj, 'created_at') ?? new Date(0).toISOString(),
+    updated_at: optionalString(obj, 'updated_at') ?? new Date(0).toISOString(),
+  };
+  const approvedBy = optionalString(obj, 'approved_by');
+  if (approvedBy !== undefined) blueprint.approved_by = approvedBy;
+  const approvedAt = optionalString(obj, 'approved_at');
+  if (approvedAt !== undefined) blueprint.approved_at = approvedAt;
+  return blueprint;
+}
+
 export interface InteractiveTemplateProfile {
   template_id: string;
   template_name: string;

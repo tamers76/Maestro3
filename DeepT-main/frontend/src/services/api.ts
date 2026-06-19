@@ -3176,3 +3176,163 @@ export async function reopenNodeSet(code: string, subtopicId: string): Promise<N
   if (!response.ok) throw new Error(data.error || 'Failed to reopen node set');
   return data.node_set;
 }
+
+// ============================================================================
+// Maestro Node Engine — Layer 2 (M8) Experience Blueprint
+// ============================================================================
+
+export type BlueprintObjectFamily = 'node_learning_object' | 'milestone_support_object';
+
+export type BlueprintNodeObjectPurpose =
+  | 'orientation'
+  | 'explanation'
+  | 'worked_example'
+  | 'practice'
+  | 'evidence_check'
+  | 'remediation'
+  | 'enrichment'
+  | 'reflection'
+  | 'bridge'
+  | 'assessment_connection';
+
+export type BlueprintVehicle =
+  | 'text'
+  | 'structured_visual'
+  | 'pictorial_visual'
+  | 'video'
+  | 'interactive'
+  | 'simulation'
+  | 'learning_anchor';
+
+export interface NodeEngineBlueprintObject {
+  object_id: string;
+  object_family: BlueprintObjectFamily;
+  sequence_order: number;
+  parent_node_id: string;
+  kc_ids: string[];
+  node_object_purpose: BlueprintNodeObjectPurpose | null;
+  milestone_support_purpose: string | null;
+  suggested_vehicle: BlueprintVehicle;
+  content_pattern: string;
+  is_primary_evidence_check: boolean;
+  title: string;
+  design_rationale: string;
+  estimated_effort_minutes: number;
+  addresses_misconception_ids: string[];
+}
+
+export interface NodeEngineBlueprint {
+  blueprint_id: string;
+  course_id: string;
+  subtopic_id: string;
+  node_id: string;
+  node_title: string;
+  objects: NodeEngineBlueprintObject[];
+  status: NodeEngineLifecycleStatus;
+  created_at: string;
+  updated_at: string;
+  approved_by?: string;
+  approved_at?: string;
+}
+
+export interface BlueprintObjectPatch {
+  object_id: string;
+  title?: string;
+  design_rationale?: string;
+  suggested_vehicle?: BlueprintVehicle;
+  node_object_purpose?: BlueprintNodeObjectPurpose;
+  content_pattern?: string;
+  estimated_effort_minutes?: number;
+  sequence_order?: number;
+}
+
+export async function fetchBlueprint(
+  code: string,
+  subtopicId: string,
+  nodeId: string
+): Promise<NodeEngineBlueprint | null> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/blueprint`
+  );
+  if (response.status === 404) return null;
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to fetch blueprint');
+  return data.blueprint;
+}
+
+export async function generateBlueprint(
+  code: string,
+  subtopicId: string,
+  nodeId: string
+): Promise<NodeEngineBlueprint> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/blueprint`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to generate blueprint');
+  return data.blueprint;
+}
+
+export async function updateBlueprint(
+  code: string,
+  subtopicId: string,
+  nodeId: string,
+  objects: BlueprintObjectPatch[]
+): Promise<NodeEngineBlueprint> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/blueprint`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ objects }),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to update blueprint');
+  return data.blueprint;
+}
+
+export async function approveBlueprint(
+  code: string,
+  subtopicId: string,
+  nodeId: string,
+  approver: string
+): Promise<NodeEngineBlueprint> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/blueprint/approve`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approver }),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to approve blueprint');
+  return data.blueprint;
+}
+
+export async function hydrateBlueprints(
+  code: string,
+  nodes: Array<{ subtopicId: string; nodeId: string }>
+): Promise<Record<string, NodeEngineBlueprint | null>> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/blueprints/hydrate`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nodes }),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to hydrate blueprints');
+  return data.blueprints ?? {};
+}

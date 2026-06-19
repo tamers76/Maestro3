@@ -97,3 +97,18 @@ export async function saveNodeSetArtifact(courseCode: string, subtopicId: string
 export async function getNodeSetArtifact<T = unknown>(courseCode: string, subtopicId: string): Promise<T | null> {
   return getCourseArtifact<T>(courseCode, nodeSetFileName(subtopicId));
 }
+
+// ============== M8 node blueprint artifacts (per node) ==============
+
+/** Stable artifact filename for one node's experience blueprint. */
+export function blueprintFileName(nodeId: string): string {
+  return `blueprint_${nodeId}.json`;
+}
+
+export async function saveBlueprintArtifact(courseCode: string, nodeId: string, data: unknown): Promise<void> {
+  await saveCourseArtifact(courseCode, blueprintFileName(nodeId), data);
+}
+
+export async function getBlueprintArtifact<T = unknown>(courseCode: string, nodeId: string): Promise<T | null> {
+  return getCourseArtifact<T>(courseCode, blueprintFileName(nodeId));
+}

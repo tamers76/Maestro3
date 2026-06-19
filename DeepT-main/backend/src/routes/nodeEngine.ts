@@ -53,6 +53,15 @@ import {
   NodeEditConflictError,
 } from '../node-engine/nodeEditing.service.js';
 import {
+  generateBlueprint,
+  getBlueprint,
+  updateBlueprint,
+  approveBlueprint,
+  getBlueprintsForNodes,
+  BlueprintNodeNotApprovedError,
+  BlueprintValidationError,
+} from '../node-engine/nodeBlueprint.service.js';
+import {
   getActiveNodeGenerationPrompt,
   updateNodeGenerationPrompt,
 } from '../node-engine/nodeGenerationPrompt.service.js';
@@ -488,5 +497,115 @@ router.post(
     }
   }
 );
+
+// ===========================================================================
+// M8 — Node Experience Blueprint (Level 1). One blueprint per approved node.
+// ===========================================================================
+
+// GET /api/node-engine/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/blueprint
+router.get(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/blueprint',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId } = req.params;
+      const blueprint = await getBlueprint(courseCode, subtopicId, nodeId);
+      if (!blueprint) {
+        return res.status(404).json({ error: `No blueprint for node "${nodeId}"` });
+      }
+      res.json({ blueprint });
+    } catch (error) {
+      console.error('Error fetching blueprint:', error);
+      res.status(500).json({ error: 'Failed to fetch blueprint' });
+    }
+  }
+);
+
+// POST /api/node-engine/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/blueprint
+router.post(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/blueprint',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId } = req.params;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const blueprint = await generateBlueprint(courseCode, subtopicId, nodeId, {
+        persist: body.persist !== false,
+      });
+      res.json({ message: 'Experience blueprint generated (draft — requires approval)', blueprint });
+    } catch (error) {
+      if (error instanceof BlueprintNodeNotApprovedError) {
+        return res.status(422).json({ error: error.message, node_not_approved: true });
+      }
+      if (error instanceof BlueprintValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error('Error generating blueprint:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to generate blueprint' });
+    }
+  }
+);
+
+// PATCH /api/node-engine/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/blueprint
+router.patch(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/blueprint',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId } = req.params;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const objects = Array.isArray(body.objects) ? (body.objects as never) : [];
+      if (objects.length === 0) {
+        return res.status(400).json({ error: 'objects[] patch array is required' });
+      }
+      const blueprint = await updateBlueprint(courseCode, subtopicId, nodeId, objects);
+      res.json({ message: 'Blueprint updated', blueprint });
+    } catch (error) {
+      if (error instanceof BlueprintValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error('Error updating blueprint:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to update blueprint' });
+    }
+  }
+);
+
+// POST /api/node-engine/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/blueprint/approve
+router.post(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/blueprint/approve',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId } = req.params;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const approver = typeof body.approver === 'string' ? body.approver : '';
+      if (!approver.trim()) {
+        return res.status(400).json({ error: 'approver is required' });
+      }
+      const blueprint = await approveBlueprint(courseCode, subtopicId, nodeId, approver);
+      res.json({ message: 'Blueprint approved', blueprint });
+    } catch (error) {
+      if (error instanceof BlueprintValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error('Error approving blueprint:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to approve blueprint' });
+    }
+  }
+);
+
+// POST /api/node-engine/courses/:courseCode/blueprints/hydrate — batch read
+router.post('/courses/:courseCode/blueprints/hydrate', async (req: Request, res: Response) => {
+  try {
+    const { courseCode } = req.params;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const refs = Array.isArray(body.nodes)
+      ? (body.nodes as Array<{ subtopicId?: string; nodeId?: string }>)
+          .filter((r) => typeof r.subtopicId === 'string' && typeof r.nodeId === 'string')
+          .map((r) => ({ subtopicId: r.subtopicId as string, nodeId: r.nodeId as string }))
+      : [];
+    const blueprints = await getBlueprintsForNodes(courseCode, refs);
+    res.json({ blueprints });
+  } catch (error) {
+    console.error('Error hydrating blueprints:', error);
+    res.status(500).json({ error: 'Failed to hydrate blueprints' });
+  }
+});
 
 export default router;
