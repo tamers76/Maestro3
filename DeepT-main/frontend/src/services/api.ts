@@ -2335,10 +2335,25 @@ export interface AlignmentStateSummary {
   reference_doc_count: number;
   chunk_count: number;
   tagged_chunk_count: number;
+  active_tagged_chunk_count: number;
+  proposed_tagged_chunk_count?: number;
   threshold: number;
   generated_at?: string;
   approved_at?: string;
   approved_by?: string;
+  corpus_updated_at?: string;
+  is_stale: boolean;
+  stale_reason?: string;
+  pending_activation: boolean;
+  node_gen_ready: boolean;
+  per_document_tag_summary?: AlignmentDocTagSummary[];
+}
+
+export interface AlignmentDocTagSummary {
+  doc_id: string;
+  title: string;
+  active_tagged_chunks: number;
+  proposed_tagged_chunks?: number;
 }
 
 export interface AlignmentMappingEdit {
@@ -2953,6 +2968,8 @@ export interface NodeEngineNode {
   /** Review-by-exception triage (Issue 1). Older artifacts may omit these. */
   review_priority?: NodeEngineReviewPriority;
   review_reasons?: string[];
+  sme_edited?: boolean;
+  sme_edited_at?: string;
   status: NodeEngineLifecycleStatus;
 }
 
@@ -3076,5 +3093,86 @@ export async function approveNodeSet(
     }
     throw new Error(data.error || 'Failed to approve node set');
   }
+  return data.node_set;
+}
+
+export interface NodeProsePatch {
+  knowledge_component?: string;
+  mastery_statement?: string;
+  why_it_matters?: string;
+  assessment_connection?: string;
+  candidate_misconceptions?: Array<{
+    candidate_misconception_id: string;
+    statement?: string;
+    reason?: string;
+    suggested_trap?: string;
+  }>;
+}
+
+export class NodeEditConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NodeEditConflictError';
+  }
+}
+
+export async function updateNodeProse(
+  code: string,
+  subtopicId: string,
+  nodeId: string,
+  patch: NodeProsePatch
+): Promise<NodeEngineNodeSet> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/node-set/nodes/${encodeURIComponent(nodeId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to update node prose');
+  return data.node_set;
+}
+
+export async function regenerateSingleNode(
+  code: string,
+  subtopicId: string,
+  nodeId: string,
+  options: { acknowledgeReplaceEdits?: boolean } = {}
+): Promise<NodeEngineNodeSet> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/node-set/nodes/${encodeURIComponent(nodeId)}/regenerate`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 409 || data.manual_edits_present) {
+      throw new NodeEditConflictError(
+        data.error || 'This node has manual edits — regenerating will replace them.'
+      );
+    }
+    throw new Error(data.error || 'Failed to regenerate node');
+  }
+  return data.node_set;
+}
+
+export async function reopenNodeSet(code: string, subtopicId: string): Promise<NodeEngineNodeSet> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/node-set/reopen`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to reopen node set');
   return data.node_set;
 }

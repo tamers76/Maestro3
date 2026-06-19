@@ -47,6 +47,12 @@ import {
   AcademicApprovalRequiredError,
 } from '../node-engine/nodeGeneration.service.js';
 import {
+  updateNodeProse,
+  regenerateSingleNode,
+  reopenNodeSet,
+  NodeEditConflictError,
+} from '../node-engine/nodeEditing.service.js';
+import {
   getActiveNodeGenerationPrompt,
   updateNodeGenerationPrompt,
 } from '../node-engine/nodeGenerationPrompt.service.js';
@@ -415,6 +421,70 @@ router.post(
       }
       console.error('Error approving node-set:', error);
       res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to approve node-set' });
+    }
+  }
+);
+
+// PATCH /api/node-engine/courses/:courseCode/subtopics/:subtopicId/node-set/nodes/:nodeId
+router.patch(
+  '/courses/:courseCode/subtopics/:subtopicId/node-set/nodes/:nodeId',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId } = req.params;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const nodeSet = await updateNodeProse(courseCode, subtopicId, nodeId, {
+        knowledge_component: typeof body.knowledge_component === 'string' ? body.knowledge_component : undefined,
+        mastery_statement: typeof body.mastery_statement === 'string' ? body.mastery_statement : undefined,
+        why_it_matters: typeof body.why_it_matters === 'string' ? body.why_it_matters : undefined,
+        assessment_connection:
+          typeof body.assessment_connection === 'string' ? body.assessment_connection : undefined,
+        candidate_misconceptions: Array.isArray(body.candidate_misconceptions)
+          ? (body.candidate_misconceptions as never)
+          : undefined,
+      });
+      res.json({ message: 'Node prose updated', node_set: nodeSet });
+    } catch (error) {
+      console.error('Error updating node prose:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to update node' });
+    }
+  }
+);
+
+// POST /api/node-engine/courses/:courseCode/subtopics/:subtopicId/node-set/nodes/:nodeId/regenerate
+router.post(
+  '/courses/:courseCode/subtopics/:subtopicId/node-set/nodes/:nodeId/regenerate',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId } = req.params;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const nodeSet = await regenerateSingleNode(courseCode, subtopicId, nodeId, {
+        acknowledgeReplaceEdits: body.acknowledgeReplaceEdits === true,
+      });
+      res.json({ message: 'Node regenerated', node_set: nodeSet });
+    } catch (error) {
+      if (error instanceof NodeEditConflictError) {
+        return res.status(409).json({
+          error: error.message,
+          manual_edits_present: true,
+        });
+      }
+      console.error('Error regenerating node:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to regenerate node' });
+    }
+  }
+);
+
+// POST /api/node-engine/courses/:courseCode/subtopics/:subtopicId/node-set/reopen
+router.post(
+  '/courses/:courseCode/subtopics/:subtopicId/node-set/reopen',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId } = req.params;
+      const nodeSet = await reopenNodeSet(courseCode, subtopicId);
+      res.json({ message: 'Node-set reopened for review', node_set: nodeSet });
+    } catch (error) {
+      console.error('Error reopening node-set:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to reopen node-set' });
     }
   }
 );

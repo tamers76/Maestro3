@@ -34,6 +34,9 @@ const ARTIFACT_FILE = 'reference-alignment.json';
  * safety net still grounds, and we avoid confidently-wrong scoping. */
 export const DEFAULT_ALIGNMENT_THRESHOLD = 0.34;
 
+/** Default threshold for auto-propose / SME re-propose on multi-source corpora. */
+export const DEFAULT_PROPOSE_ALIGNMENT_THRESHOLD = 0.42;
+
 // ===========================================================================
 // Types
 // ===========================================================================
@@ -95,11 +98,34 @@ export interface AlignmentStateSummary {
   subtopic_count: number;
   reference_doc_count: number;
   chunk_count: number;
+  /** @deprecated Prefer active_tagged_chunk_count — kept for backward compatibility (= active). */
   tagged_chunk_count: number;
+  /** Scope tags actually written in the DB — what node generation uses today. */
+  active_tagged_chunk_count: number;
+  /** Tags in the current proposal artifact (preview only until approved). */
+  proposed_tagged_chunk_count?: number;
   threshold: number;
   generated_at?: string;
   approved_at?: string;
   approved_by?: string;
+  /** Latest reference document upload time in the corpus. */
+  corpus_updated_at?: string;
+  /** Corpus changed since last approval — must re-propose and re-approve. */
+  is_stale: boolean;
+  stale_reason?: string;
+  /** Proposal exists but tags are not yet written to the DB. */
+  pending_activation: boolean;
+  /** Safe to run node generation (approved + not stale). */
+  node_gen_ready: boolean;
+  /** Per-source active vs preview tag counts for SME spot-checks. */
+  per_document_tag_summary?: AlignmentDocTagSummary[];
+}
+
+export interface AlignmentDocTagSummary {
+  doc_id: string;
+  title: string;
+  active_tagged_chunks: number;
+  proposed_tagged_chunks?: number;
 }
 
 // ===========================================================================
@@ -132,13 +158,135 @@ function subtopicQueryText(s: {
     .trim();
 }
 
+/** Count chunks with scope tags actually persisted in the DB. */
+export async function countActiveTaggedChunks(courseCode: string): Promise<number> {
+  const chunks = await referenceRepo.getAllChunks(courseCode);
+  return chunks.filter((c) => c.subtopic_ids.length > 0 || c.clo_ids.length > 0).length;
+}
+
+/** Roll active DB tags and optional proposal preview up by source document. */
+export async function buildPerDocumentTagSummary(
+  courseCode: string,
+  documents: Awaited<ReturnType<typeof referenceRepo.listDocuments>>,
+  proposal?: ReferenceAlignmentArtifact | null
+): Promise<AlignmentDocTagSummary[]> {
+  const chunks = await referenceRepo.getAllChunks(courseCode);
+  const activeByDoc = new Map<string, number>();
+  for (const chunk of chunks) {
+    if (chunk.subtopic_ids.length > 0 || chunk.clo_ids.length > 0) {
+      activeByDoc.set(chunk.doc_id, (activeByDoc.get(chunk.doc_id) ?? 0) + 1);
+    }
+  }
+
+  const proposedByDoc = new Map<string, number>();
+  if (proposal?.status === 'proposed') {
+    for (const mapping of proposal.mappings) {
+      if (mapping.decided_subtopic_ids.length > 0 || mapping.decided_clo_ids.length > 0) {
+        proposedByDoc.set(mapping.doc_id, (proposedByDoc.get(mapping.doc_id) ?? 0) + 1);
+      }
+    }
+  }
+
+  return documents.map((doc) => ({
+    doc_id: doc.doc_id,
+    title: doc.title || doc.citation_label || doc.original_filename,
+    active_tagged_chunks: activeByDoc.get(doc.doc_id) ?? 0,
+    proposed_tagged_chunks:
+      proposal?.status === 'proposed' ? (proposedByDoc.get(doc.doc_id) ?? 0) : undefined,
+  }));
+}
+
+export interface AlignmentStalenessInput {
+  artifactStatus?: AlignmentStatus;
+  approved_at?: string;
+  proposal_generated_at?: string;
+  corpus_updated_at?: string;
+  approved_chunk_count?: number;
+  current_chunk_count: number;
+  approved_doc_count?: number;
+  current_doc_count: number;
+}
+
+/**
+ * Pure staleness check: alignment tags are out of date relative to the live corpus
+ * or an unapproved proposal preview.
+ */
+export function computeAlignmentStaleness(input: AlignmentStalenessInput): {
+  is_stale: boolean;
+  stale_reason?: string;
+} {
+  const {
+    artifactStatus,
+    approved_at,
+    proposal_generated_at,
+    corpus_updated_at,
+    approved_chunk_count,
+    current_chunk_count,
+    approved_doc_count,
+    current_doc_count,
+  } = input;
+
+  if (artifactStatus === 'approved') {
+    if (approved_at && corpus_updated_at && corpus_updated_at > approved_at) {
+      return {
+        is_stale: true,
+        stale_reason:
+          'New or updated references were added after the last alignment approval. Preview tag changes and activate them again.',
+      };
+    }
+    if (
+      typeof approved_chunk_count === 'number' &&
+      approved_chunk_count > 0 &&
+      approved_chunk_count !== current_chunk_count
+    ) {
+      return {
+        is_stale: true,
+        stale_reason:
+          'The reference corpus size changed since alignment was approved. Preview tag changes and activate them again.',
+      };
+    }
+    if (
+      typeof approved_doc_count === 'number' &&
+      approved_doc_count > 0 &&
+      approved_doc_count !== current_doc_count
+    ) {
+      return {
+        is_stale: true,
+        stale_reason:
+          'Reference documents changed since alignment was approved. Preview tag changes and activate them again.',
+      };
+    }
+    return { is_stale: false };
+  }
+
+  if (artifactStatus === 'proposed') {
+    if (proposal_generated_at && corpus_updated_at && corpus_updated_at > proposal_generated_at) {
+      return {
+        is_stale: true,
+        stale_reason:
+          'New references were added after this preview was generated. Preview tag changes again before activating.',
+      };
+    }
+    return { is_stale: false };
+  }
+
+  return { is_stale: false };
+}
+
 /** Resolve the live dependency/status for Layer 7 without generating anything. */
 export async function getAlignmentState(courseCode: string): Promise<AlignmentStateSummary> {
   const bundle = await buildV1ContractBundle(courseCode);
   const approvedSubtopics = bundle.subtopics.filter((s) => s.status === 'approved');
-  const referenceDocCount = (await referenceRepo.listDocuments(courseCode)).length;
+  const documents = await referenceRepo.listDocuments(courseCode);
+  const referenceDocCount = documents.length;
   const chunkCount = await referenceRepo.countChunks(courseCode);
+  const activeTaggedChunkCount = await countActiveTaggedChunks(courseCode);
   const existing = await getCourseArtifact<ReferenceAlignmentArtifact>(courseCode, ARTIFACT_FILE);
+
+  const corpusUpdatedAt =
+    documents.length > 0
+      ? documents.reduce((max, d) => (d.uploaded_at > max ? d.uploaded_at : max), documents[0].uploaded_at)
+      : undefined;
 
   let status: AlignmentStatus;
   let lock_reason: string | undefined;
@@ -157,17 +305,41 @@ export async function getAlignmentState(courseCode: string): Promise<AlignmentSt
     status = 'available';
   }
 
+  const { is_stale, stale_reason } = computeAlignmentStaleness({
+    artifactStatus: existing?.status,
+    approved_at: existing?.approved_at,
+    proposal_generated_at: existing?.generated_at,
+    corpus_updated_at: corpusUpdatedAt,
+    approved_chunk_count: existing?.chunk_count,
+    current_chunk_count: chunkCount,
+    approved_doc_count: existing?.reference_doc_count,
+    current_doc_count: referenceDocCount,
+  });
+
+  const pending_activation = status === 'proposed';
+  const node_gen_ready = status === 'approved' && !is_stale && activeTaggedChunkCount > 0;
+  const per_document_tag_summary = await buildPerDocumentTagSummary(courseCode, documents, existing);
+
   return {
     status,
     lock_reason,
     subtopic_count: approvedSubtopics.length,
     reference_doc_count: referenceDocCount,
     chunk_count: chunkCount,
-    tagged_chunk_count: existing?.tagged_chunk_count ?? 0,
+    tagged_chunk_count: activeTaggedChunkCount,
+    active_tagged_chunk_count: activeTaggedChunkCount,
+    proposed_tagged_chunk_count:
+      existing?.status === 'proposed' ? existing.tagged_chunk_count : undefined,
     threshold: existing?.threshold ?? DEFAULT_ALIGNMENT_THRESHOLD,
     generated_at: existing?.generated_at,
     approved_at: existing?.approved_at,
     approved_by: existing?.approved_by,
+    corpus_updated_at: corpusUpdatedAt,
+    is_stale,
+    stale_reason,
+    pending_activation,
+    node_gen_ready,
+    per_document_tag_summary,
   };
 }
 

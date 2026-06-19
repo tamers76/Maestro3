@@ -70,7 +70,6 @@ import ReactMarkdown from 'react-markdown'
 import { cn } from '@/lib/utils'
 import { LEGACY_STAGES_ENABLED } from '@/config/featureFlags'
 import NodeEnginePanel from '@/components/nodeEngine/NodeEnginePanel'
-import ReferenceAlignmentPanel from '@/components/ReferenceAlignmentPanel'
 
 export default function CourseDetail() {
   const { code } = useParams<{ code: string }>()
@@ -78,6 +77,7 @@ export default function CourseDetail() {
   
   const [course, setCourse] = useState<CourseDetailType | null>(null)
   const [stage1AllApproved, setStage1AllApproved] = useState(false)
+  const [alignmentRefreshSignal, setAlignmentRefreshSignal] = useState(0)
   const [graphData, setGraphData] = useState<GraphData | null>(null)
   const [loading, setLoading] = useState(true)
   const [runningStage, setRunningStage] = useState<number | null>(null)
@@ -119,7 +119,6 @@ export default function CourseDetail() {
   // scroll to Reference Alignment, and after alignment is approved we scroll to
   // the Node Engine. These render in sequence on this page (tabs are hidden when
   // LEGACY_STAGES_ENABLED is false), so "moving on" is a scroll, not a route.
-  const referenceAlignmentRef = useRef<HTMLDivElement | null>(null)
   const nodeEngineRef = useRef<HTMLDivElement | null>(null)
   const scrollToRef = useCallback((ref: React.RefObject<HTMLDivElement | null>) => {
     const scroll = () => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -669,7 +668,13 @@ export default function CourseDetail() {
       <Stage1Layers
         courseCode={course.course_code}
         onAllApproved={setStage1AllApproved}
-        onCourseArchitectComplete={() => scrollToRef(referenceAlignmentRef)}
+        onAlignmentAutoPropose={() => setAlignmentRefreshSignal((n) => n + 1)}
+        onReferenceUploaded={() => setAlignmentRefreshSignal((n) => n + 1)}
+        alignmentRefreshSignal={alignmentRefreshSignal}
+        onAlignmentApproved={() => {
+          setAlignmentRefreshSignal((n) => n + 1)
+          scrollToRef(nodeEngineRef)
+        }}
         intake={{
           title: course.title,
           code: course.course_code,
@@ -684,15 +689,6 @@ export default function CourseDetail() {
           assessmentStrategy: course.contract?.assessment_strategy,
         }}
       />
-
-      {/* Reference Alignment — the transition between Course Architect and the
-          Node Engine (grounds node generation on approved source material). */}
-      <div ref={referenceAlignmentRef} className="scroll-mt-4">
-        <ReferenceAlignmentPanel
-          courseCode={course.course_code}
-          onAlignmentApproved={() => scrollToRef(nodeEngineRef)}
-        />
-      </div>
 
       {/* Main Content Tabs. With only the Node Engine surface (legacy parked),
           the single-item tab switcher is redundant — the Node Engine panel
@@ -730,7 +726,10 @@ export default function CourseDetail() {
         {/* Node Engine Tab (Phase 0 foundations) */}
         <TabsContent value="node-engine" className="space-y-4">
           <div ref={nodeEngineRef} className="scroll-mt-4">
-            <NodeEnginePanel courseCode={course.course_code} />
+            <NodeEnginePanel
+              courseCode={course.course_code}
+              alignmentRefreshSignal={alignmentRefreshSignal}
+            />
           </div>
         </TabsContent>
         

@@ -28,6 +28,8 @@ import { cn } from '@/lib/utils'
 
 /** The coverage-judgment prompt id in the node-engine registry (Phase A seed). */
 const REFERENCE_COVERAGE_JUDGMENT_PROMPT_ID = 'reference_coverage_judgment_prompt'
+/** The node-grounding judgment prompt id (Problem 2 seed). */
+const REFERENCE_GROUNDING_JUDGMENT_PROMPT_ID = 'reference_grounding_judgment_prompt'
 /** The AI source-suggestion prompt id (Phase C seed). */
 const REFERENCE_SOURCE_SUGGESTION_PROMPT_ID = 'reference_source_suggestion_prompt'
 
@@ -55,8 +57,7 @@ export default function Settings() {
     loadCoverageConfig()
   }, [])
 
-  // Deep-link from the Reference Coverage panel's "Cross-referencing settings"
-  // button (/settings#reference-cross-referencing) scrolls to the section.
+  // Deep-link from admin settings bookmarks (/settings#reference-cross-referencing).
   useEffect(() => {
     if (loading) return
     const hash = location.hash?.replace('#', '')
@@ -821,13 +822,14 @@ export default function Settings() {
             <PromptTemplateSettings
               filterTemplateIds={[
                 REFERENCE_COVERAGE_JUDGMENT_PROMPT_ID,
+                REFERENCE_GROUNDING_JUDGMENT_PROMPT_ID,
                 REFERENCE_SOURCE_SUGGESTION_PROMPT_ID,
               ]}
               hideModelSettings
               heading={{
-                title: 'Coverage prompts',
+                title: 'Coverage & grounding prompts',
                 description:
-                  'The authoritative Layer-3 coverage-judgment prompt and the AI source-suggestion prompt. Editing either creates a new immutable version and moves the active pointer — published versions are never overwritten.',
+                  'Coverage judgment, node-grounding judgment, and AI source-suggestion prompts. Editing any creates a new immutable version and moves the active pointer — published versions are never overwritten.',
               }}
             />
           </div>

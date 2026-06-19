@@ -69,6 +69,7 @@ import {
   buildGroundedContextWithFallback,
   type GroundingSource,
 } from '../services/referenceRetrieval.service.js';
+import { judgeNodeGroundingPassages } from '../services/referenceJudgment.service.js';
 import { isNeo4jConnected, persistNodeSetGraph } from '../services/neo4j.service.js';
 import { deriveNodeReviewTriage } from './nodeReviewTriage.service.js';
 
@@ -172,6 +173,8 @@ export interface GenerateNodeSetOptions {
   executor?: NodeGenerationExecutor;
   /** Ground each node via the existing RAG layer. Default: true (best-effort). */
   ground?: boolean;
+  /** Apply teach/don't-teach judgment to grounding strength. Default: true. */
+  groundWithJudgment?: boolean;
   /** Persist the node-set artifact to the JSON store. Default: true. */
   persist?: boolean;
   /** Also write the node-set graph to Neo4j (best-effort; needs a live driver). Default: false. */
@@ -662,6 +665,9 @@ interface GroundingAggregate {
   /** True when at least one scoped retrieval succeeded but its best passage failed
    * the score-aware strong threshold (scoped, but low-relevance → weak). */
   scopedLowRelevance: boolean;
+  /** True when at least one node had passages retrieved but judgment said none teach. */
+  judgmentDowngraded: boolean;
+  judgmentCalled: boolean;
 }
 
 function newGroundingAggregate(): GroundingAggregate {
@@ -675,6 +681,8 @@ function newGroundingAggregate(): GroundingAggregate {
     qualityFailCount: 0,
     scopedThin: false,
     scopedLowRelevance: false,
+    judgmentDowngraded: false,
+    judgmentCalled: false,
   };
 }
 
@@ -698,45 +706,67 @@ async function groundNodes(
   courseCode: string,
   context: NodeGenerationContext,
   nodes: Node[],
-  agg: GroundingAggregate
+  agg: GroundingAggregate,
+  groundWithJudgment: boolean
 ): Promise<void> {
   const cloId = context.subtopic.clo_ids[0];
-  for (const node of nodes) {
-    try {
-      agg.retrieval_called = true;
-      const grounded = await buildGroundedContextWithFallback(courseCode, node.knowledge_component, {
-        scope: { cloId, subtopicId: context.subtopic.subtopic_id },
-      });
-      const citations: Citation[] = grounded.passages.map((p) => ({
-        citation: p.citation,
-        passage_ref: p.citation,
-      }));
-      node.grounding_references = citations;
-      // Issue 2 — quality-aware strength. "strong" requires ALL of: a CLO/subtopic
-      // SCOPED source, >=1 quality-passing citation, AND a top fused score that
-      // clears STRONG_MIN_TOP_SCORE (score-aware, secondary lever). Course-level
-      // fallback hits, scoped hits that were all thin/junk (filtered to empty), and
-      // scoped-but-low-relevance hits are all "weak": "strong" must mean "the RIGHT
-      // citations were found", not merely "found something".
-      const scopedAndSubstantive =
-        grounded.source === 'scoped_references' && grounded.quality_pass_count > 0;
-      const clearsScore = grounded.top_score >= STRONG_MIN_TOP_SCORE;
-      node.grounding_strength = scopedAndSubstantive && clearsScore ? 'strong' : 'weak';
-      if (scopedAndSubstantive && !clearsScore) agg.scopedLowRelevance = true;
+  const subtopicContext = `${context.subtopic.title}. ${context.subtopic.expected_learning}`;
 
-      agg.scopedCount += grounded.scopedCount;
-      agg.courseLevelCount += grounded.courseLevelCount;
-      agg.source = promoteSource(agg.source, grounded.source);
-      agg.qualityPassCount += grounded.quality_pass_count;
-      agg.qualityFailCount += grounded.quality_fail_count;
-      if (grounded.scoped_filtered_out) agg.scopedThin = true;
-      for (const c of grounded.citations) agg.citations.add(c);
-    } catch {
-      // Grounding is additive — never block node generation on retrieval errors.
-      node.grounding_references = [];
-      node.grounding_strength = 'weak';
-    }
-  }
+  await Promise.all(
+    nodes.map(async (node) => {
+      try {
+        agg.retrieval_called = true;
+        const grounded = await buildGroundedContextWithFallback(courseCode, node.knowledge_component, {
+          scope: { cloId, subtopicId: context.subtopic.subtopic_id },
+        });
+
+        const passageInputs = grounded.passages.map((p) => ({
+          citation: p.citation,
+          text_preview: p.text.length > 280 ? `${p.text.slice(0, 280)}…` : p.text,
+        }));
+
+        let teaches = grounded.passages.length > 0;
+        let citations: Citation[] = grounded.passages.map((p) => ({
+          citation: p.citation,
+          passage_ref: p.citation,
+        }));
+
+        if (groundWithJudgment && passageInputs.length > 0) {
+          agg.judgmentCalled = true;
+          const judgment = await judgeNodeGroundingPassages(
+            node.knowledge_component,
+            subtopicContext,
+            passageInputs
+          );
+          teaches = judgment.teaches;
+          if (!teaches) agg.judgmentDowngraded = true;
+          const supported = judgment.supporting_indices
+            .filter((i) => i >= 0 && i < grounded.passages.length)
+            .map((i) => grounded.passages[i]);
+          citations =
+            supported.length > 0
+              ? supported.map((p) => ({ citation: p.citation, passage_ref: p.citation }))
+              : [];
+        }
+
+        node.grounding_references = citations;
+        const scopedAndSubstantive =
+          grounded.source === 'scoped_references' && grounded.quality_pass_count > 0;
+        node.grounding_strength = scopedAndSubstantive && teaches ? 'strong' : 'weak';
+
+        agg.scopedCount += grounded.scopedCount;
+        agg.courseLevelCount += grounded.courseLevelCount;
+        agg.source = promoteSource(agg.source, grounded.source);
+        agg.qualityPassCount += grounded.quality_pass_count;
+        agg.qualityFailCount += grounded.quality_fail_count;
+        if (grounded.scoped_filtered_out) agg.scopedThin = true;
+        for (const c of citations.map((x) => x.citation)) agg.citations.add(c);
+      } catch {
+        node.grounding_references = [];
+        node.grounding_strength = 'weak';
+      }
+    })
+  );
 }
 
 /** Build the human-readable transparency summary persisted on the node-set. */
@@ -751,7 +781,10 @@ function buildGroundingSummary(agg: GroundingAggregate): NodeSetGroundingSummary
     if (agg.qualityFailCount > 0) {
       note += ` ${agg.qualityFailCount} thin/low-content passage(s) were filtered out by the citation quality gate.`;
     }
-    if (agg.scopedLowRelevance) {
+    if (agg.judgmentDowngraded) {
+      note +=
+        ' Some node(s) retrieved passages but judgment found none that substantively teach the knowledge component — downgraded to weak grounding.';
+    } else if (agg.scopedLowRelevance) {
       note +=
         ' Some node(s) are scoped but LOW-RELEVANCE (best passage below the strong-grounding score floor), ' +
         'so they were downgraded to weak grounding — review whether the references actually cover these nodes.';
@@ -800,7 +833,7 @@ function resolveNodeGenerationModel() {
   });
 }
 
-function buildDefaultExecutor(maxTokens: number): { executor: NodeGenerationExecutor; audit: ProjectNodeSetOptions } {
+export function buildDefaultExecutor(maxTokens: number): { executor: NodeGenerationExecutor; audit: ProjectNodeSetOptions } {
   const resolved = resolveNodeGenerationModel();
   const prompt = getActiveNodeGenerationPrompt();
   const audit: ProjectNodeSetOptions = {
@@ -839,7 +872,7 @@ export async function generateNodeSet(
   subtopicId: string,
   options: GenerateNodeSetOptions = {}
 ): Promise<NodeSet> {
-  const { ground = true, persist = true, persistGraph = false, maxTokens = 8000 } = options;
+  const { ground = true, groundWithJudgment = true, persist = true, persistGraph = false, maxTokens = 8000 } = options;
 
   const bundle = await buildV1ContractBundle(courseCode);
   const context = buildNodeGenerationContext(bundle, subtopicId);
@@ -897,7 +930,7 @@ export async function generateNodeSet(
   });
 
   if (ground) {
-    await groundNodes(courseCode, context, nodeSet.nodes, agg);
+    await groundNodes(courseCode, context, nodeSet.nodes, agg, groundWithJudgment);
   }
   nodeSet.grounding_summary = buildGroundingSummary(agg);
 

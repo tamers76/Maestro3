@@ -30,6 +30,7 @@ import {
   updateAlignmentMapping,
   approveAlignment,
   DEFAULT_ALIGNMENT_THRESHOLD,
+  computeAlignmentStaleness,
   type ReferenceAlignmentArtifact,
 } from '../../services/referenceAlignment.service.js';
 import * as referenceRepo from '../../db/repos/referenceRepo.js';
@@ -204,12 +205,52 @@ test('approveNodeSet permits without override when nodes carry citations', { ski
 // 3. Reference Alignment (Layer 7)
 // ===========================================================================
 
+test('computeAlignmentStaleness flags corpus changes after approval', () => {
+  const stale = computeAlignmentStaleness({
+    artifactStatus: 'approved',
+    approved_at: '2026-01-01T00:00:00.000Z',
+    corpus_updated_at: '2026-06-01T00:00:00.000Z',
+    approved_chunk_count: 100,
+    current_chunk_count: 100,
+    approved_doc_count: 2,
+    current_doc_count: 2,
+  });
+  assert.equal(stale.is_stale, true);
+  assert.ok(stale.stale_reason?.includes('New or updated references'));
+
+  const fresh = computeAlignmentStaleness({
+    artifactStatus: 'approved',
+    approved_at: '2026-06-02T00:00:00.000Z',
+    corpus_updated_at: '2026-06-01T00:00:00.000Z',
+    approved_chunk_count: 100,
+    current_chunk_count: 100,
+    approved_doc_count: 2,
+    current_doc_count: 2,
+  });
+  assert.equal(fresh.is_stale, false);
+});
+
+test('computeAlignmentStaleness flags new uploads after a proposed preview', () => {
+  const stale = computeAlignmentStaleness({
+    artifactStatus: 'proposed',
+    proposal_generated_at: '2026-01-01T00:00:00.000Z',
+    corpus_updated_at: '2026-06-01T00:00:00.000Z',
+    current_chunk_count: 10,
+    current_doc_count: 1,
+  });
+  assert.equal(stale.is_stale, true);
+});
+
 test('getAlignmentState reports dependency counts for MDLD602 (read-only)', { skip: seededSkip }, async () => {
   const state = await getAlignmentState('MDLD602');
   assert.ok(state.reference_doc_count > 0, 'MDLD602 has reference docs');
   assert.ok(state.chunk_count > 0, 'MDLD602 has reference chunks');
   assert.equal(state.threshold, DEFAULT_ALIGNMENT_THRESHOLD);
   assert.ok(['locked', 'available', 'proposed', 'approved'].includes(state.status));
+  assert.equal(typeof state.active_tagged_chunk_count, 'number');
+  assert.equal(typeof state.is_stale, 'boolean');
+  assert.equal(typeof state.node_gen_ready, 'boolean');
+  assert.equal(typeof state.pending_activation, 'boolean');
 });
 
 test('updateAlignmentMapping promotes / reassigns and inherits CLOs only when asked', { skip: dbSkip }, async () => {

@@ -25,12 +25,17 @@ import { hybridRetrieveDetailed } from './referenceRetrieval.service.js';
 import { buildV1ContractBundle } from '../node-engine/stage1Adapter.service.js';
 import { saveCourseArtifact, getCourseArtifact } from '../node-engine/store.service.js';
 import { getReferenceCoverageThresholds } from '../node-engine/referenceCoverageConfig.service.js';
-import { getActiveVersion } from '../node-engine/promptTemplateRegistry.service.js';
-import { REFERENCE_COVERAGE_JUDGMENT_PROMPT_ID } from '../config/promptTemplates.defaults.js';
+import {
+  judgeCoveragePassages,
+  type CoverageVerdict,
+} from './referenceJudgment.service.js';
 import { callModel, type AIMessage } from './council.service.js';
 import { parseAIJson } from './ai.service.js';
 import { getContextHeaderModel } from '../config.js';
 import type { ReferenceCoverageThresholds } from '../models/nodeEngine.js';
+
+export type { CoverageVerdict };
+export { normalizeVerdict } from './referenceJudgment.service.js';
 
 const ARTIFACT_FILE = 'reference-coverage.json';
 /** Snapshot of the report that existed BEFORE the latest recompute (delta source). */
@@ -42,9 +47,6 @@ const PREV_ARTIFACT_FILE = 'reference-coverage.prev.json';
 
 /** Final per-CLO coverage band. */
 export type CoverageBand = 'well_covered' | 'partial' | 'not_covered';
-
-/** Layer-3 model judgment verdict (authoritative within the evidence ceiling). */
-export type CoverageVerdict = 'covered' | 'partial' | 'none';
 
 export type CoverageStatus =
   | 'locked' // no approved CLOs yet (approve Layer 2 first)
@@ -269,11 +271,6 @@ export function computeCoverageDelta(
   return { entries, improved, regressed, unchanged };
 }
 
-/** Coerce an arbitrary parsed value into a valid verdict (defaults to 'none'). */
-export function normalizeVerdict(value: unknown): CoverageVerdict {
-  return value === 'covered' || value === 'partial' || value === 'none' ? value : 'none';
-}
-
 /** Build the Layer-3 judgment user prompt from ONLY the retrieved passages. */
 export function buildCoverageJudgmentUserPrompt(cloStatement: string, passages: CoveragePassage[]): string {
   const passageBlock =
@@ -428,60 +425,6 @@ function toPassage(chunk: RetrievedChunk): CoveragePassage {
 }
 
 /**
- * Run the authoritative Layer-3 judgment over ONLY the supplied passages.
- * Fail-soft: any model/parse error returns a conservative "none" verdict (which
- * can only downgrade — never upgrade — so an outage never inflates coverage).
- */
-async function judgeCoverage(
-  cloStatement: string,
-  passages: CoveragePassage[]
-): Promise<{ verdict: CoverageVerdict; rationale: string; supportingIndices: number[]; gaps: string[] }> {
-  const template = getActiveVersion(REFERENCE_COVERAGE_JUDGMENT_PROMPT_ID);
-  const systemPrompt = template?.task_prompt?.trim()
-    ? template.task_prompt
-    : 'You are a strict reference-coverage judge. Judge ONLY from the provided passages. Return JSON {"verdict","rationale","supporting_passage_indices","gaps"}.';
-
-  const messages: AIMessage[] = [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: buildCoverageJudgmentUserPrompt(cloStatement, passages) },
-  ];
-
-  try {
-    // temperature: 0 pins the judge to deterministic sampling so borderline CLOs
-    // (e.g. MDLD602 CLO-1) stop flickering between partial/none across identical
-    // recomputes. Everything else (model, prompt, fail-soft none) is unchanged.
-    const raw = await callModel(messages, getContextHeaderModel(), { jsonMode: true, temperature: 0 });
-    const parsed = parseAIJson<{
-      verdict?: unknown;
-      rationale?: unknown;
-      supporting_passage_indices?: unknown;
-      gaps?: unknown;
-    }>(raw);
-    const verdict = normalizeVerdict(parsed.verdict);
-    const rationale = typeof parsed.rationale === 'string' ? parsed.rationale : '';
-    const supportingIndices = Array.isArray(parsed.supporting_passage_indices)
-      ? parsed.supporting_passage_indices.filter((n): n is number => typeof n === 'number' && Number.isInteger(n))
-      : [];
-    const gaps = Array.isArray(parsed.gaps)
-      ? parsed.gaps.filter((g): g is string => typeof g === 'string')
-      : [];
-    return { verdict, rationale, supportingIndices, gaps };
-  } catch (error) {
-    console.warn(
-      `[referenceCoverage] judgment failed; defaulting to "none" (conservative). ${
-        error instanceof Error ? error.message : String(error)
-      }`
-    );
-    return {
-      verdict: 'none',
-      rationale: 'Coverage judgment could not be completed; treated conservatively as not covered.',
-      supportingIndices: [],
-      gaps: [],
-    };
-  }
-}
-
-/**
  * Generate a short 2-4 word label for EVERY approved CLO in ONE batched cheap-LLM
  * call (single round-trip). INDEPENDENT of the evidence gate / judgment so labels
  * exist even on not_covered rows. Fail-soft: any error (or a missing/blank label)
@@ -578,7 +521,10 @@ async function measureClo(
   }
 
   // Gate PASS -> authoritative Layer-3 judgment over ONLY the supporting passages.
-  const judgment = await judgeCoverage(clo.statement, supportingPassages);
+  const judgment = await judgeCoveragePassages(
+    clo.statement,
+    supportingPassages.map((p) => ({ citation: p.citation, text_preview: p.text_preview }))
+  );
   const band = resolveCoverageBand({ evidence_gate_passed: true, verdict: judgment.verdict });
 
   // Highlight the passages the judge said genuinely teach the CLO (when given).

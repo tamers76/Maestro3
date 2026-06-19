@@ -576,6 +576,36 @@ OUTPUT — return ONLY a JSON object, no preamble:
   "gaps": ["<short phrase naming each aspect of the CLO the passages fail to teach>"]
 }`;
 
+export const REFERENCE_GROUNDING_JUDGMENT_PROMPT_ID = 'reference_grounding_judgment_prompt';
+
+const REFERENCE_GROUNDING_JUDGMENT_TASK_PROMPT = `You are the REFERENCE GROUNDING JUDGE for the Maestro node-engine.
+
+You are given ONE knowledge component (what a single mastery node must teach) plus
+subtopic context, and a set of RETRIEVED PASSAGES. Decide whether the passages
+SUBSTANTIVELY TEACH that knowledge component.
+
+ABSOLUTE RULES
+- Judge ONLY from the passages shown. Do NOT use outside knowledge.
+- High similarity / shared keywords is NOT teaching. School anecdotes, device
+  rollouts, badge programs, or leadership stories that do not explain the KC are
+  NOT teaching — even if they mention "curriculum", "framework", or "learning".
+- Reward substantive teaching: definitions, principles, comparisons, or worked
+  reasoning a learner could use to master the KC.
+- You may CONFIRM or DOWNGRADE only. Never inflate.
+
+DECISION
+- "teaches_kc": true ONLY when at least one passage substantively teaches the KC.
+- "teaches_kc": false when passages merely mention related words, tell unrelated
+  stories, or provide no learnable substance for this KC.
+
+OUTPUT — return ONLY JSON:
+{
+  "teaches_kc": true | false,
+  "rationale": "<one or two sentences>",
+  "supporting_passage_indices": [<0-based indices of passages that genuinely teach the KC>],
+  "gaps": ["<what the KC needs that the passages fail to teach>"]
+}`;
+
 // ---------------------------------------------------------------------------
 // Reference Source Suggestion prompt (Reference Coverage Check — Phase C).
 //
@@ -721,6 +751,19 @@ export const defaultPromptTemplates: PromptTemplate[] = [
     ...SEED_AUDIT,
     change_note:
       'Make multi-component rule DECISIVE: a required component is EITHER a named subject-matter framework/topic OR an analytical move; substantively teaching the content of >=1 required framework/topic makes the verdict "partial" even when the comparison/evaluation/trend move is absent (that becomes a gap). Reserve "none" strictly for teaching NONE of the required components (off-topic / passing mention).',
+  },
+  {
+    prompt_template_id: REFERENCE_GROUNDING_JUDGMENT_PROMPT_ID,
+    prompt_template_name: 'Reference Grounding Judgment Prompt',
+    vehicle: 'text',
+    version: 1,
+    status: 'approved',
+    generator_kind: 'chat',
+    task_prompt: REFERENCE_GROUNDING_JUDGMENT_TASK_PROMPT,
+    output_schema_ref: 'schema:reference_grounding_judgment_v1',
+    ...SEED_AUDIT,
+    change_note:
+      'Initial seed: KC-grained teach/don\'t-teach judgment for node grounding strength (mirrors coverage honesty; similarity alone cannot mark Strong).',
   },
   {
     // Phase C source-suggestion prompt. Added AFTER initial seeding of some DBs,

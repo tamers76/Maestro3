@@ -18,10 +18,13 @@ import { cn } from '@/lib/utils'
 import { useRole } from '@/contexts/RoleContext'
 import {
   approveNodeSet,
+  fetchAlignment,
   fetchNodeSet,
   fetchSubtopicArchitecture,
   generateNodeSet,
   AcademicApprovalRequiredError,
+  reopenNodeSet,
+  type AlignmentStateSummary,
   type NodeEngineGroundingSource,
   type NodeEngineNode,
   type NodeEngineNodeSet,
@@ -111,11 +114,18 @@ function buildCloGroups(arch: SubtopicArchitectureResponse | null): CloGroup[] {
     .filter((g) => g.subtopics.length > 0)
 }
 
-export default function NodeEnginePanel({ courseCode }: { courseCode: string }) {
+export default function NodeEnginePanel({
+  courseCode,
+  alignmentRefreshSignal = 0,
+}: {
+  courseCode: string
+  alignmentRefreshSignal?: number
+}) {
   const { role } = useRole()
 
   const [arch, setArch] = useState<SubtopicArchitectureResponse | null>(null)
   const [archLoading, setArchLoading] = useState(true)
+  const [alignmentState, setAlignmentState] = useState<AlignmentStateSummary | null>(null)
 
   // Per-subtopic node sets, keyed by subtopic id (null = no set yet).
   const [nodeSetsBySubtopicId, setNodeSetsBySubtopicId] = useState<
@@ -136,6 +146,7 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
   const [query, setQuery] = useState('')
 
   const [expandedLayer, setExpandedLayer] = useState<number | null>(1)
+  const [collapsedCloIds, setCollapsedCloIds] = useState<Set<string>>(new Set())
 
   const cloGroups = useMemo(() => buildCloGroups(arch), [arch])
 
@@ -162,6 +173,22 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
       active = false
     }
   }, [courseCode])
+
+  useEffect(() => {
+    let active = true
+    fetchAlignment(courseCode)
+      .then((data) => {
+        if (active) setAlignmentState(data.state)
+      })
+      .catch(() => {
+        if (active) setAlignmentState(null)
+      })
+    return () => {
+      active = false
+    }
+  }, [courseCode, alignmentRefreshSignal])
+
+  const nodeGenReady = alignmentState?.node_gen_ready === true
 
   // Hydrate any existing node sets for every approved subtopic so prior drafts
   // and approvals show grouped under their CLO on load.
@@ -195,6 +222,26 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
     allApprovedSubtopicIds.length > 0 &&
     allApprovedSubtopicIds.every((id) => nodeSetsBySubtopicId[id]?.status === 'approved')
 
+  const cloFullyApprovedCount = useMemo(
+    () =>
+      cloGroups.filter((g) =>
+        g.subtopics.every((s) => nodeSetsBySubtopicId[s.subtopic_id]?.status === 'approved')
+      ).length,
+    [cloGroups, nodeSetsBySubtopicId]
+  )
+
+  function handleNodeSetUpdated(subtopicId: string, nodeSet: NodeEngineNodeSet) {
+    setNodeSetsBySubtopicId((prev) => ({ ...prev, [subtopicId]: nodeSet }))
+    const cloId = cloGroups.find((g) => g.subtopics.some((s) => s.subtopic_id === subtopicId))?.clo_id
+    if (cloId) {
+      setCollapsedCloIds((prev) => {
+        const next = new Set(prev)
+        next.delete(cloId)
+        return next
+      })
+    }
+  }
+
   function layerStatus(layer: NodeEngineLayer): LayerStatus {
     if (layer.layer === 1) {
       if (allApprovedSubtopicIds.length === 0) return 'locked'
@@ -214,6 +261,19 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
   // Each await advances live progress; per-subtopic errors are captured without
   // aborting the rest of the batch.
   async function handleGenerateClo(cloId: string) {
+    if (!nodeGenReady) {
+      showToast({
+        title: 'Activate alignment tags first',
+        description:
+          alignmentState?.pending_activation
+            ? 'Reference alignment has a preview that is not yet active. Activate tags in Layer 6 Step B before generating nodes.'
+            : alignmentState?.is_stale
+              ? alignmentState.stale_reason ?? 'Alignment is stale — preview and activate tags again.'
+              : 'Complete Reference Alignment (Layer 6 Step B) before generating mastery nodes.',
+        variant: 'destructive',
+      })
+      return
+    }
     const group = cloGroups.find((g) => g.clo_id === cloId)
     if (!group || group.subtopics.length === 0) return
     setGeneratingCloId(cloId)
@@ -253,6 +313,19 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
   // is effectively resumable: completed subtopics are saved even if it's
   // interrupted. The tab must stay open for the duration.
   async function handleGenerateAllCourse() {
+    if (!nodeGenReady) {
+      showToast({
+        title: 'Activate alignment tags first',
+        description:
+          alignmentState?.pending_activation
+            ? 'Reference alignment has a preview that is not yet active. Activate tags in Layer 6 Step B before generating nodes.'
+            : alignmentState?.is_stale
+              ? alignmentState.stale_reason ?? 'Alignment is stale — preview and activate tags again.'
+              : 'Complete Reference Alignment (Layer 6 Step B) before generating mastery nodes.',
+        variant: 'destructive',
+      })
+      return
+    }
     const allSubs = cloGroups.flatMap((g) => g.subtopics)
     if (allSubs.length === 0) return
     setGeneratingAll(true)
@@ -294,6 +367,7 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
     const group = cloGroups.find((g) => g.clo_id === cloId)
     if (!group) return
     setApprovingCloId(cloId)
+    const latestSets = { ...nodeSetsBySubtopicId }
     try {
       const needOverride: string[] = []
       for (const st of group.subtopics) {
@@ -301,6 +375,7 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
         if (!ns || ns.status === 'approved') continue
         try {
           const result = await approveNodeSet(courseCode, st.subtopic_id, { approver: role })
+          latestSets[st.subtopic_id] = result
           setNodeSetsBySubtopicId((prev) => ({ ...prev, [st.subtopic_id]: result }))
         } catch (error) {
           if (error instanceof AcademicApprovalRequiredError) {
@@ -324,6 +399,7 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
                 approver: role,
                 overrideReason: reason.trim(),
               })
+              latestSets[id] = result
               setNodeSetsBySubtopicId((prev) => ({ ...prev, [id]: result }))
             } catch (error) {
               // eslint-disable-next-line no-console
@@ -345,6 +421,13 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
           : 'Node sets approved.',
         variant: 'success',
       })
+
+      const allApprovedInClo = group.subtopics.every(
+        (s) => latestSets[s.subtopic_id]?.status === 'approved'
+      )
+      if (allApprovedInClo) {
+        setCollapsedCloIds((prev) => new Set(prev).add(cloId))
+      }
     } catch (error) {
       showToast({
         title: 'Approval failed',
@@ -431,6 +514,8 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
                     {layer.layer === 1 ? (
                       <Layer1Body
                         status={status}
+                        alignmentState={alignmentState}
+                        nodeGenReady={nodeGenReady}
                         cloGroups={cloGroups}
                         nodeSetsBySubtopicId={nodeSetsBySubtopicId}
                         hydrating={hydrating}
@@ -444,6 +529,39 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
                         onQueryChange={setQuery}
                         onGenerateClo={handleGenerateClo}
                         onApproveClo={handleApproveClo}
+                        collapsedCloIds={collapsedCloIds}
+                        onToggleCloCollapsed={(cloId) =>
+                          setCollapsedCloIds((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(cloId)) next.delete(cloId)
+                            else next.add(cloId)
+                            return next
+                          })
+                        }
+                        onReopenClo={async (cloId) => {
+                          const group = cloGroups.find((g) => g.clo_id === cloId)
+                          if (!group) return
+                          for (const st of group.subtopics) {
+                            if (nodeSetsBySubtopicId[st.subtopic_id]?.status === 'approved') {
+                              const reopened = await reopenNodeSet(courseCode, st.subtopic_id)
+                              setNodeSetsBySubtopicId((prev) => ({
+                                ...prev,
+                                [st.subtopic_id]: reopened,
+                              }))
+                            }
+                          }
+                          setCollapsedCloIds((prev) => {
+                            const next = new Set(prev)
+                            next.delete(cloId)
+                            return next
+                          })
+                        }}
+                        courseCode={courseCode}
+                        onNodeSetUpdated={handleNodeSetUpdated}
+                        layer1Approved={layer1Approved}
+                        cloFullyApprovedCount={cloFullyApprovedCount}
+                        cloTotalCount={cloGroups.length}
+                        onContinueLayer2={() => setExpandedLayer(2)}
                       />
                     ) : (
                       <PlaceholderLayerBody status={status} layer={layer} />
@@ -461,6 +579,8 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
 
 interface Layer1BodyProps {
   status: LayerStatus
+  alignmentState: AlignmentStateSummary | null
+  nodeGenReady: boolean
   cloGroups: CloGroup[]
   nodeSetsBySubtopicId: Record<string, NodeEngineNodeSet | null>
   hydrating: boolean
@@ -474,11 +594,21 @@ interface Layer1BodyProps {
   onQueryChange: (q: string) => void
   onGenerateClo: (cloId: string) => void
   onApproveClo: (cloId: string) => void
+  collapsedCloIds: Set<string>
+  onToggleCloCollapsed: (cloId: string) => void
+  onReopenClo: (cloId: string) => Promise<void>
+  courseCode: string
+  onNodeSetUpdated: (subtopicId: string, nodeSet: NodeEngineNodeSet) => void
+  layer1Approved: boolean
+  cloFullyApprovedCount: number
+  cloTotalCount: number
+  onContinueLayer2: () => void
 }
 
 interface FlatNodeMatch {
   node: NodeEngineNode
   cloId: string
+  subtopicId: string
   subtopicTitle: string
   groundingSource?: NodeEngineGroundingSource
 }
@@ -498,6 +628,8 @@ function Pill({ className, children }: { className?: string; children: React.Rea
 
 function Layer1Body({
   status,
+  alignmentState,
+  nodeGenReady,
   cloGroups,
   nodeSetsBySubtopicId,
   hydrating,
@@ -511,6 +643,15 @@ function Layer1Body({
   onQueryChange,
   onGenerateClo,
   onApproveClo,
+  collapsedCloIds,
+  onToggleCloCollapsed,
+  onReopenClo,
+  courseCode,
+  onNodeSetUpdated,
+  layer1Approved,
+  cloFullyApprovedCount,
+  cloTotalCount,
+  onContinueLayer2,
 }: Layer1BodyProps) {
   if (status === 'locked') {
     return (
@@ -525,6 +666,7 @@ function Layer1Body({
   }
 
   const busy = generatingCloId !== null || approvingCloId !== null || generatingAll
+  const generateBlocked = !nodeGenReady
   const totalSubtopics = cloGroups.reduce((sum, g) => sum + g.subtopics.length, 0)
   const totalGenerated = cloGroups.reduce(
     (sum, g) => sum + g.subtopics.filter((s) => nodeSetsBySubtopicId[s.subtopic_id]).length,
@@ -546,6 +688,7 @@ function Layer1Body({
             .map((node) => ({
               node,
               cloId: group.clo_id,
+              subtopicId: st.subtopic_id,
               subtopicTitle: st.title,
               groundingSource: ns.grounding_summary?.grounding_source,
             }))
@@ -555,6 +698,20 @@ function Layer1Body({
 
   return (
     <div className="space-y-4">
+      {generateBlocked && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            {alignmentState?.pending_activation
+              ? `Reference alignment preview is not active (node-gen uses ${alignmentState.active_tagged_chunk_count} tag(s) in the database). Activate tags in Layer 6 Step B above.`
+              : alignmentState?.is_stale
+                ? alignmentState.stale_reason ??
+                  'Alignment is stale. Preview and activate tags again before generating nodes.'
+                : 'Complete Reference Alignment (Layer 6 Step B) before generating mastery nodes.'}
+          </span>
+        </div>
+      )}
+
       <p className="rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">
         Generate all nodes for a whole CLO in one click, review the subtopics grouped below, then
         approve the CLO. Review by exception: only the nodes that need your judgment (assessment-blocking
@@ -569,7 +726,12 @@ function Layer1Body({
       {/* Whole-course generation: kick off every CLO's subtopics in one run.
           Review still happens CLO by CLO below. */}
       <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-card p-3">
-        <Button size="sm" variant="default" onClick={onGenerateAll} disabled={busy || totalSubtopics === 0}>
+        <Button
+          size="sm"
+          variant="default"
+          onClick={onGenerateAll}
+          disabled={busy || totalSubtopics === 0 || generateBlocked}
+        >
           {generatingAll ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : totalGenerated > 0 ? (
@@ -617,7 +779,7 @@ function Layer1Body({
           <p className="text-xs text-muted-foreground">
             {searchMatches.length} node(s) match “{query.trim()}”.
           </p>
-          {searchMatches.map(({ node, cloId, subtopicTitle, groundingSource }) => (
+          {searchMatches.map(({ node, cloId, subtopicId, subtopicTitle, groundingSource }) => (
             <div key={node.node_id}>
               <p className="mb-1 text-xs text-muted-foreground">
                 {cloId} · {subtopicTitle}
@@ -626,12 +788,16 @@ function Layer1Body({
                 node={node}
                 index={isMustReviewNode(node, groundingSource) ? 0 : 1}
                 groundingSource={groundingSource}
+                courseCode={courseCode}
+                subtopicId={subtopicId}
+                onNodeSetUpdated={(ns) => onNodeSetUpdated(subtopicId, ns)}
               />
             </div>
           ))}
         </div>
       ) : (
-        cloGroups.map((group) => (
+        <>
+        {cloGroups.map((group) => (
           <CloGroupCard
             key={group.clo_id}
             group={group}
@@ -639,11 +805,31 @@ function Layer1Body({
             generating={generatingCloId === group.clo_id}
             approving={approvingCloId === group.clo_id}
             busy={busy}
+            generateBlocked={generateBlocked}
             progress={batchProgress && batchProgress.cloId === group.clo_id ? batchProgress : null}
             onGenerate={() => onGenerateClo(group.clo_id)}
             onApprove={() => onApproveClo(group.clo_id)}
+            collapsed={collapsedCloIds.has(group.clo_id)}
+            onToggleCollapsed={() => onToggleCloCollapsed(group.clo_id)}
+            onReopen={() => onReopenClo(group.clo_id)}
+            courseCode={courseCode}
+            onNodeSetUpdated={onNodeSetUpdated}
           />
-        ))
+        ))}
+
+        <div className="rounded-md border border-border bg-muted/20 p-4">
+          <Button size="sm" variant="default" disabled={!layer1Approved} onClick={onContinueLayer2}>
+            Continue to Layer 2 — Experience Blueprint
+            <ChevronRight className="ml-2 h-4 w-4" />
+          </Button>
+          {!layer1Approved && cloTotalCount > 0 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {cloFullyApprovedCount} of {cloTotalCount} CLOs approved · approve all node sets to
+              continue
+            </p>
+          )}
+        </div>
+        </>
       )}
     </div>
   )
@@ -655,9 +841,15 @@ interface CloGroupCardProps {
   generating: boolean
   approving: boolean
   busy: boolean
+  generateBlocked: boolean
   progress: { cloId: string; done: number; total: number } | null
   onGenerate: () => void
   onApprove: () => void
+  collapsed: boolean
+  onToggleCollapsed: () => void
+  onReopen: () => Promise<void>
+  courseCode: string
+  onNodeSetUpdated: (subtopicId: string, nodeSet: NodeEngineNodeSet) => void
 }
 
 function CloGroupCard({
@@ -666,9 +858,15 @@ function CloGroupCard({
   generating,
   approving,
   busy,
+  generateBlocked,
   progress,
   onGenerate,
   onApprove,
+  collapsed,
+  onToggleCollapsed,
+  onReopen,
+  courseCode,
+  onNodeSetUpdated,
 }: CloGroupCardProps) {
   const entries = group.subtopics.map((s) => ({
     subtopic: s,
@@ -688,9 +886,40 @@ function CloGroupCard({
   )
   const canProceedCount = allNodes.length - mustReviewCount
   const pendingApproval = generatedCount > approvedCount
+  const allApproved = generatedCount > 0 && approvedCount === group.subtopics.length
+
+  if (collapsed && allApproved) {
+    return (
+      <button
+        type="button"
+        onClick={onToggleCollapsed}
+        className={cn(
+          'flex w-full items-center justify-between gap-3 rounded-lg border p-4 text-left',
+          'border-emerald-500/40 bg-emerald-500/5'
+        )}
+      >
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="font-semibold text-foreground">{group.clo_id}</span>
+          <Pill className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+            <Check className="h-3 w-3" /> All approved
+          </Pill>
+          <span className="text-muted-foreground">
+            · {allNodes.length} node{allNodes.length === 1 ? '' : 's'} · {group.subtopics.length}{' '}
+            subtopic{group.subtopics.length === 1 ? '' : 's'}
+          </span>
+        </div>
+        <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+      </button>
+    )
+  }
 
   return (
-    <div className="rounded-lg border border-border">
+    <div
+      className={cn(
+        'rounded-lg border',
+        allApproved ? 'border-emerald-500/40' : 'border-border'
+      )}
+    >
       <div className="space-y-3 p-4">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
@@ -731,7 +960,7 @@ function CloGroupCard({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" onClick={onGenerate} disabled={busy}>
+          <Button size="sm" onClick={onGenerate} disabled={busy || generateBlocked}>
             {generating ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : generatedCount > 0 ? (
@@ -759,6 +988,12 @@ function CloGroupCard({
             <span className="text-xs text-muted-foreground">
               Generating {progress.done}/{progress.total} subtopics…
             </span>
+          )}
+
+          {allApproved && (
+            <Button size="sm" variant="outline" onClick={() => void onReopen()} disabled={busy}>
+              Reopen for review
+            </Button>
           )}
         </div>
       </div>
@@ -829,6 +1064,9 @@ function CloGroupCard({
                         node={node}
                         index={isMustReviewNode(node, subGroundingSource) ? 0 : 1}
                         groundingSource={subGroundingSource}
+                        courseCode={courseCode}
+                        subtopicId={subtopic.subtopic_id}
+                        onNodeSetUpdated={(ns) => onNodeSetUpdated(subtopic.subtopic_id, ns)}
                       />
                     ))}
                   </div>

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   AlertTriangle,
   BookOpen,
@@ -10,17 +10,28 @@ import {
   Code2,
   Link2,
   ListChecks,
+  Loader2,
+  Pencil,
+  RefreshCw,
   ShieldAlert,
   Target,
 } from 'lucide-react'
+import { Button } from '@/components/ui/Button'
+import { showToast } from '@/components/ui/Toaster'
 import { cn } from '@/lib/utils'
-import type {
-  NodeEngineGroundingSource,
-  NodeEngineNode,
-  NodeEngineNodeSet,
-  NodeEngineReviewPriority,
-  NodeEngineRiskClassification,
+import {
+  updateNodeProse,
+  regenerateSingleNode,
+  NodeEditConflictError,
+  type NodeEngineGroundingSource,
+  type NodeEngineNode,
+  type NodeEngineNodeSet,
+  type NodeEngineReviewPriority,
+  type NodeEngineRiskClassification,
+  type NodeProsePatch,
 } from '@/services/api'
+
+export const EDITED_REOPEN_REASON = 'Edited — re-confirm'
 
 /** Humanize an enum-ish token: `apply_to_case` -> `Apply to case`. */
 function humanize(value: string): string {
@@ -74,6 +85,32 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
         {label}
       </p>
       <div className="text-sm text-foreground">{children}</div>
+    </div>
+  )
+}
+
+function EditableField({
+  label,
+  value,
+  onChange,
+  rows = 2,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  rows?: number
+}) {
+  return (
+    <div className="space-y-0.5">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={rows}
+        className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
     </div>
   )
 }
@@ -171,17 +208,114 @@ export function NodeCard({
   node,
   index,
   groundingSource,
+  courseCode,
+  subtopicId,
+  onNodeSetUpdated,
 }: {
   node: NodeEngineNode
   index: number
   groundingSource?: NodeEngineGroundingSource
+  courseCode?: string
+  subtopicId?: string
+  onNodeSetUpdated?: (nodeSet: NodeEngineNodeSet) => void
 }) {
   const triage = getNodeReviewTriage(node, groundingSource)
   const mustReview = triage.priority === 'must_review'
-  // Auto-expand must_review nodes (and keep the very first node open); everything
-  // else starts collapsed but stays fully openable.
-  const [open, setOpen] = useState(mustReview || index === 0)
+  const editedReopen = triage.reasons.includes(EDITED_REOPEN_REASON)
+  const interactive = Boolean(courseCode && subtopicId && onNodeSetUpdated)
+  const [open, setOpen] = useState(
+    mustReview || index === 0 || node.sme_edited || node.status === 'needs_revision'
+  )
+  const [saving, setSaving] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
+  const [kc, setKc] = useState(node.knowledge_component)
+  const [mastery, setMastery] = useState(node.mastery_statement)
+  const [why, setWhy] = useState(node.why_it_matters)
+  const [assessmentConn, setAssessmentConn] = useState(node.assessment_connection)
+  const [candidates, setCandidates] = useState(node.candidate_misconceptions)
+
+  useEffect(() => {
+    setKc(node.knowledge_component)
+    setMastery(node.mastery_statement)
+    setWhy(node.why_it_matters)
+    setAssessmentConn(node.assessment_connection)
+    setCandidates(node.candidate_misconceptions)
+  }, [node])
+
   const ec = node.primary_evidence_check_requirement
+  const dirty =
+    kc !== node.knowledge_component ||
+    mastery !== node.mastery_statement ||
+    why !== node.why_it_matters ||
+    assessmentConn !== node.assessment_connection ||
+    candidates.some((c, i) => {
+      const orig = node.candidate_misconceptions[i]
+      if (!orig) return true
+      return (
+        c.statement !== orig.statement ||
+        c.reason !== orig.reason ||
+        (c.suggested_trap ?? '') !== (orig.suggested_trap ?? '')
+      )
+    })
+
+  async function handleSave() {
+    if (!courseCode || !subtopicId || !onNodeSetUpdated) return
+    const patch: NodeProsePatch = {
+      knowledge_component: kc,
+      mastery_statement: mastery,
+      why_it_matters: why,
+      assessment_connection: assessmentConn,
+      candidate_misconceptions: candidates.map((c) => ({
+        candidate_misconception_id: c.candidate_misconception_id,
+        statement: c.statement,
+        reason: c.reason,
+        suggested_trap: c.suggested_trap,
+      })),
+    }
+    try {
+      setSaving(true)
+      const updated = await updateNodeProse(courseCode, subtopicId, node.node_id, patch)
+      onNodeSetUpdated(updated)
+      setOpen(true)
+      showToast({ title: 'Edits saved', description: 'Node re-opened for your review.', variant: 'success' })
+    } catch (error) {
+      showToast({
+        title: 'Save failed',
+        description: error instanceof Error ? error.message : 'Failed to save node edits',
+        variant: 'destructive',
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleRegenerate(acknowledgeReplaceEdits = false) {
+    if (!courseCode || !subtopicId || !onNodeSetUpdated) return
+    try {
+      setRegenerating(true)
+      const updated = await regenerateSingleNode(courseCode, subtopicId, node.node_id, {
+        acknowledgeReplaceEdits,
+      })
+      onNodeSetUpdated(updated)
+      setOpen(true)
+      showToast({ title: 'Node regenerated', description: 'Review the updated prose.', variant: 'success' })
+    } catch (error) {
+      if (error instanceof NodeEditConflictError) {
+        const ok = window.confirm(
+          'This node has manual edits — regenerating will replace them. Continue?'
+        )
+        if (ok) void handleRegenerate(true)
+        return
+      }
+      showToast({
+        title: 'Regenerate failed',
+        description: error instanceof Error ? error.message : 'Failed to regenerate node',
+        variant: 'destructive',
+      })
+    } finally {
+      setRegenerating(false)
+    }
+  }
 
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -223,7 +357,19 @@ export function NodeCard({
                 Can proceed · open to view
               </Pill>
             )}
-            {node.status === 'approved' && (
+            {editedReopen && (
+              <Pill className="bg-amber-500/15 text-amber-700 dark:text-amber-400">
+                <Pencil className="h-3 w-3" />
+                Edited — re-confirm
+              </Pill>
+            )}
+            {node.sme_edited && !editedReopen && (
+              <Pill className="bg-amber-500/15 text-amber-700 dark:text-amber-400">
+                <Pencil className="h-3 w-3" />
+                SME edited
+              </Pill>
+            )}
+            {node.status === 'approved' && !node.sme_edited && (
               <Pill className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
                 <Check className="h-3 w-3" />
                 Approved
@@ -264,11 +410,28 @@ export function NodeCard({
             </details>
           )}
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Knowledge component">{node.knowledge_component || '—'}</Field>
-            <Field label="Node type">{humanize(node.node_type)}</Field>
-            <Field label="Mastery statement">{node.mastery_statement || '—'}</Field>
-            <Field label="Why it matters">{node.why_it_matters || '—'}</Field>
-            <Field label="Assessment connection">{node.assessment_connection || '—'}</Field>
+            {interactive ? (
+              <>
+                <EditableField label="Knowledge component" value={kc} onChange={setKc} rows={3} />
+                <Field label="Node type">{humanize(node.node_type)}</Field>
+                <EditableField label="Mastery statement" value={mastery} onChange={setMastery} rows={3} />
+                <EditableField label="Why it matters" value={why} onChange={setWhy} rows={3} />
+                <EditableField
+                  label="Assessment connection"
+                  value={assessmentConn}
+                  onChange={setAssessmentConn}
+                  rows={2}
+                />
+              </>
+            ) : (
+              <>
+                <Field label="Knowledge component">{node.knowledge_component || '—'}</Field>
+                <Field label="Node type">{humanize(node.node_type)}</Field>
+                <Field label="Mastery statement">{node.mastery_statement || '—'}</Field>
+                <Field label="Why it matters">{node.why_it_matters || '—'}</Field>
+                <Field label="Assessment connection">{node.assessment_connection || '—'}</Field>
+              </>
+            )}
             <Field label="Prerequisite order">
               Position {node.order + 1}
               {node.prerequisite_node_ids.length > 0 ? (
@@ -281,6 +444,28 @@ export function NodeCard({
               )}
             </Field>
           </div>
+
+          {interactive && (
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => void handleSave()} disabled={!dirty || saving}>
+                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Pencil className="mr-2 h-4 w-4" />}
+                Save edits
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void handleRegenerate()}
+                disabled={regenerating}
+              >
+                {regenerating ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                )}
+                Regenerate this node
+              </Button>
+            </div>
+          )}
 
           {/* Primary Evidence Check requirement */}
           <div className="rounded-md border border-border bg-muted/30 p-3">
@@ -331,20 +516,57 @@ export function NodeCard({
             </div>
             {node.candidate_misconceptions.length > 0 ? (
               <ul className="mt-2 space-y-2">
-                {node.candidate_misconceptions.map((m) => (
+                {candidates.map((m, mi) => (
                   <li
                     key={m.candidate_misconception_id}
                     className="rounded-md border border-amber-500/20 bg-amber-500/5 p-2 text-sm"
                   >
-                    <p className="font-medium">{m.statement || m.candidate_misconception_id}</p>
-                    {m.reason && <p className="text-muted-foreground">{m.reason}</p>}
+                    {interactive ? (
+                      <div className="space-y-2">
+                        <EditableField
+                          label="Statement"
+                          value={m.statement}
+                          onChange={(v) =>
+                            setCandidates((prev) =>
+                              prev.map((c, i) => (i === mi ? { ...c, statement: v } : c))
+                            )
+                          }
+                          rows={2}
+                        />
+                        <EditableField
+                          label="Reason"
+                          value={m.reason}
+                          onChange={(v) =>
+                            setCandidates((prev) =>
+                              prev.map((c, i) => (i === mi ? { ...c, reason: v } : c))
+                            )
+                          }
+                          rows={2}
+                        />
+                        <EditableField
+                          label="Suggested trap"
+                          value={m.suggested_trap ?? ''}
+                          onChange={(v) =>
+                            setCandidates((prev) =>
+                              prev.map((c, i) => (i === mi ? { ...c, suggested_trap: v } : c))
+                            )
+                          }
+                          rows={2}
+                        />
+                      </div>
+                    ) : (
+                      <>
+                        <p className="font-medium">{m.statement || m.candidate_misconception_id}</p>
+                        {m.reason && <p className="text-muted-foreground">{m.reason}</p>}
+                      </>
+                    )}
                     <div className="mt-1 flex flex-wrap gap-1">
                       {m.severity && (
                         <Pill className="bg-amber-500/15 text-amber-600 dark:text-amber-400">
                           {humanize(m.severity)}
                         </Pill>
                       )}
-                      {m.suggested_trap && (
+                      {!interactive && m.suggested_trap && (
                         <span className="text-xs text-muted-foreground">
                           Trap: {m.suggested_trap}
                         </span>

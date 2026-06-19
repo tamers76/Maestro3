@@ -886,7 +886,7 @@ export default function Layer6SubtopicEditor({
             layerApproved || !onApproveAndContinue ? (
               <span className="flex items-center gap-2 px-3 py-1.5 rounded-md font-medium bg-green-500/10 text-green-600">
                 <Check className="h-4 w-4" />
-                {layerApproved ? 'Layer 6 approved' : 'Layer 6 ready for approval'}
+                {layerApproved ? 'Subtopics approved — complete Reference Alignment (Step B)' : 'Layer 6 ready for approval'}
               </span>
             ) : (
               <Button
@@ -900,7 +900,7 @@ export default function Layer6SubtopicEditor({
                 ) : (
                   <Check className="h-4 w-4" />
                 )}
-                I am ready to approve Layer 6
+                I am ready to approve Layer 6 subtopics
               </Button>
             )
           ) : (

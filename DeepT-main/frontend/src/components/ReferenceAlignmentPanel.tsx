@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { BookMarked, Check, ChevronDown, ChevronRight, Loader2, Lock, Search, Sparkles, Upload } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { BookMarked, Check, ChevronDown, ChevronRight, Loader2, Lock, Search, Sparkles, Upload, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
+import { Card, CardContent, CardHeader } from '@/components/ui/Card'
+import { Input } from '@/components/ui/Input'
 import { showToast } from '@/components/ui/Toaster'
 import { cn } from '@/lib/utils'
 import { useRole } from '@/contexts/RoleContext'
@@ -17,16 +18,99 @@ import {
 
 const COURSE_LEVEL = '__course_level__'
 
-function StatusBadge({ status }: { status: AlignmentStateSummary['status'] }) {
+/** Default for the next propose run — tighter than the backend legacy 0.34 for multi-source corpora. */
+const DEFAULT_PROPOSE_THRESHOLD = 0.42
+const MIN_PROPOSE_THRESHOLD = 0.2
+const MAX_PROPOSE_THRESHOLD = 0.9
+
+function clampProposeThreshold(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_PROPOSE_THRESHOLD
+  return Math.min(MAX_PROPOSE_THRESHOLD, Math.max(MIN_PROPOSE_THRESHOLD, value))
+}
+
+/** Cosine score for a specific subtopic on this mapping (best candidate match). */
+function subtopicMatchScore(mapping: AlignmentChunkMapping, subtopicId: string): number {
+  return mapping.subtopic_candidates.find((c) => c.id === subtopicId)?.score ?? mapping.confidence
+}
+
+function StatusBadge({ state }: { state: AlignmentStateSummary }) {
+  if (state.is_stale) {
+    return (
+      <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+        Stale — re-activate
+      </span>
+    )
+  }
+  if (state.pending_activation) {
+    return (
+      <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+        Preview — not active
+      </span>
+    )
+  }
   const map: Record<AlignmentStateSummary['status'], { label: string; cls: string }> = {
     locked: { label: 'Locked', cls: 'bg-muted text-muted-foreground' },
     no_references: { label: 'No references', cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-400' },
     available: { label: 'Ready to align', cls: 'bg-primary/10 text-primary' },
-    proposed: { label: 'Proposed — review', cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-400' },
-    approved: { label: 'Approved', cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' },
+    proposed: { label: 'Preview ready', cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-400' },
+    approved: { label: 'Active', cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' },
   }
-  const s = map[status]
+  const s = map[state.status]
   return <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', s.cls)}>{s.label}</span>
+}
+
+function AlignmentGateBanner({ state }: { state: AlignmentStateSummary }) {
+  if (state.node_gen_ready) {
+    return (
+      <div className="flex items-start gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-400">
+        <Check className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>
+          Alignment tags are <span className="font-medium">active</span> ({state.active_tagged_chunk_count}{' '}
+          chunk{state.active_tagged_chunk_count === 1 ? '' : 's'}). Safe to generate mastery nodes in the Node
+          Engine.
+        </span>
+      </div>
+    )
+  }
+
+  if (state.is_stale && state.stale_reason) {
+    return (
+      <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>{state.stale_reason}</span>
+      </div>
+    )
+  }
+
+  if (state.pending_activation && state.proposed_tagged_chunk_count != null) {
+    return (
+      <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>
+          <span className="font-medium">{state.proposed_tagged_chunk_count}</span> passage
+          {state.proposed_tagged_chunk_count === 1 ? '' : 's'} in the preview —{' '}
+          <span className="font-medium">not active</span> for node generation. Node-gen currently uses{' '}
+          <span className="font-medium">{state.active_tagged_chunk_count}</span> active tag
+          {state.active_tagged_chunk_count === 1 ? '' : 's'} in the database. Click{' '}
+          <span className="font-medium">Activate alignment tags</span> to write the preview.
+        </span>
+      </div>
+    )
+  }
+
+  if (state.status === 'available') {
+    return (
+      <div className="flex items-start gap-2 rounded-md border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+        <Sparkles className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>
+          Preview tag changes to see how references map to subtopics, then activate tags before generating
+          mastery nodes.
+        </span>
+      </div>
+    )
+  }
+
+  return null
 }
 
 /** One reviewable chunk → subtopic mapping row. */
@@ -80,10 +164,16 @@ function MappingRow({
 export default function ReferenceAlignmentPanel({
   courseCode,
   onAlignmentApproved,
+  autoProposeSignal = 0,
+  embedded = false,
 }: {
   courseCode: string
   /** Called once alignment is approved, so the page can guide the SME to the Node Engine. */
   onAlignmentApproved?: () => void
+  /** Increment to auto-preview tag changes (Layer 6 exit, new reference upload). */
+  autoProposeSignal?: number
+  /** When true, render inside Layer 6 without an outer Card wrapper. */
+  embedded?: boolean
 }) {
   const { role } = useRole()
   const [state, setState] = useState<AlignmentStateSummary | null>(null)
@@ -93,6 +183,8 @@ export default function ReferenceAlignmentPanel({
   const [approving, setApproving] = useState(false)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [proposeThreshold, setProposeThreshold] = useState(DEFAULT_PROPOSE_THRESHOLD)
+  const lastAutoProposeSignal = useRef(0)
 
   const load = useCallback(async () => {
     try {
@@ -142,7 +234,14 @@ export default function ReferenceAlignmentPanel({
       groups.set(id, arr)
     }
     return Array.from(groups.entries())
-      .map(([id, mappings]) => ({ id, label: subtopicLabelById.get(id) ?? id, mappings }))
+      .map(([id, mappings]) => ({
+        id,
+        label: subtopicLabelById.get(id) ?? id,
+        // Lowest subtopic-specific scores first — spot-check floor rows before raising threshold.
+        mappings: [...mappings].sort(
+          (a, b) => subtopicMatchScore(a, id) - subtopicMatchScore(b, id)
+        ),
+      }))
       .sort((a, b) => a.label.localeCompare(b.label))
   }, [taggedMappings, subtopicLabelById])
 
@@ -159,24 +258,29 @@ export default function ReferenceAlignmentPanel({
       .slice(0, 100)
   }, [proposal, queryLower])
 
-  async function handlePropose() {
+  async function handlePropose(opts: { silent?: boolean } = {}) {
+    const threshold = clampProposeThreshold(proposeThreshold)
     try {
       setProposing(true)
-      const result = await proposeAlignment(courseCode)
+      const result = await proposeAlignment(courseCode, { threshold })
       setProposal(result)
       setOpen(true)
-      showToast({
-        title: 'Alignment proposed',
-        description: `${result.tagged_chunk_count} of ${result.chunk_count} chunks proposed for tagging. Review, then approve.`,
-        variant: 'success',
-      })
+      if (!opts.silent) {
+        showToast({
+          title: 'Alignment preview ready',
+          description: `${result.tagged_chunk_count} of ${result.chunk_count} chunks in preview at ${threshold.toFixed(2)}. Activate tags when ready.`,
+          variant: 'success',
+        })
+      }
       await load()
     } catch (error) {
-      showToast({
-        title: 'Propose failed',
-        description: error instanceof Error ? error.message : 'Failed to propose alignment',
-        variant: 'destructive',
-      })
+      if (!opts.silent) {
+        showToast({
+          title: 'Preview failed',
+          description: error instanceof Error ? error.message : 'Failed to preview alignment tags',
+          variant: 'destructive',
+        })
+      }
     } finally {
       setProposing(false)
     }
@@ -205,8 +309,8 @@ export default function ReferenceAlignmentPanel({
       const result = await approveAlignment(courseCode, role)
       setProposal(result)
       showToast({
-        title: 'Reference alignment approved',
-        description: `Tagged ${result.tagged_chunk_count} chunk(s). Scoped retrieval will now return real passages.`,
+        title: 'Alignment tags activated',
+        description: `${result.tagged_chunk_count} chunk(s) now active for scoped node grounding.`,
         variant: 'success',
       })
       await load()
@@ -225,41 +329,68 @@ export default function ReferenceAlignmentPanel({
 
   const status = state?.status ?? 'available'
   const locked = status === 'locked' || status === 'no_references'
-  const approved = status === 'approved'
+  const tagsLocked = state?.node_gen_ready === true
   const disabledEdits = approving || proposing
+  const activePct =
+    state && state.chunk_count > 0
+      ? Math.round((state.active_tagged_chunk_count / state.chunk_count) * 100)
+      : null
+  const proposedPct =
+    state && state.proposed_tagged_chunk_count != null && state.chunk_count > 0
+      ? Math.round((state.proposed_tagged_chunk_count / state.chunk_count) * 100)
+      : null
+  const activeProposalThreshold = proposal?.threshold ?? state?.threshold
 
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Course Architect → Node Engine
-            </p>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <BookMarked className="h-5 w-5" />
-              Reference Alignment
-            </CardTitle>
-            <CardDescription>
-              Confirm which reference passages actually ground each subtopic. This turns the
-              suggested readings previewed in Layer 6 into precise, subtopic-scoped grounding for
-              node generation. Propose pre-fills the mapping from the same reference; you review,
-              adjust, and approve — nothing is written until you do.
-            </CardDescription>
-          </div>
-          {state && <StatusBadge status={state.status} />}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
+  // Auto-preview when Layer 6 completes or a new reference is uploaded.
+  useEffect(() => {
+    if (autoProposeSignal <= 0 || autoProposeSignal <= lastAutoProposeSignal.current) return
+    lastAutoProposeSignal.current = autoProposeSignal
+    if (loading || proposing || approving) return
+    if (status === 'locked' || status === 'no_references') return
+    void handlePropose({ silent: true }).then(() => {
+      showToast({
+        title: 'Alignment preview updated',
+        description: 'Reference passages were re-mapped to subtopics. Review the preview, then activate tags.',
+        variant: 'success',
+      })
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- signal edge only
+  }, [autoProposeSignal])
+
+  const header = (
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Layer 6 — Step B · Course Architect exit gate
+        </p>
+        <h3 className={cn('flex items-center gap-2 font-semibold', embedded ? 'text-base' : 'text-lg')}>
+          <BookMarked className="h-5 w-5" />
+          Reference Alignment
+        </h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          After subtopics are approved, map reference passages to each subtopic.{' '}
+          <span className="font-medium text-foreground">Preview</span> shows proposed tags;{' '}
+          <span className="font-medium text-foreground">Activate</span> writes them to the database for node
+          generation. Preview alone does not change what node-gen uses.
+        </p>
+      </div>
+      {state && <StatusBadge state={state} />}
+    </div>
+  )
+
+  const body = (
+    <div className="space-y-3">
         {loading ? (
           <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading alignment…
           </div>
         ) : (
           <>
+            {state && <AlignmentGateBanner state={state} />}
+
             {/* Dependency / counts */}
             {state && (
-              <div className="grid grid-cols-2 gap-2 rounded-md border border-border bg-muted/30 p-3 text-xs sm:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2 rounded-md border border-border bg-muted/30 p-3 text-xs sm:grid-cols-6">
                 <div>
                   <p className="text-muted-foreground">Approved subtopics</p>
                   <p className="font-medium text-foreground">{state.subtopic_count}</p>
@@ -273,9 +404,47 @@ export default function ReferenceAlignmentPanel({
                   <p className="font-medium text-foreground">{state.chunk_count}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Tagged</p>
-                  <p className="font-medium text-foreground">{state.tagged_chunk_count}</p>
+                  <p className="text-muted-foreground">Active tags (DB)</p>
+                  <p className="font-medium text-foreground">
+                    {state.active_tagged_chunk_count}
+                    {activePct !== null ? ` (${activePct}%)` : ''}
+                  </p>
                 </div>
+                <div>
+                  <p className="text-muted-foreground">Preview tags</p>
+                  <p className="font-medium text-foreground">
+                    {state.proposed_tagged_chunk_count ?? '—'}
+                    {proposedPct !== null ? ` (${proposedPct}%)` : ''}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Preview threshold</p>
+                  <p className="font-medium text-foreground">
+                    {activeProposalThreshold != null ? activeProposalThreshold.toFixed(2) : '—'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {state?.per_document_tag_summary && state.per_document_tag_summary.length > 0 && (
+              <div className="rounded-md border border-border bg-muted/20 p-3">
+                <h3 className="text-sm font-semibold text-foreground">Tags by source</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Spot-check each reference — e.g. UbD should show preview tags before you activate.
+                </p>
+                <ul className="mt-2 space-y-1 text-xs">
+                  {state.per_document_tag_summary.map((doc) => (
+                    <li key={doc.doc_id} className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="font-medium text-foreground">{doc.title}</span>
+                      <span className="text-muted-foreground">
+                        {doc.active_tagged_chunks} active
+                        {doc.proposed_tagged_chunks != null
+                          ? ` → ${doc.proposed_tagged_chunks} preview`
+                          : ''}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
 
@@ -291,32 +460,96 @@ export default function ReferenceAlignmentPanel({
               </div>
             )}
 
+            {/* Alignment threshold — used on the next preview run */}
+            {!locked && !state?.node_gen_ready && (
+              <div className="rounded-md border border-border bg-muted/20 p-3">
+                <h3 className="text-sm font-semibold text-foreground">Alignment threshold</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Cosine similarity a passage must clear to be tagged to a subtopic. Lower values tag
+                  more passages (multi-source corpora often over-tag at 0.34). Spot-check an existing
+                  proposal, then set the threshold just above generic noise and re-propose.
+                </p>
+                <div className="mt-3 flex flex-wrap items-end gap-3">
+                  <div className="min-w-[8rem] space-y-1.5">
+                    <label htmlFor="alignment-threshold" className="text-sm font-medium text-foreground">
+                      Threshold for next propose
+                    </label>
+                    <Input
+                      id="alignment-threshold"
+                      type="number"
+                      step="0.01"
+                      min={MIN_PROPOSE_THRESHOLD}
+                      max={MAX_PROPOSE_THRESHOLD}
+                      value={proposeThreshold}
+                      disabled={proposing || approving}
+                      onChange={(e) =>
+                        setProposeThreshold(clampProposeThreshold(Number(e.target.value)))
+                      }
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Typical range 0.40–0.48 for multi-source courses.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={proposing || approving}
+                      onClick={() => setProposeThreshold(0.34)}
+                    >
+                      Calibration (0.34)
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={proposing || approving}
+                      onClick={() => setProposeThreshold(DEFAULT_PROPOSE_THRESHOLD)}
+                    >
+                      Recommended (0.42)
+                    </Button>
+                  </div>
+                </div>
+                {activeProposalThreshold != null && activeProposalThreshold !== proposeThreshold && (
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    Current proposal was generated at{' '}
+                    <span className="font-medium text-foreground">
+                      {activeProposalThreshold.toFixed(2)}
+                    </span>
+                    . Re-propose to apply {proposeThreshold.toFixed(2)}.
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Actions */}
             {!locked && (
               <div className="flex flex-wrap items-center gap-2">
-                <Button size="sm" onClick={handlePropose} disabled={proposing || approving}>
+                <Button size="sm" onClick={() => void handlePropose()} disabled={proposing || approving}>
                   {proposing ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
                     <Sparkles className="mr-2 h-4 w-4" />
                   )}
-                  {proposal ? 'Re-propose Alignment' : 'Propose Alignment'}
+                  {proposal ? 'Preview tag changes' : 'Preview alignment tags'}
                 </Button>
-                {proposal && proposal.mappings.length > 0 && !approved && (
+                {proposal && proposal.mappings.length > 0 && !state?.node_gen_ready && (
                   <Button size="sm" variant="default" onClick={handleApprove} disabled={approving || proposing}>
                     {approving ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
                       <Check className="mr-2 h-4 w-4" />
                     )}
-                    Approve all proposed tags
+                    Activate alignment tags
                   </Button>
                 )}
-                {approved && (
+                {state?.node_gen_ready && (
                   <>
                     <span className="inline-flex items-center gap-1 text-sm text-emerald-600 dark:text-emerald-400">
-                      <Check className="h-4 w-4" /> Approved
-                      {proposal?.approved_by ? ` by ${proposal.approved_by}` : ''}
+                      <Check className="h-4 w-4" /> Tags active
+                      {proposal?.approved_by ? ` · ${proposal.approved_by}` : ''}
                     </span>
                     {onAlignmentApproved && (
                       <Button size="sm" variant="default" onClick={() => onAlignmentApproved()}>
@@ -325,6 +558,11 @@ export default function ReferenceAlignmentPanel({
                       </Button>
                     )}
                   </>
+                )}
+                {state?.status === 'approved' && !state?.node_gen_ready && (
+                  <span className="inline-flex items-center gap-1 text-sm text-emerald-600 dark:text-emerald-400">
+                    <Check className="h-4 w-4" /> Tags active
+                  </span>
                 )}
               </div>
             )}
@@ -341,18 +579,22 @@ export default function ReferenceAlignmentPanel({
                     Review &amp; spot-check · {taggedMappings.length} tagged to{' '}
                     {groupedBySubtopic.length} subtopic{groupedBySubtopic.length === 1 ? '' : 's'},{' '}
                     {untaggedMappings.length} course-level
+                    {activeProposalThreshold != null
+                      ? ` · threshold ${activeProposalThreshold.toFixed(2)}`
+                      : ''}
                   </span>
                   {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                 </button>
                 {open && (
                   <div className="space-y-3 border-t border-border p-3">
-                    {!approved && (
+                    {!tagsLocked && (
                       <p className="text-xs text-muted-foreground">
                         Tags are pre-filled from the reference — you don't need to check every
-                        passage. Click{' '}
-                        <span className="font-medium text-foreground">Approve all proposed tags</span>{' '}
-                        above, then spot-check below. Expand a subtopic to see its passages, or
-                        search to find a specific one and reassign / demote any outlier.
+                        passage. Expand a subtopic to spot-check: passages are sorted{' '}
+                        <span className="font-medium text-foreground">lowest score first</span> (floor
+                        rows at the top). Compare ~0.34–0.40 noise with ~0.45+ on-topic rows, set your
+                        threshold above the noise, re-propose, then{' '}
+                        <span className="font-medium text-foreground">Approve all proposed tags</span>.
                       </p>
                     )}
 
@@ -384,7 +626,7 @@ export default function ReferenceAlignmentPanel({
                             </p>
                             <MappingRow
                               mapping={m}
-                              disabled={disabledEdits || approved}
+                              disabled={disabledEdits || tagsLocked}
                               onReassign={handleReassign}
                             />
                           </div>
@@ -411,7 +653,7 @@ export default function ReferenceAlignmentPanel({
                                 <MappingRow
                                   key={m.chunk_id}
                                   mapping={m}
-                                  disabled={disabledEdits || approved}
+                                  disabled={disabledEdits || tagsLocked}
                                   onReassign={handleReassign}
                                 />
                               ))}
@@ -440,7 +682,7 @@ export default function ReferenceAlignmentPanel({
                                 <MappingRow
                                   key={m.chunk_id}
                                   mapping={m}
-                                  disabled={disabledEdits || approved}
+                                  disabled={disabledEdits || tagsLocked}
                                   onReassign={handleReassign}
                                 />
                               ))}
@@ -461,7 +703,22 @@ export default function ReferenceAlignmentPanel({
             )}
           </>
         )}
-      </CardContent>
+    </div>
+  )
+
+  if (embedded) {
+    return (
+      <div className="space-y-3">
+        {header}
+        {body}
+      </div>
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader>{header}</CardHeader>
+      <CardContent>{body}</CardContent>
     </Card>
   )
 }

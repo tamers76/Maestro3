@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -13,7 +12,6 @@ import {
   Lock,
   Plus,
   RefreshCw,
-  Settings,
   Sparkles,
   TrendingDown,
   TrendingUp,
@@ -22,7 +20,6 @@ import {
   X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import {
   Dialog,
   DialogContent,
@@ -637,7 +634,7 @@ export default function ReferenceCoveragePanel({
   /** Bumped by the parent after a reference is ingested to auto-re-run coverage. */
   refreshSignal?: number
 }) {
-  const navigate = useNavigate()
+  const [panelOpen, setPanelOpen] = useState(false)
   const [state, setState] = useState<CoverageStateSummary | null>(null)
   const [report, setReport] = useState<ReferenceCoverageReport | null>(null)
   const [loading, setLoading] = useState(true)
@@ -777,29 +774,49 @@ export default function ReferenceCoveragePanel({
   const referenceCount = report?.reference_doc_count ?? state?.reference_doc_count ?? 0
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Course Architect · After CLO Refinement
-            </p>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Gauge className="h-5 w-5" />
+    <div className="rounded-lg border border-border">
+      <button
+        type="button"
+        className="flex w-full items-start justify-between gap-3 p-4 text-left"
+        onClick={() => setPanelOpen((open) => !open)}
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="flex items-center gap-2 font-medium">
+              <Gauge className="h-4 w-4 shrink-0" />
               Reference Coverage Check
-            </CardTitle>
-            <CardDescription>
+            </span>
+            {state && <StatusBadge status={state.status} />}
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Course Architect · After CLO Refinement
+            {!panelOpen && !loading && totalClos > 0 && (
+              <>
+                {' '}
+                · {wellCovered} of {totalClos} covered · {needAttention} need attention · {referenceCount}{' '}
+                reference{referenceCount === 1 ? '' : 's'}
+              </>
+            )}
+          </p>
+          {panelOpen && (
+            <p className="mt-2 text-sm text-muted-foreground">
               A read-only measurement of how well your uploaded reference corpus teaches each approved
               CLO. The model judges only the passages actually retrieved from your corpus, so model
               knowledge can never stand in for real sources. This does{' '}
-              <span className="font-medium text-foreground">not</span> tag references or alter
-              Reference Alignment; it only tells you where the corpus is thin.
-            </CardDescription>
-          </div>
-          {state && <StatusBadge status={state.status} />}
+              <span className="font-medium text-foreground">not</span> tag references or alter Reference
+              Alignment; it only tells you where the corpus is thin.
+            </p>
+          )}
         </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
+        {panelOpen ? (
+          <ChevronDown className="h-5 w-5 shrink-0" />
+        ) : (
+          <ChevronRight className="h-5 w-5 shrink-0" />
+        )}
+      </button>
+
+      {panelOpen && (
+        <div className="space-y-3 border-t border-border px-4 pb-4 pt-3">
         {loading ? (
           <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading coverage…
@@ -848,15 +865,6 @@ export default function ReferenceCoveragePanel({
                     <RefreshCw className="mr-2 h-4 w-4" />
                   )}
                   {report?.generated_at ? 'Re-run coverage' : 'Measure coverage'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => navigate('/settings#reference-cross-referencing')}
-                  title="Edit thresholds, embedding model, and the coverage-judgment prompt"
-                >
-                  <Settings className="mr-2 h-4 w-4" />
-                  Cross-referencing settings
                 </Button>
                 {report?.generated_at && (
                   <span className="text-xs text-muted-foreground">
@@ -943,7 +951,8 @@ export default function ReferenceCoveragePanel({
             )}
           </>
         )}
-      </CardContent>
+        </div>
+      )}
 
       {/* Fix-gap upload — reuses the real reference ingestion flow. A successful
           upload closes the dialog and re-runs coverage (the WS1 re-check loop). */}
@@ -1004,6 +1013,6 @@ export default function ReferenceCoveragePanel({
           )}
         </DialogContent>
       </Dialog>
-    </Card>
+    </div>
   )
 }

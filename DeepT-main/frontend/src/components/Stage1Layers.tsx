@@ -9,6 +9,7 @@ import {
   runStage1Layer,
   approveStage1Layer,
   rejectStage1Layer,
+  fetchAlignment,
   type Stage1LayerStateView,
   type StageExecutionMode,
 } from '@/services/api'
@@ -21,6 +22,7 @@ import Layer5IntegrityEditor from '@/components/Layer5IntegrityEditor'
 import Layer6SubtopicEditor from '@/components/Layer6SubtopicEditor'
 import IntakeSummaryView, { type IntakeSummaryProps } from '@/components/IntakeSummaryView'
 import ReferenceCoveragePanel from '@/components/ReferenceCoveragePanel'
+import ReferenceAlignmentPanel from '@/components/ReferenceAlignmentPanel'
 import type {
   CloRefinementReviewSummary,
   AssessmentRedesignReviewSummary,
@@ -84,16 +86,24 @@ function statusColor(status: string): string {
 interface Stage1LayersProps {
   courseCode: string
   onAllApproved?: (allApproved: boolean) => void
-  /** Called once the final Course Architect layer (Layer 6) is approved, so the
-   *  page can guide the SME to the next step (Reference Alignment). */
-  onCourseArchitectComplete?: () => void
+  /** Called after Layer 6 approval to auto-preview alignment tags. */
+  onAlignmentAutoPropose?: () => void
+  /** Called when a reference document is uploaded (any layer). */
+  onReferenceUploaded?: () => void
+  /** Increment to refresh alignment readiness after uploads / activation. */
+  alignmentRefreshSignal?: number
+  /** Called once alignment tags are activated — page can scroll to Node Engine. */
+  onAlignmentApproved?: () => void
   intake?: IntakeSummaryProps
 }
 
 export default function Stage1Layers({
   courseCode,
   onAllApproved,
-  onCourseArchitectComplete,
+  onAlignmentAutoPropose,
+  onReferenceUploaded,
+  alignmentRefreshSignal = 0,
+  onAlignmentApproved,
   intake,
 }: Stage1LayersProps) {
   const [layers, setLayers] = useState<Stage1LayerStateView[]>([])
@@ -112,6 +122,8 @@ export default function Stage1Layers({
   const [layer6HasChanges, setLayer6HasChanges] = useState(false)
   const [layer6Summary, setLayer6Summary] = useState<SubtopicArchitectureReviewSummary | null>(null)
   const layerRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const referenceAlignmentRef = useRef<HTMLDivElement | null>(null)
+  const [nodeGenReady, setNodeGenReady] = useState(false)
   const coverageRef = useRef<HTMLDivElement | null>(null)
   const autoRunAttempted = useRef<Set<string>>(new Set())
   // Bumped whenever a reference is ingested (Layer 1 intake) so the sibling
@@ -165,7 +177,20 @@ export default function Stage1Layers({
       setLoading(true)
       const data = await fetchStage1Layers(courseCode)
       setLayers(data.layers)
-      onAllApproved?.(data.allApproved)
+      const layersApproved = data.layers.length > 0 && data.layers.every((l) => l.status === 'approved')
+      if (layersApproved) {
+        try {
+          const alignment = await fetchAlignment(courseCode)
+          setNodeGenReady(alignment.state.node_gen_ready)
+          onAllApproved?.(alignment.state.node_gen_ready)
+        } catch {
+          setNodeGenReady(false)
+          onAllApproved?.(false)
+        }
+      } else {
+        setNodeGenReady(false)
+        onAllApproved?.(false)
+      }
     } catch (error) {
       showToast({
         title: 'Error',
@@ -177,6 +202,27 @@ export default function Stage1Layers({
     }
   }, [courseCode, onAllApproved])
 
+  const refreshAlignmentReadiness = useCallback(async () => {
+    const layersApproved = layers.length > 0 && layers.every((l) => l.status === 'approved')
+    if (!layersApproved) {
+      setNodeGenReady(false)
+      onAllApproved?.(false)
+      return
+    }
+    try {
+      const alignment = await fetchAlignment(courseCode)
+      setNodeGenReady(alignment.state.node_gen_ready)
+      onAllApproved?.(alignment.state.node_gen_ready)
+    } catch {
+      setNodeGenReady(false)
+      onAllApproved?.(false)
+    }
+  }, [courseCode, layers, onAllApproved])
+
+  useEffect(() => {
+    if (alignmentRefreshSignal > 0) void refreshAlignmentReadiness()
+  }, [alignmentRefreshSignal, refreshAlignmentReadiness])
+
   useEffect(() => {
     loadLayers()
   }, [loadLayers])
@@ -186,7 +232,9 @@ export default function Stage1Layers({
       setRunningId(layerId)
       const result = await runStage1Layer(courseCode, layerId, execution)
       setLayers(result.layers)
-      onAllApproved?.(result.layers.every((l) => l.status === 'approved'))
+      const layersApproved = result.layers.every((l) => l.status === 'approved')
+      if (layersApproved) void refreshAlignmentReadiness()
+      else onAllApproved?.(false)
       setExpandedId(layerId)
       showToast({
         title: result.success ? 'Layer complete' : 'Layer failed',
@@ -301,12 +349,30 @@ export default function Stage1Layers({
     try {
       const result = await approveStage1Layer(courseCode, layerId)
       setLayers(result.layers)
-      onAllApproved?.(result.allApproved)
+      const layersApproved = result.layers.every((l) => l.status === 'approved')
+      let alignmentReady = false
+      if (layersApproved) {
+        try {
+          const alignment = await fetchAlignment(courseCode)
+          alignmentReady = alignment.state.node_gen_ready
+          setNodeGenReady(alignmentReady)
+          onAllApproved?.(alignmentReady)
+        } catch {
+          setNodeGenReady(false)
+          onAllApproved?.(false)
+        }
+      } else {
+        setNodeGenReady(false)
+        onAllApproved?.(false)
+      }
       showToast({
         title: 'Approved',
-        description: result.allApproved
-          ? 'All Course Architect layers approved. You can proceed to the Node Engine.'
-          : 'Layer approved. Next layer unlocked.',
+        description:
+          layersApproved && alignmentReady
+            ? 'Course Architect complete — alignment active. You can proceed to the Node Engine.'
+            : layersApproved
+              ? 'All six layers approved. Complete Reference Alignment (Step B) to unlock node generation.'
+              : 'Layer approved. Next layer unlocked.',
         variant: 'success',
       })
       return true
@@ -351,10 +417,7 @@ export default function Stage1Layers({
   async function handleApproveLayer6AndContinue() {
     const approved = await handleApprove('layer6-subtopic-architecture', { skipUnsavedCheck: true })
     if (approved) {
-      // Layer 6 is the last layer — there is no next layer to expand. Guide the
-      // SME onward to Reference Alignment (the Course Architect -> Node Engine
-      // transition) instead.
-      onCourseArchitectComplete?.()
+      onAlignmentAutoPropose?.()
     }
   }
 
@@ -380,18 +443,24 @@ export default function Stage1Layers({
     )
   }
 
-  const allApproved = layers.length > 0 && layers.every((l) => l.status === 'approved')
+  const allLayersApproved = layers.length > 0 && layers.every((l) => l.status === 'approved')
+  const architectComplete = allLayersApproved && nodeGenReady
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Course Architect</CardTitle>
         <CardDescription>
-          Course Architect prepares the approved academic structure. Complete all six layers in
-          order — the Node Engine unlocks when every layer is approved.
-          {allApproved && (
+          Complete all six layers in order, then Reference Alignment (Layer 6 Step B) to activate
+          grounding tags — the Node Engine unlocks when alignment is active.
+          {architectComplete && (
             <span className="ml-2 inline-flex items-center gap-1 text-emerald-600">
               <Check className="h-4 w-4" /> Course Architect complete
+            </span>
+          )}
+          {allLayersApproved && !nodeGenReady && (
+            <span className="ml-2 inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+              Step B pending — activate alignment tags
             </span>
           )}
         </CardDescription>
@@ -413,22 +482,12 @@ export default function Stage1Layers({
           const nextLayer = layerIndex >= 0 ? layers[layerIndex + 1] : undefined
           const showContinueToNext =
             layer.status === 'approved' && !!nextLayer && nextLayer.status !== 'approved'
-          // The final layer has no successor — once approved, point the SME to the
-          // next stage (Reference Alignment) rather than leaving a dead end.
-          const showContinueToReferenceAlignment =
-            layer.status === 'approved' && !nextLayer
 
           const actionButtons = (
             <div className="flex flex-wrap gap-2">
               {showContinueToNext && nextLayer && (
                 <Button size="sm" onClick={() => setExpandedId(nextLayer.layerId)}>
                   Continue to Layer {nextLayer.config.order}
-                  <ChevronRight className="ml-2 h-4 w-4" />
-                </Button>
-              )}
-              {showContinueToReferenceAlignment && (
-                <Button size="sm" onClick={() => onCourseArchitectComplete?.()}>
-                  Continue to Reference Alignment
                   <ChevronRight className="ml-2 h-4 w-4" />
                 </Button>
               )}
@@ -679,6 +738,19 @@ export default function Stage1Layers({
                         onSaved={() => loadLayers()}
                         onApproveAndContinue={handleApproveLayer6AndContinue}
                       />
+                      {layer.status === 'approved' && (
+                        <div ref={referenceAlignmentRef} className="scroll-mt-4 border-t border-border pt-4">
+                          <ReferenceAlignmentPanel
+                            embedded
+                            courseCode={courseCode}
+                            autoProposeSignal={alignmentRefreshSignal}
+                            onAlignmentApproved={() => {
+                              void refreshAlignmentReadiness()
+                              onAlignmentApproved?.()
+                            }}
+                          />
+                        </div>
+                      )}
                     </>
                   ) : layer.layerId === 'layer1-intake' &&
                     intake &&
@@ -689,7 +761,10 @@ export default function Stage1Layers({
                     <>
                       <IntakeSummaryView
                         {...intake}
-                        onReferenceUploaded={() => setCoverageRefreshSignal((n) => n + 1)}
+                        onReferenceUploaded={() => {
+                          setCoverageRefreshSignal((n) => n + 1)
+                          onReferenceUploaded?.()
+                        }}
                       />
                       {viewingReportId === layer.layerId && layer.reportMarkdown && (
                         <FormattedReport markdown={layer.reportMarkdown} />

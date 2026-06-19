@@ -1150,6 +1150,9 @@ export interface Node {
   review_priority: NodeReviewPriority;
   /** Human-readable reasons a node landed in `must_review` (empty for can_proceed). */
   review_reasons: string[];
+  /** True when an SME has manually edited prose fields (blocks silent regenerate). */
+  sme_edited?: boolean;
+  sme_edited_at?: string;
   status: NodeEngineStatus;
 }
 
@@ -1318,6 +1321,9 @@ export function parseNode(input: unknown): Node {
   if (divergence !== undefined) node.generator_divergence_note = divergence;
   const grain = optionalString(obj, 'grain_justification');
   if (grain !== undefined) node.grain_justification = grain;
+  if (typeof obj.sme_edited === 'boolean') node.sme_edited = obj.sme_edited;
+  const smeEditedAt = optionalString(obj, 'sme_edited_at');
+  if (smeEditedAt !== undefined) node.sme_edited_at = smeEditedAt;
 
   return node;
 }
