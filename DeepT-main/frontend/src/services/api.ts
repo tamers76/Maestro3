@@ -3219,6 +3219,7 @@ export interface NodeEngineBlueprintObject {
   design_rationale: string;
   estimated_effort_minutes: number;
   addresses_misconception_ids: string[];
+  targets_misconception_id?: string | null;
 }
 
 export interface NodeEngineBlueprint {
@@ -3244,6 +3245,7 @@ export interface BlueprintObjectPatch {
   content_pattern?: string;
   estimated_effort_minutes?: number;
   sequence_order?: number;
+  targets_misconception_id?: string | null;
 }
 
 export async function fetchBlueprint(

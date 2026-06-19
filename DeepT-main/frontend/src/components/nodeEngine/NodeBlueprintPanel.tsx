@@ -38,9 +38,11 @@ interface CloBlueprintGroup {
 const VEHICLE_OPTIONS: BlueprintVehicle[] = [
   'text',
   'structured_visual',
-  'interactive',
+  'pictorial_visual',
   'video',
+  'interactive',
   'simulation',
+  'learning_anchor',
 ]
 
 function Pill({
@@ -441,6 +443,11 @@ function NodeBlueprintCard({
                         {obj.is_primary_evidence_check && (
                           <Pill className="mt-1 bg-amber-500/15 text-amber-700 dark:text-amber-400">
                             <Shield className="h-3 w-3" /> Primary EC
+                          </Pill>
+                        )}
+                        {obj.targets_misconception_id && (
+                          <Pill className="mt-1 bg-violet-500/15 text-violet-700 dark:text-violet-400">
+                            Targets {obj.targets_misconception_id}
                           </Pill>
                         )}
                       </td>

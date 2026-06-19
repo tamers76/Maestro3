@@ -1493,6 +1493,8 @@ export interface BlueprintObject {
   design_rationale: string;
   estimated_effort_minutes: number;
   addresses_misconception_ids: string[];
+  /** When this object is designed to surface/correct one specific misconception. */
+  targets_misconception_id?: string | null;
 }
 
 /** Persisted M8 artifact for one approved node. */
@@ -1513,7 +1515,7 @@ export interface NodeExperienceBlueprint {
 function parseBlueprintObject(input: unknown, context: string): BlueprintObject {
   const obj = asRecord(input, context);
   const family = assertEnum(OBJECT_FAMILIES, obj.object_family, `${context}.object_family`);
-  return {
+  const parsed: BlueprintObject = {
     object_id: requireString(obj, 'object_id', context),
     object_family: family,
     sequence_order: typeof obj.sequence_order === 'number' && Number.isFinite(obj.sequence_order)
@@ -1548,6 +1550,13 @@ function parseBlueprintObject(input: unknown, context: string): BlueprintObject 
         : 0,
     addresses_misconception_ids: optionalStringArray(obj, 'addresses_misconception_ids') ?? [],
   };
+  const targetsMisconceptionId = optionalString(obj, 'targets_misconception_id');
+  if (targetsMisconceptionId !== undefined) {
+    parsed.targets_misconception_id = targetsMisconceptionId;
+  } else if (obj.targets_misconception_id === null) {
+    parsed.targets_misconception_id = null;
+  }
+  return parsed;
 }
 
 export function parseNodeExperienceBlueprint(input: unknown): NodeExperienceBlueprint {

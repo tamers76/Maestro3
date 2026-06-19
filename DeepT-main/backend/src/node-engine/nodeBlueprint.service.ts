@@ -5,8 +5,10 @@
  * a purpose, suggested vehicle, and design rationale. The mandatory primary
  * Evidence Check object (`ec_node_<id>_primary`) is always present and flagged.
  *
- * V1 MVP uses a deterministic projection from the node (testable, no model
- * required). A human approves each blueprint before M9 content-spec work.
+ * V1 uses a deterministic full projection from the node (testable, no model
+ * required): every object the node type and fields warrant — orientation,
+ * explanation, remediation, practice, worked examples, assessment connection,
+ * and the mandatory primary EC. A human approves each blueprint before M9.
  */
 import {
   parseNodeExperienceBlueprint,
@@ -76,15 +78,76 @@ function contentPatternForNodeType(nodeType: NodeType): ContentPattern {
   }
 }
 
+/** Suggest a delivery vehicle from object purpose + node shape (full blueprint — not text-only). */
+function vehicleForExplanation(node: Node, pattern: ContentPattern): Vehicle {
+  switch (node.node_type) {
+    case 'distinction':
+      // Side-by-side contrasts can also work as structured_visual; video is the default
+      // for narrated distinction walkthroughs (golden-node pattern).
+      return pattern === 'comparison' ? 'video' : 'video';
+    case 'procedure':
+    case 'application':
+    case 'judgment':
+    case 'misconception':
+      return 'video';
+    case 'integration':
+      return 'structured_visual';
+    case 'concept':
+    case 'reflection':
+    case 'threshold':
+    case 'bridge':
+    case 'assessment_preparation':
+      return 'text';
+    default:
+      return 'text';
+  }
+}
+
+function vehicleForRemediation(node: Node): Vehicle {
+  if (node.node_type === 'misconception' || node.candidate_misconceptions.length > 0) {
+    return 'interactive';
+  }
+  return 'text';
+}
+
+function vehicleForWorkedExample(_node: Node): Vehicle {
+  return 'video';
+}
+
+function vehicleForPractice(node: Node): Vehicle {
+  if (node.primary_evidence_check_requirement.preferred_evidence_mode === 'simulation_decision') {
+    return 'simulation';
+  }
+  if (node.node_type === 'application' || node.node_type === 'judgment') {
+    return 'interactive';
+  }
+  if (node.node_type === 'distinction') {
+    return 'interactive';
+  }
+  return 'interactive';
+}
+
 function buildObject(
   node: Node,
   partial: Omit<BlueprintObject, 'parent_node_id' | 'kc_ids'>
 ): BlueprintObject {
-  return {
+  const obj: BlueprintObject = {
     ...partial,
     parent_node_id: node.node_id,
     kc_ids: node.kc_ids.length > 0 ? [...node.kc_ids] : [`kc_${node.node_id}`],
   };
+  if (partial.targets_misconception_id === undefined) {
+    delete obj.targets_misconception_id;
+  }
+  return obj;
+}
+
+/** First governed misconception id on the node, when an object should name one target. */
+function primaryMisconceptionTarget(node: Node): string | undefined {
+  const binding = node.misconception_bindings[0]?.misconception_id;
+  if (binding) return binding;
+  const candidate = node.candidate_misconceptions[0]?.candidate_misconception_id;
+  return candidate || undefined;
 }
 
 /**
@@ -128,7 +191,7 @@ export function projectBlueprintFromNode(node: Node): BlueprintObject[] {
       parent_milestone_pack_id: null,
       node_object_purpose: 'explanation',
       milestone_support_purpose: null,
-      suggested_vehicle: 'text',
+      suggested_vehicle: vehicleForExplanation(node, pattern),
       content_pattern: pattern,
       is_primary_evidence_check: false,
       title: `Explain: ${node.knowledge_component}`,
@@ -140,6 +203,7 @@ export function projectBlueprintFromNode(node: Node): BlueprintObject[] {
   );
 
   if (node.node_type === 'misconception' || node.candidate_misconceptions.length > 0) {
+    const targetId = primaryMisconceptionTarget(node);
     objects.push(
       buildObject(node, {
         object_id: `obj_${node.node_id}_remediation`,
@@ -148,7 +212,7 @@ export function projectBlueprintFromNode(node: Node): BlueprintObject[] {
         parent_milestone_pack_id: null,
         node_object_purpose: 'remediation',
         milestone_support_purpose: null,
-        suggested_vehicle: 'text',
+        suggested_vehicle: vehicleForRemediation(node),
         content_pattern: 'challenge_prompt',
         is_primary_evidence_check: false,
         title: 'Address likely misconceptions',
@@ -156,6 +220,7 @@ export function projectBlueprintFromNode(node: Node): BlueprintObject[] {
           'Targeted remediation surfacing traps and confirming probes before the evidence check.',
         estimated_effort_minutes: 6,
         addresses_misconception_ids: misconceptionIds,
+        ...(targetId ? { targets_misconception_id: targetId } : {}),
       })
     );
   }
@@ -169,7 +234,7 @@ export function projectBlueprintFromNode(node: Node): BlueprintObject[] {
         parent_milestone_pack_id: null,
         node_object_purpose: 'worked_example',
         milestone_support_purpose: null,
-        suggested_vehicle: 'text',
+        suggested_vehicle: vehicleForWorkedExample(node),
         content_pattern: 'worked_example',
         is_primary_evidence_check: false,
         title: 'Worked example',
@@ -189,7 +254,7 @@ export function projectBlueprintFromNode(node: Node): BlueprintObject[] {
         parent_milestone_pack_id: null,
         node_object_purpose: 'practice',
         milestone_support_purpose: null,
-        suggested_vehicle: 'interactive',
+        suggested_vehicle: vehicleForPractice(node),
         content_pattern: pattern === 'none' ? 'scenario' : pattern,
         is_primary_evidence_check: false,
         title: 'Guided practice',

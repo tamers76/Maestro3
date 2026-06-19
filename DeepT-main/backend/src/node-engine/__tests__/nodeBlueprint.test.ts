@@ -74,6 +74,77 @@ test('projectBlueprintFromNode assigns purpose and vehicle on every object', () 
   }
 });
 
+test('golden distinction node gets full object sequence when node fields warrant it', () => {
+  const node = minimalNode();
+  const objects = projectBlueprintFromNode(node);
+  const purposes = objects.map((o) => o.node_object_purpose);
+  assert.ok(purposes.includes('orientation'));
+  assert.ok(purposes.includes('explanation'));
+  assert.ok(purposes.includes('remediation'));
+  assert.ok(purposes.includes('practice'));
+  assert.ok(purposes.includes('assessment_connection'));
+  assert.ok(purposes.includes('evidence_check'));
+  assert.equal(objects.length, 6);
+});
+
+test('projectBlueprintFromNode assigns modality-aware vehicles across the sequence', () => {
+  const node = minimalNode();
+  const byPurpose = Object.fromEntries(
+    projectBlueprintFromNode(node).map((o) => [o.node_object_purpose, o])
+  );
+  assert.equal(byPurpose.explanation.suggested_vehicle, 'video');
+  assert.equal(byPurpose.remediation.suggested_vehicle, 'interactive');
+  assert.equal(byPurpose.practice.suggested_vehicle, 'interactive');
+  assert.equal(byPurpose.evidence_check.suggested_vehicle, 'interactive');
+});
+
+test('procedure nodes use video for worked examples', () => {
+  const node = minimalNode({
+    node_type: 'procedure',
+    candidate_misconceptions: [],
+    assessment_connection: '',
+  });
+  const worked = projectBlueprintFromNode(node).find((o) => o.node_object_purpose === 'worked_example');
+  assert.ok(worked);
+  assert.equal(worked!.suggested_vehicle, 'video');
+});
+
+test('practice uses simulation when primary EC mode is simulation_decision', () => {
+  const node = minimalNode({
+    primary_evidence_check_requirement: {
+      ...minimalNode().primary_evidence_check_requirement,
+      preferred_evidence_mode: 'simulation_decision',
+    },
+  });
+  const practice = projectBlueprintFromNode(node).find((o) => o.node_object_purpose === 'practice');
+  assert.ok(practice);
+  assert.equal(practice!.suggested_vehicle, 'simulation');
+});
+
+test('integration nodes suggest structured_visual for explanation', () => {
+  const node = minimalNode({
+    node_type: 'integration',
+    candidate_misconceptions: [],
+    assessment_connection: '',
+  });
+  const explanation = projectBlueprintFromNode(node).find((o) => o.node_object_purpose === 'explanation');
+  assert.ok(explanation);
+  assert.equal(explanation!.suggested_vehicle, 'structured_visual');
+});
+
+test('remediation sets targets_misconception_id only when a misconception exists', () => {
+  const node = minimalNode();
+  const remediation = projectBlueprintFromNode(node).find((o) => o.node_object_purpose === 'remediation');
+  assert.ok(remediation);
+  assert.equal(remediation!.targets_misconception_id, 'cand_1');
+  const noMisc = minimalNode({ candidate_misconceptions: [], misconception_bindings: [], node_type: 'concept' });
+  const objects = projectBlueprintFromNode(noMisc);
+  assert.ok(!objects.some((o) => o.node_object_purpose === 'remediation'));
+  for (const obj of objects) {
+    assert.equal(obj.targets_misconception_id, undefined);
+  }
+});
+
 test('validateBlueprintObjects rejects missing primary EC', () => {
   const node = minimalNode();
   const objects = projectBlueprintFromNode(node).map((o) =>
