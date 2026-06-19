@@ -2756,8 +2756,13 @@ export interface NodeEngineNode {
   risk_classification: NodeEngineRiskClassification[];
   generator_divergence_note?: string;
   grain_justification?: string;
+  /** Review-by-exception triage (Issue 1). Older artifacts may omit these. */
+  review_priority?: NodeEngineReviewPriority;
+  review_reasons?: string[];
   status: NodeEngineLifecycleStatus;
 }
+
+export type NodeEngineReviewPriority = 'must_review' | 'can_proceed';
 
 export type NodeEngineGroundingSource = 'scoped_references' | 'course_level_references' | 'model_only';
 

@@ -4,6 +4,7 @@ import {
   BookOpen,
   Boxes,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   Code2,
@@ -14,8 +15,10 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type {
+  NodeEngineGroundingSource,
   NodeEngineNode,
   NodeEngineNodeSet,
+  NodeEngineReviewPriority,
   NodeEngineRiskClassification,
 } from '@/services/api'
 
@@ -76,35 +79,109 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 /**
- * Why a node should draw SME attention during batch review. Used to triage which
- * nodes need a look before approving an entire CLO. Returns an empty list when the
- * node is clean.
+ * Review-by-exception triage (Issue 1). The backend now derives this on every
+ * node (`review_priority` + `review_reasons`). We trust those when present; for
+ * OLDER artifacts that predate the field we compute a client-side fallback that
+ * mirrors the backend rules (minus the summative rule, which needs assessment
+ * context not available here). Note: `evidence_map[].critical` and generic
+ * "pending misconceptions" are deliberately NOT triggers — they caused the
+ * original over-flagging that flagged every node.
  */
-export function criticalNodeReasons(node: NodeEngineNode): string[] {
+function clientReviewReasons(
+  node: NodeEngineNode,
+  groundingSource?: NodeEngineGroundingSource
+): string[] {
   const reasons: string[] = []
-  if (node.risk_classification.some((r) => r === 'critical' || r === 'high_risk')) {
-    reasons.push('High-risk')
+  const assessmentFacing = Boolean(node.prepares_for_assessment_id)
+
+  if (node.misconception_bindings.some((b) => b.blocks_submission_if_state === 'confirmed')) {
+    reasons.push('Assessment-blocking misconception')
   }
-  if (node.grounding_references.length === 0 || node.grounding_strength === 'weak') {
-    reasons.push('Weak grounding')
+  if (
+    assessmentFacing &&
+    (node.candidate_misconceptions.some((c) => c.severity === 'high') ||
+      node.misconception_bindings.some((b) => b.severity === 'high'))
+  ) {
+    reasons.push('High-severity misconception on assessment node')
   }
-  if (node.misconception_slots === 'pending' && node.candidate_misconceptions.length > 0) {
-    reasons.push('Misconceptions pending')
+  if (node.candidate_misconceptions.some((c) => c.severity === 'high')) {
+    reasons.push('High-severity misconception')
   }
-  if (node.evidence_map?.some((c) => c.critical)) {
-    reasons.push('Critical evidence')
+  if (node.grounding_strength === 'weak' || groundingSource === 'course_level_references') {
+    reasons.push('Weak or thin grounding')
   }
-  return reasons
+  if (
+    node.generator_divergence_note &&
+    (node.risk_classification.includes('critical') || assessmentFacing)
+  ) {
+    reasons.push('Generator uncertainty on high-stakes node')
+  }
+  return Array.from(new Set(reasons))
 }
 
-export function isCriticalNode(node: NodeEngineNode): boolean {
-  return criticalNodeReasons(node).length > 0
+export interface NodeReviewTriage {
+  priority: NodeEngineReviewPriority
+  reasons: string[]
 }
 
-export function NodeCard({ node, index }: { node: NodeEngineNode; index: number }) {
-  const [open, setOpen] = useState(index === 0)
+/** Resolve a node's triage: prefer the backend-derived fields, else the fallback. */
+export function getNodeReviewTriage(
+  node: NodeEngineNode,
+  groundingSource?: NodeEngineGroundingSource
+): NodeReviewTriage {
+  if (node.review_priority) {
+    return { priority: node.review_priority, reasons: node.review_reasons ?? [] }
+  }
+  const reasons = clientReviewReasons(node, groundingSource)
+  return { priority: reasons.length > 0 ? 'must_review' : 'can_proceed', reasons }
+}
+
+export function isMustReviewNode(
+  node: NodeEngineNode,
+  groundingSource?: NodeEngineGroundingSource
+): boolean {
+  return getNodeReviewTriage(node, groundingSource).priority === 'must_review'
+}
+
+/**
+ * Plain-language justification + what the SME should actually check, per triage
+ * reason. Keyed by the EXACT backend reason strings (see
+ * `nodeReviewTriage.service.ts`); unknown reasons fall back to the raw label.
+ */
+const REVIEW_REASON_DETAILS: Record<string, string> = {
+  'Assessment-blocking misconception':
+    'A confirmed misconception on this node can block a learner’s submission. Verify the misconception, what triggers it, and the clearance rule are correct before approving.',
+  'High-severity misconception on assessment node':
+    'This node feeds an assessment and carries a high-severity misconception, so a wrong call here directly affects what’s assessed. Confirm the misconception and how it’s handled are right.',
+  'High-severity misconception':
+    'This node has a high-severity misconception that could seriously derail learning. Check the statement, the suggested trap, and the severity are accurate.',
+  'Weak or thin grounding':
+    'The reference passages backing this node are weak, course-level, or off-topic — “grounded” here may not mean the right sources. Confirm it’s genuinely grounded (see Grounding below) before relying on it.',
+  'Generator uncertainty on high-stakes node':
+    'The generator made a non-standard choice on a high-stakes node (see the divergence note below). Sanity-check the node type and the pedagogy.',
+  'Prepares for a summative assessment':
+    'This is a high-leverage node feeding a summative assessment, so it always gets human eyes. Confirm it’s accurate and well-aligned to the assessment.',
+}
+
+function reviewReasonDetail(reason: string): string {
+  return REVIEW_REASON_DETAILS[reason] ?? reason
+}
+
+export function NodeCard({
+  node,
+  index,
+  groundingSource,
+}: {
+  node: NodeEngineNode
+  index: number
+  groundingSource?: NodeEngineGroundingSource
+}) {
+  const triage = getNodeReviewTriage(node, groundingSource)
+  const mustReview = triage.priority === 'must_review'
+  // Auto-expand must_review nodes (and keep the very first node open); everything
+  // else starts collapsed but stays fully openable.
+  const [open, setOpen] = useState(mustReview || index === 0)
   const ec = node.primary_evidence_check_requirement
-  const attentionReasons = criticalNodeReasons(node)
 
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -115,8 +192,8 @@ export function NodeCard({ node, index }: { node: NodeEngineNode; index: number 
       >
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-primary/10 text-xs font-semibold text-primary">
-              {node.order + 1}
+            <span className="font-semibold text-foreground">
+              Mastery Node {node.order + 1}:
             </span>
             <span className="font-medium">{node.node_title}</span>
             <Pill className={nodeTypeColor()}>{humanize(node.node_type)}</Pill>
@@ -129,13 +206,21 @@ export function NodeCard({ node, index }: { node: NodeEngineNode; index: number 
                 {humanize(r)}
               </Pill>
             ))}
-            {attentionReasons.length > 0 && (
+            {mustReview ? (
               <Pill
-                className="bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                title={attentionReasons.join(' · ')}
+                className="bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                title={triage.reasons.join(' · ')}
               >
                 <AlertTriangle className="h-3 w-3" />
-                Needs review
+                Must review
+              </Pill>
+            ) : (
+              <Pill
+                className="bg-muted text-muted-foreground"
+                title="No blocking signals — open to view, but review is optional."
+              >
+                <CheckCircle2 className="h-3 w-3" />
+                Can proceed · open to view
               </Pill>
             )}
             {node.status === 'approved' && (
@@ -158,6 +243,26 @@ export function NodeCard({ node, index }: { node: NodeEngineNode; index: number 
 
       {open && (
         <div className="space-y-4 border-t border-border px-4 py-4">
+          {mustReview && triage.reasons.length > 0 && (
+            <details className="group rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-sm">
+              <summary className="flex cursor-pointer list-none items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                <div className="flex-1">
+                  <span className="font-medium">Why this needs your review: </span>
+                  {triage.reasons.join(' · ')}
+                </div>
+                <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 transition-transform group-open:rotate-90 dark:text-amber-400" />
+              </summary>
+              <ul className="mt-2 space-y-1.5 border-t border-amber-500/20 pl-6 pt-2">
+                {triage.reasons.map((reason) => (
+                  <li key={reason} className="text-muted-foreground">
+                    <span className="font-medium text-foreground">{reason}: </span>
+                    {reviewReasonDetail(reason)}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Knowledge component">{node.knowledge_component || '—'}</Field>
             <Field label="Node type">{humanize(node.node_type)}</Field>
@@ -275,12 +380,23 @@ export function NodeCard({ node, index }: { node: NodeEngineNode; index: number 
                 {node.grounding_strength ? humanize(node.grounding_strength) : 'Ungrounded'}
               </Pill>
             </div>
+            {node.grounding_strength === 'weak' && node.grounding_references.length > 0 && (
+              <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                Thin grounding: citations were found but are course-level or low-content, so this
+                node reads as weak — review before relying on it.
+              </p>
+            )}
             {node.grounding_references.length > 0 ? (
-              <ul className="mt-1 list-inside list-disc text-sm text-muted-foreground">
-                {node.grounding_references.map((c, i) => (
-                  <li key={`${c.citation}-${i}`}>{c.citation || c.passage_ref}</li>
-                ))}
-              </ul>
+              <details className="mt-1">
+                <summary className="cursor-pointer text-sm font-medium text-primary hover:underline">
+                  Show citations ({node.grounding_references.length})
+                </summary>
+                <ul className="mt-1 list-inside list-disc text-sm text-muted-foreground">
+                  {node.grounding_references.map((c, i) => (
+                    <li key={`${c.citation}-${i}`}>{c.citation || c.passage_ref}</li>
+                  ))}
+                </ul>
+              </details>
             ) : (
               <p className="mt-1 text-sm text-muted-foreground">
                 No grounding references attached (additive — acceptable in V1).
@@ -332,6 +448,9 @@ export default function NodeSetReport({
   )
   const evidenceCheckIds = nodeSet.nodes.map((n) => n.primary_evidence_check_requirement.evidence_check_id)
   const stronglyGrounded = nodeSet.nodes.filter((n) => n.grounding_strength === 'strong').length
+  const groundingSource = nodeSet.grounding_summary?.grounding_source
+  const mustReviewCount = nodeSet.nodes.filter((n) => isMustReviewNode(n, groundingSource)).length
+  const canProceedCount = nodeSet.nodes.length - mustReviewCount
 
   const statusColor =
     nodeSet.status === 'approved'
@@ -386,6 +505,21 @@ export default function NodeSetReport({
 
         {/* At-a-glance flags */}
         <div className="flex flex-wrap gap-2">
+          <Pill
+            className={cn(
+              mustReviewCount > 0
+                ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+            )}
+            title="Review by exception: only must_review nodes need your judgment; can_proceed nodes stay open to view."
+          >
+            {mustReviewCount > 0 ? (
+              <AlertTriangle className="h-3 w-3" />
+            ) : (
+              <CheckCircle2 className="h-3 w-3" />
+            )}
+            {mustReviewCount} need your review · {canProceedCount} can proceed
+          </Pill>
           <Pill className="bg-blue-500/15 text-blue-600 dark:text-blue-400">
             <ListChecks className="h-3 w-3" />
             {evidenceCheckIds.length} evidence checks
@@ -497,7 +631,7 @@ export default function NodeSetReport({
       <div className="space-y-2">
         <h4 className="text-sm font-semibold">Generated nodes ({nodeSet.nodes.length})</h4>
         {nodeSet.nodes.map((node, i) => (
-          <NodeCard key={node.node_id} node={node} index={i} />
+          <NodeCard key={node.node_id} node={node} index={i} groundingSource={groundingSource} />
         ))}
       </div>
 

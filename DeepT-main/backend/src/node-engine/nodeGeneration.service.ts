@@ -70,10 +70,27 @@ import {
   type GroundingSource,
 } from '../services/referenceRetrieval.service.js';
 import { isNeo4jConnected, persistNodeSetGraph } from '../services/neo4j.service.js';
+import { deriveNodeReviewTriage } from './nodeReviewTriage.service.js';
 
 const DEFAULT_SIGNALS: CaptureSignal[] = ['response', 'reasoning', 'confidence'];
 const MIN_GRAIN = 4;
 const MAX_GRAIN = 7;
+
+/**
+ * Minimum top fused `final_score` a scoped grounding must clear to count as
+ * 'strong' (secondary, score-aware lever on top of source + quality gate).
+ *
+ * The fused score is `0.6·semNorm + 0.4·kwNorm + RRF`, min-max normalized within
+ * the candidate pool so a healthy scoped match lands near ~1.0. 0.35 is therefore
+ * comfortably cleared by genuine grounding, but downgrades degenerate retrievals
+ * whose best passage was carried only by the tiny RRF tie-break (≈0.016) or a
+ * negligible signal to 'weak' — i.e. "scoped, but the best match is barely a
+ * match". NOTE: because scores are pool-normalized, this does NOT by itself catch
+ * an off-topic passage that is the best of a bad pool (e.g. the back-of-book index
+ * that scored ~0.82) — that is the structural index/TOC detector's job; this is a
+ * documented secondary safety that flips thin/degenerate grounding to weak.
+ */
+const STRONG_MIN_TOP_SCORE = 0.35;
 
 // ===========================================================================
 // Public types
@@ -565,6 +582,9 @@ export function projectNodeSet(
       misconception_bindings: bindings,
       grounding_references: [],
       risk_classification: [...risk],
+      // Triage is derived AFTER grounding in generateNodeSet(); default safe here.
+      review_priority: 'can_proceed',
+      review_reasons: [],
       status: 'draft',
     };
 
@@ -633,10 +653,29 @@ interface GroundingAggregate {
   /** Best source seen so far (scoped beats course-level beats model_only). */
   source: GroundingSource;
   citations: Set<string>;
+  /** Citations that cleared the Issue 2 quality gate (summed across nodes/prompt). */
+  qualityPassCount: number;
+  /** Candidate passages dropped by the quality gate (summed). */
+  qualityFailCount: number;
+  /** True when at least one scoped retrieval found hits that were all thin/junk. */
+  scopedThin: boolean;
+  /** True when at least one scoped retrieval succeeded but its best passage failed
+   * the score-aware strong threshold (scoped, but low-relevance → weak). */
+  scopedLowRelevance: boolean;
 }
 
 function newGroundingAggregate(): GroundingAggregate {
-  return { retrieval_called: false, scopedCount: 0, courseLevelCount: 0, source: 'model_only', citations: new Set() };
+  return {
+    retrieval_called: false,
+    scopedCount: 0,
+    courseLevelCount: 0,
+    source: 'model_only',
+    citations: new Set(),
+    qualityPassCount: 0,
+    qualityFailCount: 0,
+    scopedThin: false,
+    scopedLowRelevance: false,
+  };
 }
 
 const SOURCE_RANK: Record<GroundingSource, number> = {
@@ -673,13 +712,24 @@ async function groundNodes(
         passage_ref: p.citation,
       }));
       node.grounding_references = citations;
-      // "strong" only when CLO/subtopic-scoped passages back the node; course-level
-      // fallback hits are real citations but a weaker (broad) grounding signal.
-      node.grounding_strength = grounded.source === 'scoped_references' && citations.length > 0 ? 'strong' : 'weak';
+      // Issue 2 — quality-aware strength. "strong" requires ALL of: a CLO/subtopic
+      // SCOPED source, >=1 quality-passing citation, AND a top fused score that
+      // clears STRONG_MIN_TOP_SCORE (score-aware, secondary lever). Course-level
+      // fallback hits, scoped hits that were all thin/junk (filtered to empty), and
+      // scoped-but-low-relevance hits are all "weak": "strong" must mean "the RIGHT
+      // citations were found", not merely "found something".
+      const scopedAndSubstantive =
+        grounded.source === 'scoped_references' && grounded.quality_pass_count > 0;
+      const clearsScore = grounded.top_score >= STRONG_MIN_TOP_SCORE;
+      node.grounding_strength = scopedAndSubstantive && clearsScore ? 'strong' : 'weak';
+      if (scopedAndSubstantive && !clearsScore) agg.scopedLowRelevance = true;
 
       agg.scopedCount += grounded.scopedCount;
       agg.courseLevelCount += grounded.courseLevelCount;
       agg.source = promoteSource(agg.source, grounded.source);
+      agg.qualityPassCount += grounded.quality_pass_count;
+      agg.qualityFailCount += grounded.quality_fail_count;
+      if (grounded.scoped_filtered_out) agg.scopedThin = true;
       for (const c of grounded.citations) agg.citations.add(c);
     } catch {
       // Grounding is additive — never block node generation on retrieval errors.
@@ -698,11 +748,22 @@ function buildGroundingSummary(agg: GroundingAggregate): NodeSetGroundingSummary
     note = 'Grounding was not run for this node-set.';
   } else if (agg.source === 'scoped_references') {
     note = `Grounded on ${agg.scopedCount} CLO/subtopic-scoped reference passage(s) — ${citationsCount} citation(s).`;
+    if (agg.qualityFailCount > 0) {
+      note += ` ${agg.qualityFailCount} thin/low-content passage(s) were filtered out by the citation quality gate.`;
+    }
+    if (agg.scopedLowRelevance) {
+      note +=
+        ' Some node(s) are scoped but LOW-RELEVANCE (best passage below the strong-grounding score floor), ' +
+        'so they were downgraded to weak grounding — review whether the references actually cover these nodes.';
+    }
   } else if (agg.source === 'course_level_references') {
     note =
-      `Scoped retrieval returned nothing; used the course-level safety net ` +
+      (agg.scopedThin
+        ? `Scoped retrieval returned only thin/low-quality passages (filtered out); `
+        : `Scoped retrieval returned nothing; `) +
+      `used the course-level safety net ` +
       `(${agg.courseLevelCount} passage(s), ${citationsCount} citation(s)). ` +
-      `Run Reference Alignment (Course Architect Layer 7) to tag chunks to this subtopic for precise grounding.`;
+      `Run Reference Alignment (Course Architect Layer 7) to tag substantive chunks to this subtopic for precise grounding.`;
   } else {
     note =
       'No reference passages were retrieved (model-only). Node generation is not academically approvable ' +
@@ -801,6 +862,16 @@ export async function generateNodeSet(
       agg.scopedCount += grounded.scopedCount;
       agg.courseLevelCount += grounded.courseLevelCount;
       agg.source = promoteSource(agg.source, grounded.source);
+      agg.qualityPassCount += grounded.quality_pass_count;
+      agg.qualityFailCount += grounded.quality_fail_count;
+      if (grounded.scoped_filtered_out) agg.scopedThin = true;
+      if (
+        grounded.source === 'scoped_references' &&
+        grounded.quality_pass_count > 0 &&
+        grounded.top_score < STRONG_MIN_TOP_SCORE
+      ) {
+        agg.scopedLowRelevance = true;
+      }
       for (const c of grounded.citations) agg.citations.add(c);
     } catch {
       groundingBlock = '';
@@ -829,6 +900,20 @@ export async function generateNodeSet(
     await groundNodes(courseCode, context, nodeSet.nodes, agg);
   }
   nodeSet.grounding_summary = buildGroundingSummary(agg);
+
+  // Issue 1 — derive review-by-exception triage from the (now grounded) signals.
+  const assessmentsById = new Map(
+    context.connected_assessments.map((a) => [a.assessment_id, a] as const)
+  );
+  const triageContext = {
+    groundingSource: nodeSet.grounding_summary.grounding_source,
+    assessmentsById,
+  };
+  for (const node of nodeSet.nodes) {
+    const triage = deriveNodeReviewTriage(node, triageContext);
+    node.review_priority = triage.review_priority;
+    node.review_reasons = triage.review_reasons;
+  }
 
   if (persist) {
     await saveNodeSetArtifact(courseCode, subtopicId, nodeSet);

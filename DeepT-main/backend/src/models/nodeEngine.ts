@@ -151,6 +151,12 @@ export type CheckStatus = (typeof CHECK_STATUSES)[number];
 export const REVIEW_PRIORITIES = ['standard', 'recommended', 'required', 'urgent'] as const;
 export type ReviewPriority = (typeof REVIEW_PRIORITIES)[number];
 
+/** M7 review-by-exception triage bucket (Issue 1). A `must_review` node needs SME
+ * judgment before approval; a `can_proceed` node is visible/openable but not
+ * gating. Distinct from the Step 9 ValidationResult `ReviewPriority` vocabulary. */
+export const NODE_REVIEW_PRIORITIES = ['must_review', 'can_proceed'] as const;
+export type NodeReviewPriority = (typeof NODE_REVIEW_PRIORITIES)[number];
+
 /** V1 uses `course_only`; the wider scope vocabulary is reserved for later. */
 export const REUSE_SCOPES = [
   'course_only',
@@ -1083,6 +1089,12 @@ export interface Node {
   risk_classification: RiskClassification[];
   generator_divergence_note?: string;
   grain_justification?: string;
+  // --- Review-by-exception triage (Issue 1) ---
+  /** Whether the SME must review this node (must_review) or may skip it
+   * (can_proceed). Defaults to `can_proceed` when parsing older artifacts. */
+  review_priority: NodeReviewPriority;
+  /** Human-readable reasons a node landed in `must_review` (empty for can_proceed). */
+  review_reasons: string[];
   status: NodeEngineStatus;
 }
 
@@ -1227,6 +1239,12 @@ export function parseNode(input: unknown): Node {
     misconception_bindings: bindings,
     grounding_references: parseCitations(obj.grounding_references, 'Node'),
     risk_classification: riskClassification,
+    // Default to can_proceed/[] for backward compat with artifacts written before
+    // review-by-exception triage existed (Issue 1).
+    review_priority: isEnumMember(NODE_REVIEW_PRIORITIES, obj.review_priority)
+      ? obj.review_priority
+      : 'can_proceed',
+    review_reasons: optionalStringArray(obj, 'review_reasons') ?? [],
     status: assertEnum(NODE_ENGINE_STATUSES, obj.status, 'Node.status'),
   };
 

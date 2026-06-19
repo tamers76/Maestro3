@@ -2,17 +2,32 @@ import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 import { readFileSync } from 'fs';
 
+/**
+ * Light, lossless normalization of raw PDF text (Issue 2): strip form-feed page
+ * breaks, normalize line endings, and collapse runs of blank lines / trailing
+ * spaces. This makes the downstream paragraph/heading split (referenceChunking)
+ * cleaner without changing wording. Content filtering is the chunker's job.
+ */
+export function normalizePdfText(text: string): string {
+  return (text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\f/g, '\n') // form-feed page break -> paragraph boundary
+    .replace(/[ \t]+\n/g, '\n') // trailing whitespace on a line
+    .replace(/\n{3,}/g, '\n\n'); // collapse repeated blank lines
+}
+
 // Extract text from PDF file
 export async function extractTextFromPDF(filePath: string): Promise<string> {
   const buffer = readFileSync(filePath);
   const data = await pdfParse(buffer);
-  return data.text;
+  return normalizePdfText(data.text);
 }
 
 // Extract text from PDF buffer
 export async function extractTextFromPDFBuffer(buffer: Buffer): Promise<string> {
   const data = await pdfParse(buffer);
-  return data.text;
+  return normalizePdfText(data.text);
 }
 
 // Extract text from DOCX file

@@ -22,12 +22,13 @@ import {
   fetchSubtopicArchitecture,
   generateNodeSet,
   AcademicApprovalRequiredError,
+  type NodeEngineGroundingSource,
   type NodeEngineNode,
   type NodeEngineNodeSet,
   type SubtopicArchitectureResponse,
 } from '@/services/api'
 import { NODE_ENGINE_LAYER_MAP, type NodeEngineLayer } from './nodeEngineLayers'
-import { NodeCard, isCriticalNode } from './NodeSetReport'
+import { NodeCard, isMustReviewNode } from './NodeSetReport'
 
 /**
  * Maestro Node Engine — operational layer workflow.
@@ -241,7 +242,7 @@ export default function NodeEnginePanel({ courseCode }: { courseCode: string }) 
     } else {
       showToast({
         title: `Nodes generated for ${cloId}`,
-        description: `Draft node sets ready for ${group.subtopics.length} subtopic(s). Review critical nodes, then approve.`,
+        description: `Draft node sets ready for ${group.subtopics.length} subtopic(s). Review the must-review nodes, then approve.`,
         variant: 'success',
       })
     }
@@ -479,6 +480,7 @@ interface FlatNodeMatch {
   node: NodeEngineNode
   cloId: string
   subtopicTitle: string
+  groundingSource?: NodeEngineGroundingSource
 }
 
 function Pill({ className, children }: { className?: string; children: React.ReactNode }) {
@@ -541,7 +543,12 @@ function Layer1Body({
                 n.node_title.toLowerCase().includes(trimmedQuery) ||
                 n.knowledge_component.toLowerCase().includes(trimmedQuery)
             )
-            .map((node) => ({ node, cloId: group.clo_id, subtopicTitle: st.title }))
+            .map((node) => ({
+              node,
+              cloId: group.clo_id,
+              subtopicTitle: st.title,
+              groundingSource: ns.grounding_summary?.grounding_source,
+            }))
         })
       )
     : []
@@ -550,9 +557,13 @@ function Layer1Body({
     <div className="space-y-4">
       <p className="rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">
         Generate all nodes for a whole CLO in one click, review the subtopics grouped below, then
-        approve the CLO. Nodes that need a closer look (high-risk, weak grounding, pending
-        misconceptions, or a critical evidence criterion) are flagged{' '}
-        <span className="font-medium text-amber-600 dark:text-amber-400">Needs review</span>.
+        approve the CLO. Review by exception: only the nodes that need your judgment (assessment-blocking
+        or high-severity misconceptions, weak/thin grounding, generator uncertainty, or summative prep)
+        are flagged{' '}
+        <span className="font-medium text-amber-700 dark:text-amber-400">Must review</span>. Every other
+        node is marked{' '}
+        <span className="font-medium text-foreground">Can proceed</span> — still fully open to view, just
+        not gating.
       </p>
 
       {/* Whole-course generation: kick off every CLO's subtopics in one run.
@@ -606,12 +617,16 @@ function Layer1Body({
           <p className="text-xs text-muted-foreground">
             {searchMatches.length} node(s) match “{query.trim()}”.
           </p>
-          {searchMatches.map(({ node, cloId, subtopicTitle }) => (
+          {searchMatches.map(({ node, cloId, subtopicTitle, groundingSource }) => (
             <div key={node.node_id}>
               <p className="mb-1 text-xs text-muted-foreground">
                 {cloId} · {subtopicTitle}
               </p>
-              <NodeCard node={node} index={isCriticalNode(node) ? 0 : 1} />
+              <NodeCard
+                node={node}
+                index={isMustReviewNode(node, groundingSource) ? 0 : 1}
+                groundingSource={groundingSource}
+              />
             </div>
           ))}
         </div>
@@ -662,7 +677,16 @@ function CloGroupCard({
   const generatedCount = entries.filter((e) => e.nodeSet).length
   const approvedCount = entries.filter((e) => e.nodeSet?.status === 'approved').length
   const allNodes = entries.flatMap((e) => e.nodeSet?.nodes ?? [])
-  const criticalCount = allNodes.filter(isCriticalNode).length
+  // Count must_review vs can_proceed using each set's own grounding source.
+  const mustReviewCount = entries.reduce(
+    (sum, e) =>
+      sum +
+      (e.nodeSet?.nodes ?? []).filter((n) =>
+        isMustReviewNode(n, e.nodeSet?.grounding_summary?.grounding_source)
+      ).length,
+    0
+  )
+  const canProceedCount = allNodes.length - mustReviewCount
   const pendingApproval = generatedCount > approvedCount
 
   return (
@@ -695,13 +719,13 @@ function CloGroupCard({
           {allNodes.length > 0 && (
             <Pill
               className={cn(
-                criticalCount > 0
-                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                  : 'bg-muted text-muted-foreground'
+                mustReviewCount > 0
+                  ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                  : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
               )}
             >
               <AlertTriangle className="h-3 w-3" />
-              {criticalCount} need review
+              {mustReviewCount} need your review · {canProceedCount} can proceed
             </Pill>
           )}
         </div>
@@ -743,13 +767,17 @@ function CloGroupCard({
           start expanded so they draw the eye first. */}
       {generatedCount > 0 && (
         <div className="space-y-2 border-t border-border px-4 py-3">
-          {entries.map(({ subtopic, nodeSet }) => {
+          {entries.map(({ subtopic, nodeSet }, subIndex) => {
             const nodes = nodeSet?.nodes ?? []
-            const subCritical = nodes.filter(isCriticalNode).length
+            const subGroundingSource = nodeSet?.grounding_summary?.grounding_source
+            const subMustReview = nodes.filter((n) => isMustReviewNode(n, subGroundingSource)).length
             return (
               <details key={subtopic.subtopic_id} className="rounded-md border border-border">
                 <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-sm">
-                  <span className="font-medium">{subtopic.title}</span>
+                  <span className="font-medium">
+                    <span className="text-muted-foreground">ST{subIndex + 1}:</span>{' '}
+                    {subtopic.title}
+                  </span>
                   {nodeSet ? (
                     <>
                       <Pill className="bg-muted text-muted-foreground">
@@ -783,9 +811,9 @@ function CloGroupCard({
                             : 'Ungrounded'}
                         </Pill>
                       )}
-                      {subCritical > 0 && (
-                        <Pill className="bg-amber-500/15 text-amber-600 dark:text-amber-400">
-                          <AlertTriangle className="h-3 w-3" /> {subCritical} need review
+                      {subMustReview > 0 && (
+                        <Pill className="bg-amber-500/15 text-amber-700 dark:text-amber-400">
+                          <AlertTriangle className="h-3 w-3" /> {subMustReview} need your review
                         </Pill>
                       )}
                     </>
@@ -799,7 +827,8 @@ function CloGroupCard({
                       <NodeCard
                         key={node.node_id}
                         node={node}
-                        index={isCriticalNode(node) ? 0 : 1}
+                        index={isMustReviewNode(node, subGroundingSource) ? 0 : 1}
+                        groundingSource={subGroundingSource}
                       />
                     ))}
                   </div>

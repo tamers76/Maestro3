@@ -11,7 +11,7 @@
     "db:build-vector-index": "tsx src/db/migrate.ts --vector",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "test": "node --import tsx --test src/node-engine/__tests__/phase0.test.ts src/node-engine/__tests__/stage1Adapter.test.ts src/node-engine/__tests__/nodeGeneration.test.ts src/node-engine/__tests__/referenceGrounding.test.ts src/node-engine/__tests__/referenceAnchoringV1.test.ts src/node-engine/__tests__/referenceRepo.pgvector.test.ts src/node-engine/__tests__/outboxRepo.poison.test.ts"
+    "test": "node --import tsx --test src/node-engine/__tests__/phase0.test.ts src/node-engine/__tests__/stage1Adapter.test.ts src/node-engine/__tests__/nodeGeneration.test.ts src/node-engine/__tests__/referenceGrounding.test.ts src/node-engine/__tests__/referenceQuality.test.ts src/node-engine/__tests__/nodeReviewTriage.test.ts src/node-engine/__tests__/referenceAnchoringV1.test.ts src/node-engine/__tests__/referenceRepo.pgvector.test.ts src/node-engine/__tests__/outboxRepo.poison.test.ts"
   },
   "dependencies": {
     "archiver": "^7.0.0",

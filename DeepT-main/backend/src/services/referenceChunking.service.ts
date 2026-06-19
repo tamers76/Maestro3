@@ -9,6 +9,8 @@
  * heuristic that is good enough for sizing chunks.
  */
 
+import { isJunkLine, isJunkHeading, passesCitationQualityGate } from './referenceQuality.service.js';
+
 const CHARS_PER_TOKEN = 4;
 const TARGET_TOKENS = 400;
 const MIN_TOKENS = 120;
@@ -61,7 +63,14 @@ function splitIntoBlocks(text: string): { text: string; heading?: string }[] {
       flush();
       continue;
     }
+    // Issue 2: drop structural noise (bare page numbers, TOC dot-leaders, index
+    // fragments, repeated-token artifacts) before it can pollute a chunk.
+    if (isJunkLine(line)) {
+      continue;
+    }
     if (looksLikeHeading(line)) {
+      // Don't attach a junk heading; skip noise that merely looks heading-shaped.
+      if (isJunkHeading(line)) continue;
       flush();
       currentHeading = line.trim();
       continue;
@@ -130,7 +139,10 @@ export function chunkText(text: string): RawChunk[] {
 
   if (buffer.trim()) pushChunk(buffer, heading);
 
-  return chunks;
+  // Issue 2: drop any produced chunk whose assembled text is still too thin /
+  // junky to stand as a citation. Sequence ids may now have gaps — that is fine,
+  // chunk_id only needs to be unique within the document.
+  return chunks.filter((c) => passesCitationQualityGate(c.text));
 }
 
 /** Build a traceable citation string for a chunk. */

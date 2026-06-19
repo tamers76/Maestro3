@@ -13,6 +13,7 @@ import * as referenceRepo from '../db/repos/referenceRepo.js';
 import { embedQuery } from './embedding.service.js';
 import { getStoreForBackend, type RetrieveScope } from './referenceStore.service.js';
 import { keywordSearch, type KeywordSearchResult } from './keywordSearch.service.js';
+import { passesCitationQualityGate } from './referenceQuality.service.js';
 
 export interface RetrieveOptions {
   scope?: RetrieveScope;
@@ -21,6 +22,21 @@ export interface RetrieveOptions {
 }
 
 const DEFAULT_TOP_N = 6;
+
+/**
+ * Conservative default relevance FLOOR applied to the scoped grounding path (and
+ * its course-level safety net) when the caller does not pass an explicit minScore.
+ *
+ * The fused `final_score` is `0.6·semNorm + 0.4·kwNorm + RRF`, where semNorm/kwNorm
+ * are min-max normalized within the candidate pool (so the pool's best candidate is
+ * ~1.0) and the RRF term is tiny (<= ~0.016). A 0.12 floor therefore only removes
+ * the long tail of candidates carried almost entirely by the RRF tie-break or a
+ * negligible normalized signal; it NEVER drops a genuinely relevant top passage, so
+ * it cannot wipe out a legitimately-grounded course. Topicality (e.g. the off-topic
+ * back-of-book index that still scores high) is handled structurally by the citation
+ * quality gate and by the score-aware grounding-strength check — NOT by this floor.
+ */
+export const DEFAULT_SCOPED_MIN_SCORE = 0.12;
 
 // Hybrid-fusion weights (semantic-leaning start) + RRF constant.
 const SEMANTIC_WEIGHT = 0.6;
@@ -139,19 +155,36 @@ export function fuseHybrid(input: HybridFusionInput): RetrievedChunk[] {
  * retrieveReferenceChunks, so they automatically gain multi-signal ranking while
  * keeping their existing return shapes + scope/fallback semantics.
  */
-export async function hybridRetrieve(
+export interface HybridRetrieveResult {
+  chunks: RetrievedChunk[];
+  /** Distinct in-scope candidate chunks considered (pre quality-gate). */
+  candidateCount: number;
+  /** Candidates that passed the minimum-content citation quality gate. */
+  qualityPassCount: number;
+  /** Candidates dropped by the quality gate (thin/junk fragments). */
+  qualityFailCount: number;
+}
+
+export async function hybridRetrieveDetailed(
   courseCode: string,
   query: string,
   options: RetrieveOptions = {}
-): Promise<RetrievedChunk[]> {
+): Promise<HybridRetrieveResult> {
   const { scope, topN = DEFAULT_TOP_N, minScore } = options;
 
+  const empty: HybridRetrieveResult = {
+    chunks: [],
+    candidateCount: 0,
+    qualityPassCount: 0,
+    qualityFailCount: 0,
+  };
+
   const docCount = (await referenceRepo.listDocuments(courseCode)).length;
-  if (docCount === 0) return [];
-  if (!query.trim()) return [];
+  if (docCount === 0) return empty;
+  if (!query.trim()) return empty;
 
   const queryVector = await embedQuery(query);
-  if (queryVector.length === 0) return [];
+  if (queryVector.length === 0) return empty;
 
   const poolSize = Math.max(topN * CANDIDATE_POOL_MULTIPLIER, MIN_CANDIDATE_POOL);
   const store = getStoreForBackend('postgres');
@@ -159,22 +192,55 @@ export async function hybridRetrieve(
 
   // Resolve candidates to full chunks (scope already applied by store.query).
   const candidateChunks = await referenceRepo.getChunksByIds(semanticHits.map((h) => h.chunk_id));
-  const byId = new Map<string, ReferenceChunk>();
-  for (const c of candidateChunks) byId.set(c.chunk_id, c);
 
-  // BM25 over the SAME scope-filtered candidate set.
+  // Issue 2: minimum-content CITATION gate. A thin/fragment passage can never
+  // become a citation, so drop junk candidates BEFORE ranking/slicing — this
+  // prevents noise from occupying top-N slots and pushing out real passages. If
+  // every candidate fails, retrieval returns empty and the honest course-level /
+  // model-only fallback path takes over.
+  const passingChunks = candidateChunks.filter((c) => passesCitationQualityGate(c.text));
+  const qualityFailCount = candidateChunks.length - passingChunks.length;
+  const passingIds = new Set(passingChunks.map((c) => c.chunk_id));
+
+  const byId = new Map<string, ReferenceChunk>();
+  for (const c of passingChunks) byId.set(c.chunk_id, c);
+
+  const filteredSemanticHits = semanticHits.filter((h) => passingIds.has(h.chunk_id));
+
+  // BM25 over the SAME scope-filtered, quality-passing candidate set.
   const keyword = keywordSearch(
     query,
-    candidateChunks.map((c) => ({ chunk_id: c.chunk_id, text: c.text }))
+    passingChunks.map((c) => ({ chunk_id: c.chunk_id, text: c.text }))
   );
 
-  return fuseHybrid({ semanticHits, keyword, chunkById: byId, topN, minScore });
+  const chunks = fuseHybrid({
+    semanticHits: filteredSemanticHits,
+    keyword,
+    chunkById: byId,
+    topN,
+    minScore,
+  });
+
+  return {
+    chunks,
+    candidateCount: candidateChunks.length,
+    qualityPassCount: passingChunks.length,
+    qualityFailCount,
+  };
+}
+
+export async function hybridRetrieve(
+  courseCode: string,
+  query: string,
+  options: RetrieveOptions = {}
+): Promise<RetrievedChunk[]> {
+  return (await hybridRetrieveDetailed(courseCode, query, options)).chunks;
 }
 
 /**
  * Retrieve the most relevant reference passages for a query, optionally scoped
  * to a CLO or subtopic. Returns hits with traceable citations. Backed by hybrid
- * (semantic + keyword) retrieval.
+ * (semantic + keyword) retrieval, with the Issue 2 citation quality gate applied.
  */
 export async function retrieveReferenceChunks(
   courseCode: string,
@@ -224,6 +290,29 @@ export interface GroundingWithFallback {
   /** Hits returned by the unscoped course-level fallback (0 when scoped already succeeded). */
   courseLevelCount: number;
   source: GroundingSource;
+  /** Quality-passing citations behind the passages actually used (Issue 2). */
+  quality_pass_count: number;
+  /** Candidate passages dropped by the citation quality gate (Issue 2). */
+  quality_fail_count: number;
+  /** True when the scoped query DID return hits but they were all filtered out as
+   * thin/junk — i.e. "scoped but thin". Lets callers flag weak grounding even
+   * when a course-level fallback then succeeded. */
+  scoped_filtered_out: boolean;
+  /** Highest fused final_score among the passages actually used (0 when none).
+   * Lets callers gate grounding-strength on real relevance, not just presence. */
+  top_score: number;
+  /** Median fused final_score among the passages actually used (0 when none). */
+  median_score: number;
+}
+
+/** Top + median fused final_score over a ranked passage list (0/0 when empty). */
+function scoreStats(chunks: RetrievedChunk[]): { top: number; median: number } {
+  if (chunks.length === 0) return { top: 0, median: 0 };
+  const scores = chunks.map((c) => c.final_score).sort((a, b) => b - a);
+  const top = scores[0];
+  const mid = Math.floor(scores.length / 2);
+  const median = scores.length % 2 === 0 ? (scores[mid - 1] + scores[mid]) / 2 : scores[mid];
+  return { top, median };
 }
 
 /**
@@ -240,27 +329,50 @@ export async function buildGroundedContextWithFallback(
   options: RetrieveOptions = {}
 ): Promise<GroundingWithFallback> {
   const hasScope = Boolean(options.scope?.cloId || options.scope?.subtopicId);
+  // Apply a conservative relevance floor by default (caller can override / disable
+  // by passing an explicit minScore). See DEFAULT_SCOPED_MIN_SCORE for reasoning.
+  const minScore = options.minScore ?? DEFAULT_SCOPED_MIN_SCORE;
 
   let scopedCount = 0;
+  let scopedFilteredOut = false;
   if (hasScope) {
-    const scoped = await retrieveReferenceChunks(courseCode, query, options);
-    scopedCount = scoped.length;
+    const scoped = await hybridRetrieveDetailed(courseCode, query, { ...options, minScore });
+    scopedCount = scoped.chunks.length;
+    // Scoped retrieval found candidates but the quality gate removed them all.
+    scopedFilteredOut = scoped.candidateCount > 0 && scoped.qualityPassCount === 0;
     if (scopedCount > 0) {
-      const built = contextFromChunks(scoped);
-      return { ...built, scopedCount, courseLevelCount: 0, source: 'scoped_references' };
+      const built = contextFromChunks(scoped.chunks);
+      const stats = scoreStats(scoped.chunks);
+      return {
+        ...built,
+        scopedCount,
+        courseLevelCount: 0,
+        source: 'scoped_references',
+        quality_pass_count: scoped.qualityPassCount,
+        quality_fail_count: scoped.qualityFailCount,
+        scoped_filtered_out: false,
+        top_score: stats.top,
+        median_score: stats.median,
+      };
     }
   }
 
   // Course-level fallback (no scope filter).
-  const courseOpts: RetrieveOptions = { topN: options.topN, minScore: options.minScore };
-  const courseLevel = await retrieveReferenceChunks(courseCode, query, courseOpts);
-  const courseLevelCount = courseLevel.length;
-  const built = contextFromChunks(courseLevel);
+  const courseOpts: RetrieveOptions = { topN: options.topN, minScore };
+  const courseLevel = await hybridRetrieveDetailed(courseCode, query, courseOpts);
+  const courseLevelCount = courseLevel.chunks.length;
+  const built = contextFromChunks(courseLevel.chunks);
+  const stats = scoreStats(courseLevel.chunks);
   return {
     ...built,
     scopedCount,
     courseLevelCount,
     source: courseLevelCount > 0 ? 'course_level_references' : 'model_only',
+    quality_pass_count: courseLevel.qualityPassCount,
+    quality_fail_count: courseLevel.qualityFailCount,
+    scoped_filtered_out: scopedFilteredOut,
+    top_score: stats.top,
+    median_score: stats.median,
   };
 }
 
