@@ -132,9 +132,15 @@ function buildCloGroups(arch: SubtopicArchitectureResponse | null): CloGroup[] {
 export default function NodeEnginePanel({
   courseCode,
   alignmentFetchSignal = 0,
+  soloLayer,
+  onNavigateLayer,
 }: {
   courseCode: string
   alignmentFetchSignal?: number
+  /** Wizard mode: render ONLY this layer as a focused step. */
+  soloLayer?: number
+  /** Wizard mode: forward navigation routes instead of expanding in-place. */
+  onNavigateLayer?: (layer: number) => void
 }) {
   const { role } = useRole()
 
@@ -866,43 +872,54 @@ export default function NodeEnginePanel({
     }
   }
 
+  const solo = typeof soloLayer === 'number'
+  const visibleLayers = solo
+    ? NODE_ENGINE_LAYER_MAP.filter((l) => l.layer === soloLayer)
+    : NODE_ENGINE_LAYER_MAP
+  const goToLayer = (n: number) => {
+    if (onNavigateLayer) onNavigateLayer(n)
+    else setExpandedLayer(n)
+  }
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-lg">
-          <Boxes className="h-5 w-5" />
-          Maestro Node Engine
-        </CardTitle>
-        <CardDescription>
-          Course Architect prepares the approved academic structure. The Node Engine turns each
-          approved subtopic into governed adaptive learning nodes for{' '}
-          <span className="font-mono">{courseCode}</span>. Approve each layer to unlock the next.
-          {layer1Approved && (
-            <span className="ml-2 inline-flex items-center gap-1 text-emerald-600">
-              <Check className="h-4 w-4" /> Layer 1 approved
-            </span>
-          )}
-          {layer2Approved && (
-            <span className="ml-2 inline-flex items-center gap-1 text-emerald-600">
-              <Check className="h-4 w-4" /> Layer 2 approved
-            </span>
-          )}
-          {layer3Approved && (
-            <span className="ml-2 inline-flex items-center gap-1 text-emerald-600">
-              <Check className="h-4 w-4" /> Layer 3 approved
-            </span>
-          )}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
+    <Card className={cn(solo && 'border-0 bg-transparent shadow-none')}>
+      {!solo && (
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Boxes className="h-5 w-5" />
+            Maestro Node Engine
+          </CardTitle>
+          <CardDescription>
+            Course Architect prepares the approved academic structure. The Node Engine turns each
+            approved subtopic into governed adaptive learning nodes for{' '}
+            <span className="font-mono">{courseCode}</span>. Approve each layer to unlock the next.
+            {layer1Approved && (
+              <span className="ml-2 inline-flex items-center gap-1 text-emerald-600">
+                <Check className="h-4 w-4" /> Layer 1 approved
+              </span>
+            )}
+            {layer2Approved && (
+              <span className="ml-2 inline-flex items-center gap-1 text-emerald-600">
+                <Check className="h-4 w-4" /> Layer 2 approved
+              </span>
+            )}
+            {layer3Approved && (
+              <span className="ml-2 inline-flex items-center gap-1 text-emerald-600">
+                <Check className="h-4 w-4" /> Layer 3 approved
+              </span>
+            )}
+          </CardDescription>
+        </CardHeader>
+      )}
+      <CardContent className={cn('space-y-3', solo && 'p-0')}>
         {archLoading ? (
           <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading approved subtopics…
           </div>
         ) : (
-          NODE_ENGINE_LAYER_MAP.map((layer) => {
+          visibleLayers.map((layer) => {
             const status = layerStatus(layer)
-            const open = expandedLayer === layer.layer
+            const open = solo ? layer.layer === soloLayer : expandedLayer === layer.layer
             return (
               <div
                 key={layer.layer}
@@ -916,7 +933,10 @@ export default function NodeEnginePanel({
                 <button
                   type="button"
                   className="flex w-full items-start justify-between gap-3 p-4 text-left"
-                  onClick={() => setExpandedLayer(open ? null : layer.layer)}
+                  onClick={() => {
+                    if (solo) return
+                    setExpandedLayer(open ? null : layer.layer)
+                  }}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -939,11 +959,12 @@ export default function NodeEnginePanel({
                     <p className="mt-1 text-sm text-muted-foreground">{layer.job}</p>
                     <p className="text-xs text-muted-foreground">Output: {layer.output}</p>
                   </div>
-                  {open ? (
-                    <ChevronDown className="h-5 w-5 shrink-0" />
-                  ) : (
-                    <ChevronRight className="h-5 w-5 shrink-0" />
-                  )}
+                  {!solo &&
+                    (open ? (
+                      <ChevronDown className="h-5 w-5 shrink-0" />
+                    ) : (
+                      <ChevronRight className="h-5 w-5 shrink-0" />
+                    ))}
                 </button>
 
                 {open && (
@@ -998,7 +1019,7 @@ export default function NodeEnginePanel({
                         layer1Approved={layer1Approved}
                         cloFullyApprovedCount={cloFullyApprovedCount}
                         cloTotalCount={cloGroups.length}
-                        onContinueLayer2={() => setExpandedLayer(2)}
+                        onContinueLayer2={() => goToLayer(2)}
                       />
                     ) : layer.layer === 2 ? (
                       <>
@@ -1026,7 +1047,7 @@ export default function NodeEnginePanel({
                         />
                         <Layer2ContinueCta
                           layer2Approved={layer2Approved}
-                          onContinue={() => setExpandedLayer(3)}
+                          onContinue={() => goToLayer(3)}
                         />
                       </>
                     ) : layer.layer === 3 ? (
@@ -1056,7 +1077,7 @@ export default function NodeEnginePanel({
                         />
                         <Layer3ContinueCta
                           layer3Approved={layer3Approved}
-                          onContinue={() => setExpandedLayer(4)}
+                          onContinue={() => goToLayer(4)}
                         />
                       </>
                     ) : layer.layer === 4 ? (
@@ -1082,7 +1103,7 @@ export default function NodeEnginePanel({
                         />
                         <Layer4ContinueCta
                           layer4Complete={layer4Complete}
-                          onContinue={() => setExpandedLayer(5)}
+                          onContinue={() => goToLayer(5)}
                         />
                       </>
                     ) : (

@@ -24,6 +24,12 @@ export interface CourseJourney {
   engineSteps: JourneyStep[]
   architectComplete: boolean
   nodeGenReady: boolean
+  /** True once Course Architect is complete and alignment tags are active. */
+  engineUnlocked: boolean
+  /** Layer id of the first not-yet-approved Architect layer (the frontier). */
+  architectFrontierId: string | undefined
+  /** Engine layer number to land on first (the frontier). */
+  engineFrontierLayer: number
   refresh: () => Promise<void>
 }
 
@@ -101,8 +107,17 @@ export function useCourseJourney(courseCode: string | undefined): CourseJourney 
     id: `engine-${l.layer}`,
     phase: 'engine',
     label: `${l.layer}. ${l.label}`,
-    status: !engineUnlocked ? 'locked' : i === 0 ? 'current' : 'locked',
+    // Per-layer approval gating is enforced inside the engine panel. Here we
+    // only gate the phase: navigable once unlocked, with Layer 1 as frontier.
+    status: !engineUnlocked ? 'locked' : i === 0 ? 'current' : 'upcoming',
   }))
+
+  // Frontier = the step the user should resume on. Prefer the "current" step,
+  // else the first non-locked, else the last step (everything done).
+  const architectFrontierId =
+    architectSteps.find((s) => s.status === 'current')?.id ??
+    architectSteps.find((s) => s.status !== 'locked')?.id ??
+    architectSteps[architectSteps.length - 1]?.id
 
   return {
     loading,
@@ -110,6 +125,9 @@ export function useCourseJourney(courseCode: string | undefined): CourseJourney 
     engineSteps,
     architectComplete,
     nodeGenReady,
+    engineUnlocked,
+    architectFrontierId,
+    engineFrontierLayer: 1,
     refresh,
   }
 }

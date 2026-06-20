@@ -5,18 +5,242 @@ import { Button } from '@/components/ui/Button'
 import { showToast } from '@/components/ui/Toaster'
 import { fetchCourse, type CourseDetail as CourseDetailType } from '@/services/api'
 import Stage1Layers from '@/components/Stage1Layers'
+import { type IntakeSummaryProps } from '@/components/IntakeSummaryView'
 import NodeEnginePanel from '@/components/nodeEngine/NodeEnginePanel'
 import JourneyRail from './JourneyRail'
-import WizardStepShell from './WizardStepShell'
+import WizardStepShell, { type StepStatusTone } from './WizardStepShell'
 import WizardActionBar from './WizardActionBar'
-import { useCourseJourney, type WizardPhase } from './useCourseJourney'
-import type { StageStep } from './StageStepper'
+import { useCourseJourney, type CourseJourney, type JourneyStep, type WizardPhase } from './useCourseJourney'
+
+/** Map a journey step status to the step-shell status badge tone. */
+function stepBadge(status: JourneyStep['status'] | undefined): { label: string; tone: StepStatusTone } {
+  switch (status) {
+    case 'done':
+      return { label: 'Approved', tone: 'approved' }
+    case 'current':
+      return { label: 'In progress', tone: 'running' }
+    case 'locked':
+      return { label: 'Locked', tone: 'locked' }
+    default:
+      return { label: 'Not started', tone: 'neutral' }
+  }
+}
+
+interface ArchitectScreenProps {
+  courseCode: string
+  journey: CourseJourney
+  intake: IntakeSummaryProps
+  alignmentFetchSignal: number
+  alignmentAutoProposeSignal: number
+  onAlignmentFetch: () => void
+  onAlignmentAutoPropose: () => void
+  onArchitectAllApproved: (v: boolean) => void
+}
+
+/** One Course Architect layer, rendered as a focused, route-driven step. */
+function ArchitectScreen({
+  courseCode,
+  journey,
+  intake,
+  alignmentFetchSignal,
+  alignmentAutoProposeSignal,
+  onAlignmentFetch,
+  onAlignmentAutoPropose,
+  onArchitectAllApproved,
+}: ArchitectScreenProps) {
+  const { layerId } = useParams<{ layerId: string }>()
+  const navigate = useNavigate()
+  const base = `/courses/${encodeURIComponent(courseCode)}`
+  const steps = journey.architectSteps
+  const idx = steps.findIndex((s) => s.id === layerId)
+
+  // Keep the rail/stepper statuses in sync whenever a layer is opened.
+  useEffect(() => {
+    void journey.refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layerId])
+
+  // Unknown / not-yet-loaded layer id → bounce to the resume frontier.
+  if (steps.length > 0 && idx === -1) {
+    return <Navigate to={`${base}/architect/${journey.architectFrontierId ?? steps[0].id}`} replace />
+  }
+
+  const active = idx >= 0 ? steps[idx] : undefined
+  const prev = idx > 0 ? steps[idx - 1] : undefined
+  const next = idx >= 0 && idx < steps.length - 1 ? steps[idx + 1] : undefined
+  const goLayer = (id: string) => navigate(`${base}/architect/${id}`)
+  const goEngine = () => navigate(`${base}/engine/${journey.engineFrontierLayer}`)
+
+  return (
+    <>
+      <WizardStepShell
+        breadcrumb={[{ label: 'Course Architect' }, { label: active?.label ?? 'Layer' }]}
+        counter={`Phase 1 of 2 · Step ${Math.max(idx, 0) + 1} of ${steps.length || 6}`}
+        title={active?.label ?? 'Course Architect'}
+        subtitle="Review, run, and approve this layer. Approving unlocks the next step in the journey."
+        statusBadge={stepBadge(active?.status)}
+        steps={steps.map((s) => ({ id: s.id, label: s.label, status: s.status }))}
+        onSelectStep={(id) => goLayer(id)}
+      >
+        <Stage1Layers
+          courseCode={courseCode}
+          soloLayerId={layerId}
+          onNavigateLayer={goLayer}
+          onAllApproved={(v) => {
+            onArchitectAllApproved(v)
+            void journey.refresh()
+          }}
+          onAlignmentAutoPropose={() => {
+            onAlignmentAutoPropose()
+            onAlignmentFetch()
+          }}
+          onReferenceUploaded={() => {
+            onAlignmentAutoPropose()
+            onAlignmentFetch()
+          }}
+          alignmentFetchSignal={alignmentFetchSignal}
+          alignmentAutoProposeSignal={alignmentAutoProposeSignal}
+          onAlignmentApproved={() => {
+            onAlignmentFetch()
+            void journey.refresh()
+          }}
+          intake={intake}
+        />
+      </WizardStepShell>
+      <WizardActionBar
+        back={prev ? { label: `Back: ${prev.label}`, onClick: () => goLayer(prev.id) } : undefined}
+        primary={
+          next
+            ? {
+                label: 'Next layer',
+                onClick: () => goLayer(next.id),
+                disabled: next.status === 'locked',
+                icon: <ChevronRight className="h-4 w-4" />,
+              }
+            : {
+                label: 'Continue to Node Engine',
+                onClick: goEngine,
+                disabled: !journey.engineUnlocked,
+                icon: <ChevronRight className="h-4 w-4" />,
+              }
+        }
+        hint={
+          next && next.status === 'locked'
+            ? 'Approve this layer to unlock the next step.'
+            : !next && !journey.engineUnlocked
+              ? 'Approve all six layers and activate reference alignment to unlock the Node Engine.'
+              : undefined
+        }
+      />
+    </>
+  )
+}
+
+interface EngineScreenProps {
+  courseCode: string
+  journey: CourseJourney
+  alignmentFetchSignal: number
+}
+
+/** One Node Engine layer, rendered as a focused, route-driven step. */
+function EngineScreen({ courseCode, journey, alignmentFetchSignal }: EngineScreenProps) {
+  const { layerNum } = useParams<{ layerNum: string }>()
+  const navigate = useNavigate()
+  const base = `/courses/${encodeURIComponent(courseCode)}`
+  const num = Number(layerNum)
+
+  useEffect(() => {
+    void journey.refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layerNum])
+
+  const goArchitect = () =>
+    navigate(`${base}/architect/${journey.architectFrontierId ?? journey.architectSteps[0]?.id ?? ''}`)
+
+  if (!journey.engineUnlocked) {
+    return (
+      <>
+        <WizardStepShell
+          breadcrumb={[{ label: 'Node Engine' }]}
+          counter="Phase 2 of 2"
+          title="Maestro Node Engine"
+          subtitle="Turn each approved subtopic into governed adaptive learning nodes."
+          statusBadge={{ label: 'Locked', tone: 'locked' }}
+          steps={journey.engineSteps.map((s) => ({ id: s.id, label: s.label, status: s.status }))}
+        >
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-16 text-center">
+            <Boxes className="mb-3 h-10 w-10 text-muted-foreground/50" />
+            <p className="text-caption font-medium text-foreground">Node Engine is locked</p>
+            <p className="mt-1 max-w-md text-fine-print text-muted-foreground">
+              Complete all six Course Architect layers and activate reference alignment to begin node
+              generation.
+            </p>
+            <Button className="mt-4" onClick={goArchitect}>
+              Go to Course Architect
+            </Button>
+          </div>
+        </WizardStepShell>
+        <WizardActionBar back={{ label: 'Back to Course Architect', onClick: goArchitect }} />
+      </>
+    )
+  }
+
+  const steps = journey.engineSteps
+  const idx = steps.findIndex((s) => s.id === `engine-${num}`)
+  if (steps.length > 0 && (Number.isNaN(num) || idx === -1)) {
+    return <Navigate to={`${base}/engine/${journey.engineFrontierLayer}`} replace />
+  }
+
+  const active = idx >= 0 ? steps[idx] : undefined
+  const prev = idx > 0 ? steps[idx - 1] : undefined
+  const next = idx >= 0 && idx < steps.length - 1 ? steps[idx + 1] : undefined
+  const layerOf = (id: string) => Number(id.replace('engine-', ''))
+  const goLayer = (n: number) => navigate(`${base}/engine/${n}`)
+
+  return (
+    <>
+      <WizardStepShell
+        breadcrumb={[{ label: 'Node Engine' }, { label: active?.label ?? 'Layer' }]}
+        counter={`Phase 2 of 2 · Step ${Math.max(idx, 0) + 1} of ${steps.length}`}
+        title={active?.label ?? 'Maestro Node Engine'}
+        subtitle="Generate and approve this layer's output. Approving unlocks the next layer."
+        statusBadge={stepBadge(active?.status)}
+        steps={steps.map((s) => ({ id: s.id, label: s.label, status: s.status }))}
+        onSelectStep={(id) => goLayer(layerOf(id))}
+      >
+        <NodeEnginePanel
+          courseCode={courseCode}
+          soloLayer={num}
+          onNavigateLayer={goLayer}
+          alignmentFetchSignal={alignmentFetchSignal}
+        />
+      </WizardStepShell>
+      <WizardActionBar
+        back={
+          prev
+            ? { label: `Back: ${prev.label}`, onClick: () => goLayer(layerOf(prev.id)) }
+            : { label: 'Back to Course Architect', onClick: goArchitect }
+        }
+        primary={
+          next
+            ? {
+                label: 'Next layer',
+                onClick: () => goLayer(layerOf(next.id)),
+                icon: <ChevronRight className="h-4 w-4" />,
+              }
+            : undefined
+        }
+      />
+    </>
+  )
+}
 
 /**
  * The routed Course Architect → Node Engine wizard shell. Owns the course data,
- * the persistent journey rail, and phase-level routing. Each phase renders the
- * existing engine panels inside the shared step chrome (breadcrumb, dots stepper,
- * sticky action bar) so the design language is identical end-to-end.
+ * the persistent journey rail, and per-layer routing. Each layer renders the
+ * existing engine panels in "solo" mode inside the shared step chrome
+ * (breadcrumb, dots stepper, sticky action bar) so the design language is
+ * identical end-to-end.
  */
 export default function CourseWizard() {
   const { code } = useParams<{ code: string }>()
@@ -72,11 +296,19 @@ export default function CourseWizard() {
     )
   }
 
-  const engineUnlocked = journey.architectComplete && journey.nodeGenReady
-  const defaultPhase: WizardPhase = engineUnlocked ? 'engine' : 'architect'
-  const currentPhase: WizardPhase = location.pathname.endsWith('/engine') ? 'engine' : 'architect'
+  const engineUnlocked = journey.engineUnlocked
+  const currentPhase: WizardPhase = /\/engine(\/|$)/.test(location.pathname) ? 'engine' : 'architect'
 
-  const intake = {
+  // Derive the active layer id from the URL so the rail can highlight it.
+  const architectMatch = location.pathname.match(/\/architect\/([^/]+)/)
+  const engineMatch = location.pathname.match(/\/engine\/([^/]+)/)
+  const activeStepId = engineMatch
+    ? `engine-${engineMatch[1]}`
+    : architectMatch
+      ? architectMatch[1]
+      : undefined
+
+  const intake: IntakeSummaryProps = {
     title: course.title,
     code: course.course_code,
     description: course.description,
@@ -90,96 +322,9 @@ export default function CourseWizard() {
     assessmentStrategy: course.contract?.assessment_strategy,
   }
 
-  const architectStep: StageStep | undefined = journey.architectSteps.find((s) => s.status === 'current')
-  const goEngine = () => navigate(`/courses/${encodeURIComponent(code)}/engine`)
-  const goArchitect = () => navigate(`/courses/${encodeURIComponent(code)}/architect`)
-
-  const architectPhase = (
-    <>
-      <WizardStepShell
-        breadcrumb={[{ label: 'Course Architect' }, { label: architectStep?.label ?? 'Layers' }]}
-        counter={`Phase 1 of 2 · ${journey.architectSteps.filter((s) => s.status === 'done').length}/${journey.architectSteps.length} approved`}
-        title="Course Architect"
-        subtitle="Prepare the approved academic structure. Complete each layer in order, then activate reference alignment."
-        statusBadge={
-          journey.architectComplete
-            ? { label: 'Complete', tone: 'approved' }
-            : { label: 'In progress', tone: 'running' }
-        }
-        steps={journey.architectSteps.map((s) => ({ id: s.id, label: s.label, status: s.status }))}
-      >
-        <Stage1Layers
-          courseCode={course.course_code}
-          onAllApproved={(v) => {
-            setArchitectAllApproved(v)
-            void journey.refresh()
-          }}
-          onAlignmentAutoPropose={() => {
-            setAlignmentAutoProposeSignal((n) => n + 1)
-            setAlignmentFetchSignal((n) => n + 1)
-          }}
-          onReferenceUploaded={() => {
-            setAlignmentAutoProposeSignal((n) => n + 1)
-            setAlignmentFetchSignal((n) => n + 1)
-          }}
-          alignmentFetchSignal={alignmentFetchSignal}
-          alignmentAutoProposeSignal={alignmentAutoProposeSignal}
-          onAlignmentApproved={() => {
-            setAlignmentFetchSignal((n) => n + 1)
-            void journey.refresh()
-          }}
-          intake={intake}
-        />
-      </WizardStepShell>
-      <WizardActionBar
-        primary={{
-          label: 'Continue to Node Engine',
-          onClick: goEngine,
-          disabled: !engineUnlocked,
-          icon: <ChevronRight className="h-4 w-4" />,
-        }}
-        hint={
-          !engineUnlocked
-            ? 'Approve all six layers and activate reference alignment to unlock the Node Engine.'
-            : undefined
-        }
-      />
-    </>
-  )
-
-  const enginePhase = (
-    <>
-      <WizardStepShell
-        breadcrumb={[{ label: 'Node Engine' }]}
-        counter="Phase 2 of 2"
-        title="Maestro Node Engine"
-        subtitle="Turn each approved subtopic into governed adaptive learning nodes. Approve each layer to unlock the next."
-        statusBadge={
-          engineUnlocked ? { label: 'Available', tone: 'running' } : { label: 'Locked', tone: 'locked' }
-        }
-        steps={journey.engineSteps.map((s) => ({ id: s.id, label: s.label, status: s.status }))}
-      >
-        {engineUnlocked ? (
-          <NodeEnginePanel courseCode={course.course_code} alignmentFetchSignal={alignmentFetchSignal} />
-        ) : (
-          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-16 text-center">
-            <Boxes className="mb-3 h-10 w-10 text-muted-foreground/50" />
-            <p className="text-caption font-medium text-foreground">Node Engine is locked</p>
-            <p className="mt-1 max-w-md text-fine-print text-muted-foreground">
-              Complete all six Course Architect layers and activate reference alignment to begin
-              node generation.
-            </p>
-            <Button className="mt-4" onClick={goArchitect}>
-              Go to Course Architect
-            </Button>
-          </div>
-        )}
-      </WizardStepShell>
-      <WizardActionBar
-        back={{ label: 'Back to Course Architect', onClick: goArchitect }}
-      />
-    </>
-  )
+  // Landing target: resume in the engine if unlocked, else the architect frontier.
+  const architectLanding = `architect/${journey.architectFrontierId ?? journey.architectSteps[0]?.id ?? ''}`
+  const indexTarget = engineUnlocked ? `engine/${journey.engineFrontierLayer}` : architectLanding
 
   return (
     <div className="space-y-5">
@@ -205,17 +350,52 @@ export default function CourseWizard() {
               engineSteps={journey.engineSteps}
               architectComplete={journey.architectComplete}
               engineUnlocked={engineUnlocked}
+              activeStepId={activeStepId}
             />
           </div>
         </aside>
 
         <div className="min-w-0 flex-1">
-          <Routes>
-            <Route index element={<Navigate to={defaultPhase} replace />} />
-            <Route path="architect" element={architectPhase} />
-            <Route path="engine" element={enginePhase} />
-            <Route path="*" element={<Navigate to="architect" replace />} />
-          </Routes>
+          {journey.loading && journey.architectSteps.length === 0 ? (
+            <div className="flex h-64 items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : (
+            <Routes>
+              <Route index element={<Navigate to={indexTarget} replace />} />
+              <Route path="architect" element={<Navigate to={architectLanding} replace />} />
+              <Route
+                path="architect/:layerId"
+                element={
+                  <ArchitectScreen
+                    courseCode={course.course_code}
+                    journey={journey}
+                    intake={intake}
+                    alignmentFetchSignal={alignmentFetchSignal}
+                    alignmentAutoProposeSignal={alignmentAutoProposeSignal}
+                    onAlignmentFetch={() => setAlignmentFetchSignal((n) => n + 1)}
+                    onAlignmentAutoPropose={() => setAlignmentAutoProposeSignal((n) => n + 1)}
+                    onArchitectAllApproved={setArchitectAllApproved}
+                  />
+                }
+              />
+              <Route
+                path="engine"
+                element={<Navigate to={`engine/${journey.engineFrontierLayer}`} replace />}
+              />
+              <Route
+                path="engine/:layerNum"
+                element={
+                  <EngineScreen
+                    courseCode={course.course_code}
+                    journey={journey}
+                    alignmentFetchSignal={alignmentFetchSignal}
+                  />
+                }
+              />
+              <Route path="*" element={<Navigate to={indexTarget} replace />} />
+            </Routes>
+          )}
         </div>
       </div>
     </div>

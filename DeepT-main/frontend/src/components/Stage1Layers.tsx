@@ -97,6 +97,10 @@ interface Stage1LayersProps {
   /** Called once alignment tags are activated — page can scroll to Node Engine. */
   onAlignmentApproved?: () => void
   intake?: IntakeSummaryProps
+  /** Wizard mode: render ONLY this layer as a focused step (others hidden). */
+  soloLayerId?: string
+  /** Wizard mode: forward navigation routes instead of expanding in-place. */
+  onNavigateLayer?: (layerId: string) => void
 }
 
 export default function Stage1Layers({
@@ -108,6 +112,8 @@ export default function Stage1Layers({
   alignmentAutoProposeSignal = 0,
   onAlignmentApproved,
   intake,
+  soloLayerId,
+  onNavigateLayer,
 }: Stage1LayersProps) {
   const [layers, setLayers] = useState<Stage1LayerStateView[]>([])
   const [loading, setLoading] = useState(true)
@@ -229,6 +235,22 @@ export default function Stage1Layers({
   useEffect(() => {
     loadLayers()
   }, [loadLayers])
+
+  // Wizard solo mode: keep the rendered layer expanded so its editor + auto-run
+  // and scroll effects behave exactly as in the accordion.
+  useEffect(() => {
+    if (soloLayerId && expandedId !== soloLayerId) setExpandedId(soloLayerId)
+  }, [soloLayerId, expandedId])
+
+  // Forward navigation: route between layer screens in wizard mode, otherwise
+  // expand the target layer in-place (legacy accordion behavior).
+  const goToLayer = useCallback(
+    (layerId: string) => {
+      if (onNavigateLayer) onNavigateLayer(layerId)
+      else setExpandedId(layerId)
+    },
+    [onNavigateLayer]
+  )
 
   async function handleRun(layerId: string, execution?: StageExecutionMode) {
     try {
@@ -392,28 +414,28 @@ export default function Stage1Layers({
   async function handleApproveLayer2AndContinue() {
     const approved = await handleApprove('layer2-clo-review', { skipUnsavedCheck: true })
     if (approved) {
-      setExpandedId('layer3-assessment-redesign')
+      goToLayer('layer3-assessment-redesign')
     }
   }
 
   async function handleApproveLayer3AndContinue() {
     const approved = await handleApprove('layer3-assessment-redesign', { skipUnsavedCheck: true })
     if (approved) {
-      setExpandedId('layer4-weighting-rubric')
+      goToLayer('layer4-weighting-rubric')
     }
   }
 
   async function handleApproveLayer4AndContinue() {
     const approved = await handleApprove('layer4-weighting-rubric', { skipUnsavedCheck: true })
     if (approved) {
-      setExpandedId('layer5-integrity-ai')
+      goToLayer('layer5-integrity-ai')
     }
   }
 
   async function handleApproveLayer5AndContinue() {
     const approved = await handleApprove('layer5-integrity-ai', { skipUnsavedCheck: true })
     if (approved) {
-      setExpandedId('layer6-subtopic-architecture')
+      goToLayer('layer6-subtopic-architecture')
     }
   }
 
@@ -448,29 +470,13 @@ export default function Stage1Layers({
 
   const allLayersApproved = layers.length > 0 && layers.every((l) => l.status === 'approved')
   const architectComplete = allLayersApproved && nodeGenReady
+  const solo = !!soloLayerId
+  const visibleLayers = solo ? layers.filter((l) => l.layerId === soloLayerId) : layers
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Course Architect</CardTitle>
-        <CardDescription>
-          Complete all six layers in order, then Reference Alignment (Layer 6 Step B) to activate
-          grounding tags — the Node Engine unlocks when alignment is active.
-          {architectComplete && (
-            <span className="ml-2 inline-flex items-center gap-1 text-emerald-600">
-              <Check className="h-4 w-4" /> Course Architect complete
-            </span>
-          )}
-          {allLayersApproved && !nodeGenReady && (
-            <span className="ml-2 inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
-              Step B pending — activate alignment tags
-            </span>
-          )}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {layers.map((layer) => {
-          const open = expandedId === layer.layerId
+  const layersList = (
+    <div className="space-y-3">
+        {visibleLayers.map((layer) => {
+          const open = solo ? layer.layerId === soloLayerId : expandedId === layer.layerId
           const clientRunning = runningId === layer.layerId
           // Server says "running" but this client did not start it -> stale (e.g. interrupted run)
           const staleRunning = layer.status === 'running' && !clientRunning
@@ -489,7 +495,7 @@ export default function Stage1Layers({
           const actionButtons = (
             <div className="flex flex-wrap gap-2">
               {showContinueToNext && nextLayer && (
-                <Button size="sm" onClick={() => setExpandedId(nextLayer.layerId)}>
+                <Button size="sm" onClick={() => goToLayer(nextLayer.layerId)}>
                   Continue to Layer {nextLayer.config.order}
                   <ChevronRight className="ml-2 h-4 w-4" />
                 </Button>
@@ -591,7 +597,10 @@ export default function Stage1Layers({
               <button
                 type="button"
                 className="flex w-full items-start justify-between gap-3 p-4 text-left"
-                onClick={() => setExpandedId(open ? null : layer.layerId)}
+                onClick={() => {
+                  if (solo) return
+                  setExpandedId(open ? null : layer.layerId)
+                }}
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -799,7 +808,33 @@ export default function Stage1Layers({
             </Fragment>
           )
         })}
-      </CardContent>
+    </div>
+  )
+
+  // Wizard solo mode: render just the focused layer (the shell supplies the
+  // header/chrome). Legacy mode keeps the full accordion inside a titled Card.
+  if (solo) return layersList
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Course Architect</CardTitle>
+        <CardDescription>
+          Complete all six layers in order, then Reference Alignment (Layer 6 Step B) to activate
+          grounding tags — the Node Engine unlocks when alignment is active.
+          {architectComplete && (
+            <span className="ml-2 inline-flex items-center gap-1 text-emerald-600">
+              <Check className="h-4 w-4" /> Course Architect complete
+            </span>
+          )}
+          {allLayersApproved && !nodeGenReady && (
+            <span className="ml-2 inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+              Step B pending — activate alignment tags
+            </span>
+          )}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>{layersList}</CardContent>
     </Card>
   )
 }

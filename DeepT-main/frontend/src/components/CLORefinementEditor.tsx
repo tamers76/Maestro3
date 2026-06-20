@@ -14,6 +14,7 @@ import {
   type SmeRefinementDecision,
 } from '@/services/api'
 import { cn } from '@/lib/utils'
+import { SegmentedRadio } from '@/components/wizard/SegmentedRadio'
 import {
   Save,
   Loader2,
@@ -24,6 +25,8 @@ import {
   ChevronDown,
   ChevronRight,
   XCircle,
+  Lock,
+  Pencil,
 } from 'lucide-react'
 
 const CLO_COLORS = [
@@ -230,31 +233,32 @@ function CLORefinementZone({
             )}
           </section>
 
-          {/* 4. SME Decision Buttons */}
+          {/* 4. SME Decision — segmented liquid-glass control */}
           {!readOnlyRefinement && (
             <section>
               <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-2">SME Decision</h4>
-              <div className="flex flex-wrap gap-2">
-                {(['keep_official', 'accept_ai_refinement', 'custom_wording'] as const).map((d) => {
-                  const selected = item.sme_decision === d
-                  return (
-                    <Button
-                      key={d}
-                      size="sm"
-                      variant={selected ? 'default' : 'outline'}
-                      onClick={() => applyDecision(d)}
-                      className={cn(
-                        'transition-shadow',
-                        selected
-                          ? 'ring-1 ring-primary/60 dark:shadow-lg dark:shadow-primary/20'
-                          : 'border border-border dark:border-white/15 dark:shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_1px_3px_rgba(0,0,0,0.4)] hover:border-primary/50 dark:hover:border-primary/50 dark:hover:shadow-primary/20',
-                      )}
-                    >
-                      {DECISION_LABELS[d]}
-                    </Button>
-                  )
-                })}
-              </div>
+              <SegmentedRadio<SmeRefinementDecision>
+                aria-label={`Decision for ${clo.clo_id}`}
+                value={item.sme_decision}
+                onValueChange={(d) => applyDecision(d)}
+                options={[
+                  {
+                    value: 'keep_official',
+                    label: DECISION_LABELS.keep_official,
+                    icon: <Lock className="h-3.5 w-3.5" />,
+                  },
+                  {
+                    value: 'accept_ai_refinement',
+                    label: DECISION_LABELS.accept_ai_refinement,
+                    icon: <Sparkles className="h-3.5 w-3.5" />,
+                  },
+                  {
+                    value: 'custom_wording',
+                    label: DECISION_LABELS.custom_wording,
+                    icon: <Pencil className="h-3.5 w-3.5" />,
+                  },
+                ]}
+              />
             </section>
           )}
 

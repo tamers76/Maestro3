@@ -35,10 +35,9 @@ export function SegmentedRadio<T extends string = string>({
 }: SegmentedRadioProps<T>) {
   const groupId = useId()
   const count = Math.max(options.length, 1)
-  const selectedIndex = Math.max(
-    options.findIndex((o) => o.value === value),
-    0
-  )
+  const matchedIndex = options.findIndex((o) => o.value === value)
+  const hasSelection = matchedIndex >= 0
+  const selectedIndex = hasSelection ? matchedIndex : 0
   const segmentWidthPct = 100 / count
 
   return (
@@ -63,7 +62,8 @@ export function SegmentedRadio<T extends string = string>({
           'pointer-events-none absolute inset-y-1 left-1 rounded-md bg-card',
           'shadow-[0_1px_2px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.04)]',
           'ring-1 ring-primary/30',
-          'transition-transform duration-300 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]'
+          'transition-all duration-300 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]',
+          !hasSelection && 'opacity-0'
         )}
         style={{
           width: `calc(${segmentWidthPct}% - 0.25rem)`,
