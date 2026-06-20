@@ -139,11 +139,13 @@ export default function Settings() {
     
     try {
       setSaving(true)
-      await updateSettings(settings)
+      const result = await updateSettings(settings)
       showToast({
         title: 'Settings Saved',
-        description: 'Your settings have been updated',
-        variant: 'success',
+        description: result.warning
+          ? `${result.message}. ${result.warning}`
+          : 'Your settings have been updated',
+        variant: result.warning ? 'default' : 'success',
       })
     } catch (error) {
       showToast({
@@ -273,7 +275,7 @@ export default function Settings() {
   }
   
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
+    <div className="mx-auto w-full max-w-6xl space-y-8">
       <div>
         <h1 className="font-display text-3xl font-semibold text-foreground flex items-center gap-3">
           Settings

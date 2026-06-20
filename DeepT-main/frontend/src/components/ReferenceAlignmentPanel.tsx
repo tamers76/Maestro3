@@ -341,12 +341,13 @@ export default function ReferenceAlignmentPanel({
       : null
   const activeProposalThreshold = proposal?.threshold ?? state?.threshold
 
-  // Auto-preview when Layer 6 completes or a new reference is uploaded.
+  // Auto-preview when Layer 6 completes or a new reference is uploaded — never after activation.
   useEffect(() => {
     if (autoProposeSignal <= 0 || autoProposeSignal <= lastAutoProposeSignal.current) return
     lastAutoProposeSignal.current = autoProposeSignal
     if (loading || proposing || approving) return
     if (status === 'locked' || status === 'no_references') return
+    if (state?.node_gen_ready || status === 'approved' || proposal?.status === 'approved') return
     void handlePropose({ silent: true }).then(() => {
       showToast({
         title: 'Alignment preview updated',

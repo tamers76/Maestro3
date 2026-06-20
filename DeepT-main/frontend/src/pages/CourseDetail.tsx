@@ -77,7 +77,10 @@ export default function CourseDetail() {
   
   const [course, setCourse] = useState<CourseDetailType | null>(null)
   const [stage1AllApproved, setStage1AllApproved] = useState(false)
-  const [alignmentRefreshSignal, setAlignmentRefreshSignal] = useState(0)
+  /** Refetch alignment readiness (Node Engine gate) without re-running preview. */
+  const [alignmentFetchSignal, setAlignmentFetchSignal] = useState(0)
+  /** Auto-preview tags after reference upload or Layer 6 completion only. */
+  const [alignmentAutoProposeSignal, setAlignmentAutoProposeSignal] = useState(0)
   const [graphData, setGraphData] = useState<GraphData | null>(null)
   const [loading, setLoading] = useState(true)
   const [runningStage, setRunningStage] = useState<number | null>(null)
@@ -668,11 +671,18 @@ export default function CourseDetail() {
       <Stage1Layers
         courseCode={course.course_code}
         onAllApproved={setStage1AllApproved}
-        onAlignmentAutoPropose={() => setAlignmentRefreshSignal((n) => n + 1)}
-        onReferenceUploaded={() => setAlignmentRefreshSignal((n) => n + 1)}
-        alignmentRefreshSignal={alignmentRefreshSignal}
+        onAlignmentAutoPropose={() => {
+          setAlignmentAutoProposeSignal((n) => n + 1)
+          setAlignmentFetchSignal((n) => n + 1)
+        }}
+        onReferenceUploaded={() => {
+          setAlignmentAutoProposeSignal((n) => n + 1)
+          setAlignmentFetchSignal((n) => n + 1)
+        }}
+        alignmentFetchSignal={alignmentFetchSignal}
+        alignmentAutoProposeSignal={alignmentAutoProposeSignal}
         onAlignmentApproved={() => {
-          setAlignmentRefreshSignal((n) => n + 1)
+          setAlignmentFetchSignal((n) => n + 1)
           scrollToRef(nodeEngineRef)
         }}
         intake={{
@@ -728,7 +738,7 @@ export default function CourseDetail() {
           <div ref={nodeEngineRef} className="scroll-mt-4">
             <NodeEnginePanel
               courseCode={course.course_code}
-              alignmentRefreshSignal={alignmentRefreshSignal}
+              alignmentFetchSignal={alignmentFetchSignal}
             />
           </div>
         </TabsContent>

@@ -1071,7 +1071,7 @@ export async function fetchRawSettings(): Promise<Settings> {
   return response.json();
 }
 
-export async function updateSettings(settings: Partial<Settings>): Promise<{ message: string; settings: Settings }> {
+export async function updateSettings(settings: Partial<Settings>): Promise<{ message: string; settings: Settings; warning?: string }> {
   const response = await fetch(`${API_BASE}/settings`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -2699,6 +2699,178 @@ export async function updatePromptTemplate(
 }
 
 // ============================================================================
+// HeyGen catalog (avatar looks + voices for Video render Settings)
+// ============================================================================
+
+export interface HeyGenAvatarLookOption {
+  id: string;
+  name: string;
+  gender: string | null;
+  avatar_type: string | null;
+  preview_image_url: string | null;
+  preview_video_url: string | null;
+  default_voice_id: string | null;
+  supported_api_engines: string[];
+  tags: string[];
+  group_id: string | null;
+}
+
+export interface HeyGenVoiceOption {
+  voice_id: string;
+  name: string;
+  language: string | null;
+  gender: string | null;
+  type: string | null;
+  preview_audio_url: string | null;
+  support_pause: boolean;
+  support_locale: boolean;
+}
+
+export interface HeyGenCatalogPage<T> {
+  items: T[];
+  has_more: boolean;
+  next_token: string | null;
+}
+
+export async function fetchHeyGenCatalogStatus(apiKeyRef?: string): Promise<{
+  configured: boolean;
+  api_key_ref: string;
+}> {
+  const params = apiKeyRef ? `?api_key_ref=${encodeURIComponent(apiKeyRef)}` : '';
+  const response = await fetch(`${API_BASE}/node-engine/heygen/catalog/status${params}`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to read HeyGen status');
+  return data;
+}
+
+/** HBMSU Avatar Library — configured in heygenApprovedAvatars.defaults.ts */
+export async function fetchHeyGenApprovedAvatars(apiKeyRef?: string): Promise<{
+  items: AvatarLibraryEntry[];
+}> {
+  const params = apiKeyRef ? `?api_key_ref=${encodeURIComponent(apiKeyRef)}` : '';
+  const response = await fetch(`${API_BASE}/node-engine/heygen/approved-avatars${params}`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to load HBMSU Avatar Library');
+  return data;
+}
+
+export interface HeyGenAvatarCharacter {
+  group_id: string;
+  name: string;
+  gender: string | null;
+  default_voice_id: string | null;
+  looks_count: number;
+  preview_image_url: string | null;
+  preview_video_url: string | null;
+  preview_looks: HeyGenAvatarLookOption[];
+}
+
+export async function fetchHeyGenAvatarCharacters(options: {
+  api_key_ref?: string;
+  ownership?: 'public' | 'private';
+  avatar_type?: 'studio_avatar' | 'digital_twin' | 'photo_avatar';
+  limit?: number;
+  token?: string;
+} = {}): Promise<HeyGenCatalogPage<HeyGenAvatarCharacter>> {
+  const params = new URLSearchParams();
+  if (options.api_key_ref) params.set('api_key_ref', options.api_key_ref);
+  if (options.ownership) params.set('ownership', options.ownership);
+  if (options.avatar_type) params.set('avatar_type', options.avatar_type);
+  if (options.limit) params.set('limit', String(options.limit));
+  if (options.token) params.set('token', options.token);
+  const qs = params.toString();
+  const response = await fetch(
+    `${API_BASE}/node-engine/heygen/avatar-characters${qs ? `?${qs}` : ''}`
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to list HeyGen avatar characters');
+  return data;
+}
+
+export async function fetchHeyGenCharacterLooks(
+  groupId: string,
+  options: {
+    api_key_ref?: string;
+    ownership?: 'public' | 'private';
+    limit?: number;
+    token?: string;
+  } = {}
+): Promise<HeyGenCatalogPage<HeyGenAvatarLookOption>> {
+  const params = new URLSearchParams();
+  if (options.api_key_ref) params.set('api_key_ref', options.api_key_ref);
+  if (options.ownership) params.set('ownership', options.ownership);
+  if (options.limit) params.set('limit', String(options.limit));
+  if (options.token) params.set('token', options.token);
+  const qs = params.toString();
+  const response = await fetch(
+    `${API_BASE}/node-engine/heygen/avatar-characters/${encodeURIComponent(groupId)}/looks${qs ? `?${qs}` : ''}`
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to list character looks');
+  return data;
+}
+
+export async function fetchHeyGenAvatars(options: {
+  api_key_ref?: string;
+  ownership?: 'public' | 'private';
+  avatar_type?: 'studio_avatar' | 'digital_twin' | 'photo_avatar';
+  limit?: number;
+  token?: string;
+} = {}): Promise<HeyGenCatalogPage<HeyGenAvatarLookOption>> {
+  const params = new URLSearchParams();
+  if (options.api_key_ref) params.set('api_key_ref', options.api_key_ref);
+  if (options.ownership) params.set('ownership', options.ownership);
+  if (options.avatar_type) params.set('avatar_type', options.avatar_type);
+  if (options.limit) params.set('limit', String(options.limit));
+  if (options.token) params.set('token', options.token);
+  const qs = params.toString();
+  const response = await fetch(`${API_BASE}/node-engine/heygen/avatars${qs ? `?${qs}` : ''}`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to list HeyGen avatars');
+  return data;
+}
+
+export async function fetchHeyGenVoices(options: {
+  api_key_ref?: string;
+  type?: 'public' | 'private';
+  language?: string;
+  gender?: string;
+  limit?: number;
+  token?: string;
+} = {}): Promise<HeyGenCatalogPage<HeyGenVoiceOption>> {
+  const params = new URLSearchParams();
+  if (options.api_key_ref) params.set('api_key_ref', options.api_key_ref);
+  if (options.type) params.set('type', options.type);
+  if (options.language) params.set('language', options.language);
+  if (options.gender) params.set('gender', options.gender);
+  if (options.limit) params.set('limit', String(options.limit));
+  if (options.token) params.set('token', options.token);
+  const qs = params.toString();
+  const response = await fetch(`${API_BASE}/node-engine/heygen/voices${qs ? `?${qs}` : ''}`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to list HeyGen voices');
+  return data;
+}
+
+export async function fetchHeyGenStyles(options: {
+  api_key_ref?: string;
+  tag?: string;
+  limit?: number;
+  token?: string;
+} = {}): Promise<HeyGenCatalogPage<HeyGenVideoAgentStyle>> {
+  const params = new URLSearchParams();
+  if (options.api_key_ref) params.set('api_key_ref', options.api_key_ref);
+  if (options.tag) params.set('tag', options.tag);
+  if (options.limit) params.set('limit', String(options.limit));
+  if (options.token) params.set('token', options.token);
+  const qs = params.toString();
+  const response = await fetch(`${API_BASE}/node-engine/heygen/styles${qs ? `?${qs}` : ''}`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to list HeyGen video agent styles');
+  return data;
+}
+
+// ============================================================================
 // Maestro Node Engine — per-vehicle Modality Generation (model) config
 // Stored independently from prompt templates: editing model config NEVER mints
 // a new prompt-template version.
@@ -2724,12 +2896,51 @@ export interface VideoVoiceSettings {
   locale?: string;
 }
 
+export interface AvatarLibraryEntry {
+  id: string;
+  name: string;
+  preview_image_url?: string | null;
+  avatar_type?: string | null;
+  default_voice_id?: string | null;
+  supported_api_engines?: string[];
+  group_id?: string | null;
+  character_name?: string | null;
+}
+
+/** @deprecated Use AvatarLibraryEntry */
+export type FavoriteAvatarRef = AvatarLibraryEntry;
+
+export type VideoRenderStyle = 'studio_direct' | 'video_agent_produced';
+export type NarrationFidelity = 'strict' | 'moderate';
+export type VideoOrientation = 'landscape' | 'portrait';
+export type RenderStyleOverride = VideoRenderStyle | 'inherit';
+
+export interface VideoBrandKit {
+  enabled: boolean;
+  primaryColor?: string;
+  secondaryColor?: string;
+  accentColor?: string;
+  fontFamily?: string;
+  mediaTypeGuidance?: string;
+}
+
+export interface VideoAgentPromptTemplates {
+  scriptFramingDirective?: string;
+  defaultStyleBlock?: string;
+}
+
 export interface VideoSettings {
   provider: 'heygen';
   /** Reference to the API key (env/setting NAME), never the key value. */
   apiKeyRef?: string;
   avatar_id?: string;
   voice_id?: string;
+  /** HBMSU Avatar Library entries for video renders. */
+  approved_avatars?: AvatarLibraryEntry[];
+  /** Selected looks that rotate across course video objects (stable per object_id). */
+  avatar_rotation_pool?: AvatarLibraryEntry[];
+  /** @deprecated Migrated to approved_avatars on read. */
+  favorite_avatars?: AvatarLibraryEntry[];
   engine?: VideoEngine;
   resolution?: VideoResolution;
   aspect_ratio?: VideoAspectRatio;
@@ -2739,6 +2950,41 @@ export interface VideoSettings {
   motion_prompt?: string;
   output_format?: VideoOutputFormat;
   callback_url?: string;
+  /** Course-wide default render style (per-object override happens in Layer 4). */
+  video_render_style?: VideoRenderStyle;
+  narration_fidelity?: NarrationFidelity;
+  style_id?: string;
+  orientation?: VideoOrientation;
+  target_duration_seconds?: number;
+  brand_kit?: VideoBrandKit;
+  agent_prompt_templates?: VideoAgentPromptTemplates;
+}
+
+export interface HeyGenVideoAgentStyle {
+  style_id: string;
+  name: string;
+  thumbnail_url: string | null;
+  preview_video_url: string | null;
+  tags: string[];
+  aspect_ratio: string | null;
+}
+
+export interface NodeEngineAgentSection {
+  section_number: number;
+  title: string;
+  duration_seconds?: number;
+  narration: string;
+  visual_description: string;
+  on_screen_text?: string[];
+  transitions?: string;
+}
+
+export interface NodeEngineAgentProduction {
+  learning_objective: string;
+  target_audience: string;
+  sections: NodeEngineAgentSection[];
+  production_notes: string;
+  critical_on_screen_text: string[];
 }
 
 export interface ModalityGenerationConfig {
@@ -3175,4 +3421,681 @@ export async function reopenNodeSet(code: string, subtopicId: string): Promise<N
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || 'Failed to reopen node set');
   return data.node_set;
+}
+
+// ============================================================================
+// Maestro Node Engine — Layer 2 (M8) Experience Blueprint
+// ============================================================================
+
+export type BlueprintObjectFamily = 'node_learning_object' | 'milestone_support_object';
+
+export type BlueprintNodeObjectPurpose =
+  | 'orientation'
+  | 'explanation'
+  | 'worked_example'
+  | 'practice'
+  | 'evidence_check'
+  | 'remediation'
+  | 'enrichment'
+  | 'reflection'
+  | 'bridge'
+  | 'assessment_connection';
+
+export type BlueprintVehicle =
+  | 'text'
+  | 'structured_visual'
+  | 'pictorial_visual'
+  | 'video'
+  | 'interactive'
+  | 'simulation'
+  | 'learning_anchor';
+
+export interface NodeEngineBlueprintObject {
+  object_id: string;
+  object_family: BlueprintObjectFamily;
+  sequence_order: number;
+  parent_node_id: string;
+  kc_ids: string[];
+  node_object_purpose: BlueprintNodeObjectPurpose | null;
+  milestone_support_purpose: string | null;
+  suggested_vehicle: BlueprintVehicle;
+  content_pattern: string;
+  is_primary_evidence_check: boolean;
+  title: string;
+  design_rationale: string;
+  estimated_effort_minutes: number;
+  addresses_misconception_ids: string[];
+  targets_misconception_id?: string | null;
+}
+
+export interface NodeEngineBlueprint {
+  blueprint_id: string;
+  course_id: string;
+  subtopic_id: string;
+  node_id: string;
+  node_title: string;
+  objects: NodeEngineBlueprintObject[];
+  status: NodeEngineLifecycleStatus;
+  created_at: string;
+  updated_at: string;
+  approved_by?: string;
+  approved_at?: string;
+}
+
+export interface BlueprintObjectPatch {
+  object_id: string;
+  title?: string;
+  design_rationale?: string;
+  suggested_vehicle?: BlueprintVehicle;
+  node_object_purpose?: BlueprintNodeObjectPurpose;
+  content_pattern?: string;
+  estimated_effort_minutes?: number;
+  sequence_order?: number;
+  targets_misconception_id?: string | null;
+}
+
+export async function fetchBlueprint(
+  code: string,
+  subtopicId: string,
+  nodeId: string
+): Promise<NodeEngineBlueprint | null> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/blueprint`
+  );
+  if (response.status === 404) return null;
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to fetch blueprint');
+  return data.blueprint;
+}
+
+export async function generateBlueprint(
+  code: string,
+  subtopicId: string,
+  nodeId: string
+): Promise<NodeEngineBlueprint> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/blueprint`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to generate blueprint');
+  return data.blueprint;
+}
+
+export async function updateBlueprint(
+  code: string,
+  subtopicId: string,
+  nodeId: string,
+  objects: BlueprintObjectPatch[]
+): Promise<NodeEngineBlueprint> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/blueprint`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ objects }),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to update blueprint');
+  return data.blueprint;
+}
+
+export async function approveBlueprint(
+  code: string,
+  subtopicId: string,
+  nodeId: string,
+  approver: string
+): Promise<NodeEngineBlueprint> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/blueprint/approve`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approver }),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to approve blueprint');
+  return data.blueprint;
+}
+
+export async function hydrateBlueprints(
+  code: string,
+  nodes: Array<{ subtopicId: string; nodeId: string }>
+): Promise<Record<string, NodeEngineBlueprint | null>> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/blueprints/hydrate`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nodes }),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to hydrate blueprints');
+  return data.blueprints ?? {};
+}
+
+// ============================================================================
+// Maestro Node Engine — Layer 3 (M9) Content Specification
+// ============================================================================
+
+export interface NodeEngineContentSpecExample {
+  label: string;
+  content: string;
+  citation?: NodeEngineCitation;
+}
+
+export interface NodeEngineContentSpecNonExample {
+  label: string;
+  content: string;
+  why_not: string;
+}
+
+export interface NodeEngineEvidenceCheckSpec {
+  learner_task: string;
+  response_prompt: string;
+  reasoning_prompt: string;
+  confidence_prompt: string;
+  evidence_criteria_summary: string;
+  misconception_trap?: string;
+  no_feedback_before_submission: boolean;
+  preferred_evidence_mode: NodeEngineEvidenceMode;
+  must_capture_signals: NodeEngineCaptureSignal[];
+}
+
+export interface NodeEngineContentSpec {
+  content_spec_id: string;
+  object_id: string;
+  blueprint_id: string;
+  course_id: string;
+  subtopic_id: string;
+  node_id: string;
+  object_family: BlueprintObjectFamily;
+  node_object_purpose: BlueprintNodeObjectPurpose | null;
+  milestone_support_purpose: string | null;
+  content_pattern: string;
+  suggested_vehicle: BlueprintVehicle;
+  is_primary_evidence_check: boolean;
+  parent_node_id: string;
+  kc_ids: string[];
+  title: string;
+  required_explanation: string;
+  examples: NodeEngineContentSpecExample[];
+  non_examples: NodeEngineContentSpecNonExample[];
+  preservation_rules: string[];
+  addresses_misconception_ids: string[];
+  targets_misconception_id?: string | null;
+  grounding_references: NodeEngineCitation[];
+  grounding_strength: NodeEngineGroundingStrength;
+  grounding_note?: string;
+  evidence_check_spec?: NodeEngineEvidenceCheckSpec;
+  status: NodeEngineLifecycleStatus;
+  created_at: string;
+  updated_at: string;
+  approved_by?: string;
+  approved_at?: string;
+}
+
+export interface ContentSpecPatch {
+  title?: string;
+  required_explanation?: string;
+  preservation_rules?: string[];
+  grounding_note?: string;
+}
+
+export async function fetchContentSpecs(
+  code: string,
+  subtopicId: string,
+  nodeId: string
+): Promise<NodeEngineContentSpec[]> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/content-specs`
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to fetch content specs');
+  return data.specs ?? [];
+}
+
+export async function generateContentSpecs(
+  code: string,
+  subtopicId: string,
+  nodeId: string,
+  objectId?: string
+): Promise<NodeEngineContentSpec[]> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/content-specs`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(objectId ? { object_id: objectId } : {}),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to generate content specs');
+  return data.specs ?? [];
+}
+
+export async function updateContentSpec(
+  code: string,
+  subtopicId: string,
+  nodeId: string,
+  objectId: string,
+  patch: ContentSpecPatch
+): Promise<NodeEngineContentSpec> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/objects/${encodeURIComponent(objectId)}/content-spec`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to update content spec');
+  return data.spec;
+}
+
+export async function approveContentSpec(
+  code: string,
+  subtopicId: string,
+  nodeId: string,
+  objectId: string,
+  approver: string
+): Promise<NodeEngineContentSpec> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/objects/${encodeURIComponent(objectId)}/content-spec/approve`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approver }),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to approve content spec');
+  return data.spec;
+}
+
+export async function hydrateContentSpecs(
+  code: string,
+  nodes: Array<{ subtopicId: string; nodeId: string }>
+): Promise<Record<string, NodeEngineContentSpec | null>> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/content-specs/hydrate`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nodes }),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to hydrate content specs');
+  return data.specs ?? {};
+}
+
+// ---------------------------------------------------------------------------
+// M10 — Modality Production (Phase A: text only)
+// ---------------------------------------------------------------------------
+
+export type TextSegmentType =
+  | 'heading'
+  | 'subheading'
+  | 'body'
+  | 'definition'
+  | 'example'
+  | 'non_example'
+  | 'callout'
+  | 'quotation'
+  | 'table'
+  | 'formula'
+  | 'summary';
+
+export interface NodeEngineTextSegment {
+  type: TextSegmentType;
+  text: string;
+  citation?: { citation: string; passage_ref: string };
+  items?: string[];
+  columns?: string[];
+  rows?: string[][];
+}
+
+export interface NodeEngineTextFidelityCheck {
+  status: 'passed' | 'needs_review';
+  notes: string[];
+}
+
+export interface NodeEngineVideoBriefFidelityCheck {
+  status: 'passed' | 'needs_review';
+  notes: string[];
+}
+
+export type StructuredVisualType =
+  | 'comparison_table'
+  | 'process_map'
+  | 'concept_map'
+  | 'decision_tree'
+  | 'framework_diagram'
+  | 'criteria_matrix'
+  | 'annotated_example'
+  | 'rubric_map'
+  | 'checklist_visual'
+  | 'timeline'
+  | 'hierarchy'
+  | 'cause_effect_map'
+  | 'infographic';
+
+export type SemanticElementType =
+  | 'concept'
+  | 'criterion'
+  | 'step'
+  | 'example'
+  | 'non_example'
+  | 'misconception'
+  | 'correction'
+  | 'evidence'
+  | 'decision_point'
+  | 'rubric_level'
+  | 'checklist_item';
+
+export type SemanticRelationshipType =
+  | 'contrasts_with'
+  | 'leads_to'
+  | 'depends_on'
+  | 'supports'
+  | 'violates'
+  | 'maps_to'
+  | 'prepares_for'
+  | 'corrects'
+  | 'exemplifies';
+
+export type SemanticAnnotationType =
+  | 'explanation'
+  | 'warning'
+  | 'misconception_alert'
+  | 'evidence_note'
+  | 'rubric_note'
+  | 'assessment_tip';
+
+export interface NodeEngineSemanticElement {
+  element_id: string;
+  element_type: SemanticElementType;
+  label: string;
+  description?: string;
+  citation?: string;
+  importance?: string;
+}
+
+export interface NodeEngineSemanticRelationship {
+  from_element_id: string;
+  to_element_id: string;
+  relationship_type: SemanticRelationshipType;
+  label?: string;
+}
+
+export interface NodeEngineSemanticAnnotation {
+  annotation_id: string;
+  target_element_id: string;
+  annotation_type: SemanticAnnotationType;
+  text: string;
+  citation?: string;
+}
+
+export interface NodeEngineStructuredVisual {
+  visual_type: StructuredVisualType;
+  title: string;
+  semantic_elements: NodeEngineSemanticElement[];
+  relationships: NodeEngineSemanticRelationship[];
+  annotations: NodeEngineSemanticAnnotation[];
+  layout_intent: string;
+  reading_order: string[];
+  renderer_notes?: string;
+  alt_text: string;
+  text_equivalent: string;
+  grounding_strength: 'strong' | 'moderate' | 'weak';
+  evidence_check_role?: 'not_evidence_check' | 'supporting_visual' | 'evidence_collection_visual';
+  rendering_route: 'platform_native' | 'ai_infographic';
+  fidelity_check?: NodeEngineTextFidelityCheck;
+}
+
+export interface NodeEngineProducedObject {
+  object_id: string;
+  content_spec_id: string;
+  node_id: string;
+  subtopic_id: string;
+  course_id: string;
+  blueprint_suggested_vehicle: BlueprintVehicle;
+  produced_modality: BlueprintVehicle;
+  envelope: {
+    object_id: string;
+    produced_modality: string;
+    governance_status: string;
+    modality_specific: {
+      segments?: NodeEngineTextSegment[];
+      fidelity_check?: NodeEngineTextFidelityCheck | NodeEngineVideoBriefFidelityCheck;
+      production_note?: string;
+      /** Phase B video — HeyGen-ready prompt (copy-paste until API connected). */
+      heygen_prompt?: string;
+      heygen_recommended_mode?: 'generate' | 'chat';
+      transcript?: string;
+      render_status?: 'brief_ready' | 'render_pending' | 'render_complete' | 'render_failed';
+      script_word_count?: number;
+      /** Effective word budget (derived from target duration); falls back to 420. */
+      script_word_budget?: number;
+      heygen_video_id?: string;
+      /** Ephemeral HeyGen presigned URL (audit / re-ingest only). */
+      heygen_source_url?: string;
+      /** @deprecated Use heygen_source_url — kept for older produced artifacts. */
+      video_url?: string;
+      /** Maestro asset tag, e.g. MSTR-VID-MDLD602-obj_video_1 */
+      maestro_video_asset_id?: string;
+      maestro_video_stored?: boolean;
+      maestro_video_bytes?: number;
+      maestro_video_ingested_at?: string;
+      maestro_video_ingest_error?: string;
+      render_mock?: boolean;
+      render_failure_message?: string;
+      last_render_at?: string;
+      /** Effective render style stamped at brief time. */
+      video_render_style?: VideoRenderStyle;
+      /** Per-object override (Layer 4). */
+      video_render_style_override?: RenderStyleOverride;
+      /** Which HeyGen API path produced the render. */
+      render_path?: 'direct_video' | 'video_agent';
+      heygen_session_id?: string;
+      /** Captured rendered transcript (Video Agent) for SME drift review. */
+      rendered_transcript?: string;
+      transcript_fidelity?: 'matched' | 'minor_drift' | 'needs_review';
+      transcript_fidelity_notes?: string[];
+      /** Structured scenes for the Video Agent path. */
+      agent_production?: NodeEngineAgentProduction;
+      video_brief?: {
+        narration?: {
+          video_title?: string;
+          full_script?: string;
+          script_word_count?: number;
+          approximate_duration_minutes?: number;
+        };
+        heygen_prompt_payload?: { prompt?: string; recommended_mode?: 'generate' | 'chat' };
+        fidelity_check?: NodeEngineVideoBriefFidelityCheck;
+        video_render_style?: VideoRenderStyle;
+        agent_production?: NodeEngineAgentProduction;
+      };
+      /** Structured visual semantic spec (platform-rendered). */
+      structured_visual?: NodeEngineStructuredVisual;
+      visual_type?: StructuredVisualType;
+      text_equivalent?: string;
+      rendering_route?: 'platform_native' | 'ai_infographic';
+    };
+    grounding_strength: string;
+    estimated_effort_minutes: number;
+  };
+  prompt_template_id: string;
+  prompt_version: number;
+  generation_mode: string;
+  produced_at: string;
+}
+
+export async function produceTextObject(
+  code: string,
+  subtopicId: string,
+  nodeId: string,
+  objectId: string
+): Promise<NodeEngineProducedObject> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/objects/${encodeURIComponent(objectId)}/produce-text`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to produce text object');
+  return data.produced;
+}
+
+export async function produceVideoBriefObject(
+  code: string,
+  subtopicId: string,
+  nodeId: string,
+  objectId: string,
+  renderStyleOverride?: RenderStyleOverride
+): Promise<NodeEngineProducedObject> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/objects/${encodeURIComponent(objectId)}/produce-video-brief`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(
+        renderStyleOverride ? { render_style_override: renderStyleOverride } : {}
+      ),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to produce video brief');
+  return data.produced;
+}
+
+export async function produceStructuredVisualObject(
+  code: string,
+  subtopicId: string,
+  nodeId: string,
+  objectId: string
+): Promise<NodeEngineProducedObject> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/objects/${encodeURIComponent(objectId)}/produce-structured-visual`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to produce structured visual');
+  return data.produced;
+}
+
+/** Layer 4 production — routes to the producer matching the approved spec vehicle. */
+export async function produceLayer4Object(
+  code: string,
+  subtopicId: string,
+  nodeId: string,
+  objectId: string,
+  suggestedVehicle: BlueprintVehicle,
+  renderStyleOverride?: RenderStyleOverride
+): Promise<NodeEngineProducedObject> {
+  if (suggestedVehicle === 'video') {
+    return produceVideoBriefObject(code, subtopicId, nodeId, objectId, renderStyleOverride);
+  }
+  if (suggestedVehicle === 'structured_visual') {
+    return produceStructuredVisualObject(code, subtopicId, nodeId, objectId);
+  }
+  return produceTextObject(code, subtopicId, nodeId, objectId);
+}
+
+export async function renderVideoObject(
+  code: string,
+  subtopicId: string,
+  nodeId: string,
+  objectId: string
+): Promise<NodeEngineProducedObject> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/objects/${encodeURIComponent(objectId)}/render-video`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to render video');
+  return data.produced;
+}
+
+export async function refreshVideoRender(
+  code: string,
+  subtopicId: string,
+  nodeId: string,
+  objectId: string
+): Promise<NodeEngineProducedObject> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/objects/${encodeURIComponent(objectId)}/render-video/refresh`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to refresh video render');
+  return data.produced;
+}
+
+/** In-app stream URL for a Maestro-ingested produced video (SME review). */
+export function producedVideoStreamUrl(courseCode: string, objectId: string): string {
+  return `${API_BASE}/node-engine/courses/${encodeURIComponent(courseCode)}/objects/${encodeURIComponent(objectId)}/video`;
+}
+
+export async function hydrateProducedObjects(
+  code: string,
+  objectIds: string[]
+): Promise<Record<string, NodeEngineProducedObject | null>> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/produced-objects/hydrate`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ object_ids: objectIds }),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to hydrate produced objects');
+  return data.produced ?? {};
 }

@@ -97,3 +97,48 @@ export async function saveNodeSetArtifact(courseCode: string, subtopicId: string
 export async function getNodeSetArtifact<T = unknown>(courseCode: string, subtopicId: string): Promise<T | null> {
   return getCourseArtifact<T>(courseCode, nodeSetFileName(subtopicId));
 }
+
+// ============== M8 node blueprint artifacts (per node) ==============
+
+/** Stable artifact filename for one node's experience blueprint. */
+export function blueprintFileName(nodeId: string): string {
+  return `blueprint_${nodeId}.json`;
+}
+
+export async function saveBlueprintArtifact(courseCode: string, nodeId: string, data: unknown): Promise<void> {
+  await saveCourseArtifact(courseCode, blueprintFileName(nodeId), data);
+}
+
+export async function getBlueprintArtifact<T = unknown>(courseCode: string, nodeId: string): Promise<T | null> {
+  return getCourseArtifact<T>(courseCode, blueprintFileName(nodeId));
+}
+
+// ============== M9 content-spec artifacts (per node bundle) ==============
+
+/** Stable artifact filename for one node's content-spec bundle. */
+export function contentSpecsFileName(nodeId: string): string {
+  return `content_specs_${nodeId}.json`;
+}
+
+export async function saveContentSpecsArtifact(courseCode: string, nodeId: string, data: unknown): Promise<void> {
+  await saveCourseArtifact(courseCode, contentSpecsFileName(nodeId), data);
+}
+
+export async function getContentSpecsArtifact<T = unknown>(courseCode: string, nodeId: string): Promise<T | null> {
+  return getCourseArtifact<T>(courseCode, contentSpecsFileName(nodeId));
+}
+
+// ============== M10 produced-object artifacts (per blueprint object) ==============
+
+/** Stable artifact filename for one produced learning object. */
+export function producedObjectFileName(objectId: string): string {
+  return `produced_${objectId}.json`;
+}
+
+export async function saveProducedObjectArtifact(courseCode: string, objectId: string, data: unknown): Promise<void> {
+  await saveCourseArtifact(courseCode, producedObjectFileName(objectId), data);
+}
+
+export async function getProducedObjectArtifact<T = unknown>(courseCode: string, objectId: string): Promise<T | null> {
+  return getCourseArtifact<T>(courseCode, producedObjectFileName(objectId));
+}

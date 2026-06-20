@@ -53,6 +53,62 @@ import {
   NodeEditConflictError,
 } from '../node-engine/nodeEditing.service.js';
 import {
+  generateBlueprint,
+  getBlueprint,
+  updateBlueprint,
+  approveBlueprint,
+  getBlueprintsForNodes,
+  BlueprintNodeNotApprovedError,
+  BlueprintValidationError,
+} from '../node-engine/nodeBlueprint.service.js';
+import {
+  generateContentSpecs,
+  getContentSpec,
+  getContentSpecsForNode,
+  updateContentSpec,
+  groundContentSpec,
+  approveContentSpec,
+  getContentSpecsForNodes,
+  ContentSpecBlueprintNotApprovedError,
+  ContentSpecValidationError,
+} from '../node-engine/contentSpec.service.js';
+import {
+  produceTextObject,
+  getProducedObject,
+  getProducedObjectsForNodes,
+  ContentSpecNotApprovedError,
+  TextProductionError,
+} from '../node-engine/modalityProduction.service.js';
+import {
+  produceVideoBriefObject,
+  VideoBriefProductionError,
+  ContentSpecNotApprovedError as VideoContentSpecNotApprovedError,
+} from '../node-engine/videoBriefProduction.service.js';
+import {
+  produceStructuredVisualObject,
+  StructuredVisualProductionError,
+  ContentSpecNotApprovedError as StructuredVisualContentSpecNotApprovedError,
+} from '../node-engine/structuredVisualProduction.service.js';
+import {
+  refreshVideoRenderForObject,
+  submitVideoRenderForObject,
+  VideoRenderError,
+} from '../node-engine/videoRenderProduction.service.js';
+import {
+  resolveStoredProducedVideoPath,
+  streamProducedVideoFile,
+} from '../node-engine/videoAsset.service.js';
+import {
+  getHeyGenCatalogStatus,
+  listHeyGenAvatarLooks,
+  listHeyGenAvatarCharacters,
+  listHeyGenAvatarLooksForGroup,
+  listHeyGenVoices,
+  listHeyGenVideoAgentStyles,
+  HeyGenCatalogError,
+} from '../node-engine/heygenCatalog.service.js';
+import { resolveHeyGenApprovedAvatars } from '../node-engine/heygenApprovedAvatars.service.js';
+import {
   getActiveNodeGenerationPrompt,
   updateNodeGenerationPrompt,
 } from '../node-engine/nodeGenerationPrompt.service.js';
@@ -262,6 +318,149 @@ router.put('/modality-config/:vehicle', async (req: Request, res: Response) => {
     }
     console.error('Error updating modality config:', error);
     res.status(500).json({ error: 'Failed to update modality config' });
+  }
+});
+
+// ===========================================================================
+// HeyGen catalog — avatar looks + voices for Video render Settings UI
+// ===========================================================================
+
+router.get('/heygen/catalog/status', (req: Request, res: Response) => {
+  try {
+    const apiKeyRef =
+      typeof req.query.api_key_ref === 'string' ? req.query.api_key_ref : undefined;
+    res.json(getHeyGenCatalogStatus(apiKeyRef));
+  } catch (error) {
+    console.error('HeyGen catalog status:', error);
+    res.status(500).json({ error: 'Failed to read HeyGen catalog status' });
+  }
+});
+
+/** Institution-curated allowlist — only these avatars appear in the Video Settings picker. */
+router.get('/heygen/approved-avatars', async (req: Request, res: Response) => {
+  try {
+    const apiKeyRef =
+      typeof req.query.api_key_ref === 'string' ? req.query.api_key_ref : undefined;
+    const items = await resolveHeyGenApprovedAvatars({ apiKeyRef });
+    res.json({ items });
+  } catch (error) {
+    console.error('HeyGen approved avatars:', error);
+    res.status(500).json({ error: 'Failed to load approved HeyGen avatars' });
+  }
+});
+
+router.get('/heygen/avatars', async (req: Request, res: Response) => {
+  try {
+    const q = req.query;
+    const page = await listHeyGenAvatarLooks({
+      apiKeyRef: typeof q.api_key_ref === 'string' ? q.api_key_ref : undefined,
+      ownership:
+        q.ownership === 'public' || q.ownership === 'private' ? q.ownership : undefined,
+      avatar_type:
+        q.avatar_type === 'studio_avatar' ||
+        q.avatar_type === 'digital_twin' ||
+        q.avatar_type === 'photo_avatar'
+          ? q.avatar_type
+          : undefined,
+      group_id: typeof q.group_id === 'string' ? q.group_id : undefined,
+      limit: typeof q.limit === 'string' ? Number(q.limit) : undefined,
+      token: typeof q.token === 'string' ? q.token : undefined,
+    });
+    res.json(page);
+  } catch (error) {
+    if (error instanceof HeyGenCatalogError) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('HeyGen avatars:', error);
+    res.status(500).json({ error: 'Failed to list HeyGen avatars' });
+  }
+});
+
+router.get('/heygen/avatar-characters', async (req: Request, res: Response) => {
+  try {
+    const q = req.query;
+    const page = await listHeyGenAvatarCharacters({
+      apiKeyRef: typeof q.api_key_ref === 'string' ? q.api_key_ref : undefined,
+      ownership:
+        q.ownership === 'public' || q.ownership === 'private' ? q.ownership : undefined,
+      avatar_type:
+        q.avatar_type === 'studio_avatar' ||
+        q.avatar_type === 'digital_twin' ||
+        q.avatar_type === 'photo_avatar'
+          ? q.avatar_type
+          : undefined,
+      limit: typeof q.limit === 'string' ? Number(q.limit) : undefined,
+      token: typeof q.token === 'string' ? q.token : undefined,
+    });
+    res.json(page);
+  } catch (error) {
+    if (error instanceof HeyGenCatalogError) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('HeyGen avatar characters:', error);
+    res.status(500).json({ error: 'Failed to list HeyGen avatar characters' });
+  }
+});
+
+router.get('/heygen/avatar-characters/:group_id/looks', async (req: Request, res: Response) => {
+  try {
+    const q = req.query;
+    const page = await listHeyGenAvatarLooksForGroup({
+      apiKeyRef: typeof q.api_key_ref === 'string' ? q.api_key_ref : undefined,
+      group_id: req.params.group_id,
+      ownership:
+        q.ownership === 'public' || q.ownership === 'private' ? q.ownership : undefined,
+      limit: typeof q.limit === 'string' ? Number(q.limit) : undefined,
+      token: typeof q.token === 'string' ? q.token : undefined,
+    });
+    res.json(page);
+  } catch (error) {
+    if (error instanceof HeyGenCatalogError) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('HeyGen avatar character looks:', error);
+    res.status(500).json({ error: 'Failed to list HeyGen avatar looks for character' });
+  }
+});
+
+router.get('/heygen/voices', async (req: Request, res: Response) => {
+  try {
+    const q = req.query;
+    const page = await listHeyGenVoices({
+      apiKeyRef: typeof q.api_key_ref === 'string' ? q.api_key_ref : undefined,
+      type: q.type === 'public' || q.type === 'private' ? q.type : undefined,
+      language: typeof q.language === 'string' ? q.language : undefined,
+      gender: typeof q.gender === 'string' ? q.gender : undefined,
+      limit: typeof q.limit === 'string' ? Number(q.limit) : undefined,
+      token: typeof q.token === 'string' ? q.token : undefined,
+    });
+    res.json(page);
+  } catch (error) {
+    if (error instanceof HeyGenCatalogError) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('HeyGen voices:', error);
+    res.status(500).json({ error: 'Failed to list HeyGen voices' });
+  }
+});
+
+// GET /api/node-engine/heygen/styles — curated Video Agent visual styles
+router.get('/heygen/styles', async (req: Request, res: Response) => {
+  try {
+    const q = req.query;
+    const page = await listHeyGenVideoAgentStyles({
+      apiKeyRef: typeof q.api_key_ref === 'string' ? q.api_key_ref : undefined,
+      tag: typeof q.tag === 'string' ? q.tag : undefined,
+      limit: typeof q.limit === 'string' ? Number(q.limit) : undefined,
+      token: typeof q.token === 'string' ? q.token : undefined,
+    });
+    res.json(page);
+  } catch (error) {
+    if (error instanceof HeyGenCatalogError) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('HeyGen styles:', error);
+    res.status(500).json({ error: 'Failed to list HeyGen video agent styles' });
   }
 });
 
@@ -488,5 +687,482 @@ router.post(
     }
   }
 );
+
+// ===========================================================================
+// M8 — Node Experience Blueprint (Level 1). One blueprint per approved node.
+// ===========================================================================
+
+// GET /api/node-engine/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/blueprint
+router.get(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/blueprint',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId } = req.params;
+      const blueprint = await getBlueprint(courseCode, subtopicId, nodeId);
+      if (!blueprint) {
+        return res.status(404).json({ error: `No blueprint for node "${nodeId}"` });
+      }
+      res.json({ blueprint });
+    } catch (error) {
+      console.error('Error fetching blueprint:', error);
+      res.status(500).json({ error: 'Failed to fetch blueprint' });
+    }
+  }
+);
+
+// POST /api/node-engine/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/blueprint
+router.post(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/blueprint',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId } = req.params;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const blueprint = await generateBlueprint(courseCode, subtopicId, nodeId, {
+        persist: body.persist !== false,
+      });
+      res.json({ message: 'Experience blueprint generated (draft — requires approval)', blueprint });
+    } catch (error) {
+      if (error instanceof BlueprintNodeNotApprovedError) {
+        return res.status(422).json({ error: error.message, node_not_approved: true });
+      }
+      if (error instanceof BlueprintValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error('Error generating blueprint:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to generate blueprint' });
+    }
+  }
+);
+
+// PATCH /api/node-engine/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/blueprint
+router.patch(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/blueprint',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId } = req.params;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const objects = Array.isArray(body.objects) ? (body.objects as never) : [];
+      if (objects.length === 0) {
+        return res.status(400).json({ error: 'objects[] patch array is required' });
+      }
+      const blueprint = await updateBlueprint(courseCode, subtopicId, nodeId, objects);
+      res.json({ message: 'Blueprint updated', blueprint });
+    } catch (error) {
+      if (error instanceof BlueprintValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error('Error updating blueprint:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to update blueprint' });
+    }
+  }
+);
+
+// POST /api/node-engine/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/blueprint/approve
+router.post(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/blueprint/approve',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId } = req.params;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const approver = typeof body.approver === 'string' ? body.approver : '';
+      if (!approver.trim()) {
+        return res.status(400).json({ error: 'approver is required' });
+      }
+      const blueprint = await approveBlueprint(courseCode, subtopicId, nodeId, approver);
+      res.json({ message: 'Blueprint approved', blueprint });
+    } catch (error) {
+      if (error instanceof BlueprintValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error('Error approving blueprint:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to approve blueprint' });
+    }
+  }
+);
+
+// POST /api/node-engine/courses/:courseCode/blueprints/hydrate — batch read
+router.post('/courses/:courseCode/blueprints/hydrate', async (req: Request, res: Response) => {
+  try {
+    const { courseCode } = req.params;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const refs = Array.isArray(body.nodes)
+      ? (body.nodes as Array<{ subtopicId?: string; nodeId?: string }>)
+          .filter((r) => typeof r.subtopicId === 'string' && typeof r.nodeId === 'string')
+          .map((r) => ({ subtopicId: r.subtopicId as string, nodeId: r.nodeId as string }))
+      : [];
+    const blueprints = await getBlueprintsForNodes(courseCode, refs);
+    res.json({ blueprints });
+  } catch (error) {
+    console.error('Error hydrating blueprints:', error);
+    res.status(500).json({ error: 'Failed to hydrate blueprints' });
+  }
+});
+
+// ===========================================================================
+// M9 — Learning Object Content Specification (Level 2). One spec per blueprint object.
+// ===========================================================================
+
+// GET /api/node-engine/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/content-specs
+router.get(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/content-specs',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId } = req.params;
+      const specs = await getContentSpecsForNode(courseCode, subtopicId, nodeId);
+      res.json({ specs });
+    } catch (error) {
+      console.error('Error fetching content specs:', error);
+      res.status(500).json({ error: 'Failed to fetch content specs' });
+    }
+  }
+);
+
+// GET /api/node-engine/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/objects/:objectId/content-spec
+router.get(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/objects/:objectId/content-spec',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId, objectId } = req.params;
+      const spec = await getContentSpec(courseCode, subtopicId, nodeId, objectId);
+      if (!spec) {
+        return res.status(404).json({ error: `No content spec for object "${objectId}"` });
+      }
+      res.json({ spec });
+    } catch (error) {
+      console.error('Error fetching content spec:', error);
+      res.status(500).json({ error: 'Failed to fetch content spec' });
+    }
+  }
+);
+
+// POST /api/node-engine/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/content-specs
+router.post(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/content-specs',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId } = req.params;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const objectId = typeof body.object_id === 'string' ? body.object_id : undefined;
+      const specs = await generateContentSpecs(courseCode, subtopicId, nodeId, {
+        persist: body.persist !== false,
+        objectId,
+      });
+      res.json({
+        message: objectId
+          ? 'Content spec generated (draft — requires approval)'
+          : 'Content specs generated (draft — require approval)',
+        specs,
+      });
+    } catch (error) {
+      if (error instanceof ContentSpecBlueprintNotApprovedError) {
+        return res.status(422).json({ error: error.message, blueprint_not_approved: true });
+      }
+      if (error instanceof ContentSpecValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error('Error generating content specs:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to generate content specs' });
+    }
+  }
+);
+
+// PATCH /api/node-engine/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/objects/:objectId/content-spec
+router.patch(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/objects/:objectId/content-spec',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId, objectId } = req.params;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const spec = await updateContentSpec(courseCode, subtopicId, nodeId, objectId, {
+        title: typeof body.title === 'string' ? body.title : undefined,
+        required_explanation:
+          typeof body.required_explanation === 'string' ? body.required_explanation : undefined,
+        preservation_rules: Array.isArray(body.preservation_rules)
+          ? (body.preservation_rules as string[])
+          : undefined,
+        grounding_note: typeof body.grounding_note === 'string' ? body.grounding_note : undefined,
+      });
+      res.json({ message: 'Content spec updated', spec });
+    } catch (error) {
+      if (error instanceof ContentSpecValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error('Error updating content spec:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to update content spec' });
+    }
+  }
+);
+
+// POST /api/node-engine/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/objects/:objectId/content-spec/ground
+router.post(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/objects/:objectId/content-spec/ground',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId, objectId } = req.params;
+      const spec = await groundContentSpec(courseCode, subtopicId, nodeId, objectId);
+      res.json({ message: 'Content spec re-grounded from node references', spec });
+    } catch (error) {
+      if (error instanceof ContentSpecValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error('Error grounding content spec:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to ground content spec' });
+    }
+  }
+);
+
+// POST /api/node-engine/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/objects/:objectId/content-spec/approve
+router.post(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/objects/:objectId/content-spec/approve',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId, objectId } = req.params;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const approver = typeof body.approver === 'string' ? body.approver : '';
+      if (!approver.trim()) {
+        return res.status(400).json({ error: 'approver is required' });
+      }
+      const spec = await approveContentSpec(courseCode, subtopicId, nodeId, objectId, approver);
+      res.json({ message: 'Content spec approved', spec });
+    } catch (error) {
+      if (error instanceof ContentSpecValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error('Error approving content spec:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to approve content spec' });
+    }
+  }
+);
+
+// POST /api/node-engine/courses/:courseCode/content-specs/hydrate — batch read
+router.post('/courses/:courseCode/content-specs/hydrate', async (req: Request, res: Response) => {
+  try {
+    const { courseCode } = req.params;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const refs = Array.isArray(body.nodes)
+      ? (body.nodes as Array<{ subtopicId?: string; nodeId?: string }>)
+          .filter((r) => typeof r.subtopicId === 'string' && typeof r.nodeId === 'string')
+          .map((r) => ({ subtopicId: r.subtopicId as string, nodeId: r.nodeId as string }))
+      : [];
+    const specs = await getContentSpecsForNodes(courseCode, refs);
+    res.json({ specs });
+  } catch (error) {
+    console.error('Error hydrating content specs:', error);
+    res.status(500).json({ error: 'Failed to hydrate content specs' });
+  }
+});
+
+// ===========================================================================
+// M10 — Modality Production (Level 3). Phase A: text production only.
+// ===========================================================================
+
+// GET /api/node-engine/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/objects/:objectId/produced
+router.get(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/objects/:objectId/produced',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId, objectId } = req.params;
+      const produced = await getProducedObject(courseCode, subtopicId, nodeId, objectId);
+      if (!produced) {
+        return res.status(404).json({ error: `No produced object for "${objectId}"` });
+      }
+      res.json({ produced });
+    } catch (error) {
+      console.error('Error fetching produced object:', error);
+      res.status(500).json({ error: 'Failed to fetch produced object' });
+    }
+  }
+);
+
+// POST /api/node-engine/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/objects/:objectId/produce-text
+router.post(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/objects/:objectId/produce-text',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId, objectId } = req.params;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const produced = await produceTextObject(courseCode, subtopicId, nodeId, objectId, {
+        persist: body.persist !== false,
+        useDeterministicProjection: body.use_deterministic_projection === true,
+      });
+      res.json({
+        message: 'Text learning object produced (recommended SME review before publish)',
+        produced,
+      });
+    } catch (error) {
+      if (error instanceof ContentSpecNotApprovedError) {
+        return res.status(422).json({ error: error.message, content_spec_not_approved: true });
+      }
+      if (error instanceof TextProductionError) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error('Error producing text object:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to produce text object' });
+    }
+  }
+);
+
+// POST .../produce-video-brief — Phase B: HeyGen-ready video brief (no render yet)
+router.post(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/objects/:objectId/produce-video-brief',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId, objectId } = req.params;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const overrideRaw = body.render_style_override;
+      const renderStyleOverride =
+        overrideRaw === 'studio_direct' ||
+        overrideRaw === 'video_agent_produced' ||
+        overrideRaw === 'inherit'
+          ? overrideRaw
+          : undefined;
+      const produced = await produceVideoBriefObject(courseCode, subtopicId, nodeId, objectId, {
+        persist: body.persist !== false,
+        useDeterministicProjection: body.use_deterministic_projection === true,
+        ...(renderStyleOverride ? { renderStyleOverride } : {}),
+      });
+      res.json({
+        message: 'Video brief produced — HeyGen prompt ready (render when API connected)',
+        produced,
+      });
+    } catch (error) {
+      if (error instanceof VideoContentSpecNotApprovedError) {
+        return res.status(422).json({ error: error.message, content_spec_not_approved: true });
+      }
+      if (error instanceof VideoBriefProductionError) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error('Error producing video brief:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to produce video brief',
+      });
+    }
+  }
+);
+
+// POST .../produce-structured-visual — semantic visual spec (platform renders it)
+router.post(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/objects/:objectId/produce-structured-visual',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId, objectId } = req.params;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const produced = await produceStructuredVisualObject(courseCode, subtopicId, nodeId, objectId, {
+        persist: body.persist !== false,
+        useDeterministicProjection: body.use_deterministic_projection === true,
+      });
+      res.json({
+        message: 'Structured visual produced (recommended SME review before publish)',
+        produced,
+      });
+    } catch (error) {
+      if (error instanceof StructuredVisualContentSpecNotApprovedError) {
+        return res.status(422).json({ error: error.message, content_spec_not_approved: true });
+      }
+      if (error instanceof StructuredVisualProductionError) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error('Error producing structured visual:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to produce structured visual',
+      });
+    }
+  }
+);
+
+// POST .../render-video — Phase C: HeyGen Direct Video (script + settings)
+router.post(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/objects/:objectId/render-video',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId, objectId } = req.params;
+      const produced = await submitVideoRenderForObject(
+        courseCode,
+        subtopicId,
+        nodeId,
+        objectId
+      );
+      const ms = produced.envelope.modality_specific ?? {};
+      res.json({
+        message:
+          ms.render_mock === true
+            ? 'Mock render complete (set HEYGEN_API_KEY + avatar/voice for live HeyGen)'
+            : 'HeyGen render submitted — poll refresh until complete',
+        produced,
+      });
+    } catch (error) {
+      if (error instanceof VideoRenderError) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error('Error rendering video:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to render video',
+      });
+    }
+  }
+);
+
+// POST .../render-video/refresh — poll HeyGen status and update produced object
+router.post(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/objects/:objectId/render-video/refresh',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId, objectId } = req.params;
+      const produced = await refreshVideoRenderForObject(
+        courseCode,
+        subtopicId,
+        nodeId,
+        objectId
+      );
+      res.json({ message: 'HeyGen render status refreshed', produced });
+    } catch (error) {
+      if (error instanceof VideoRenderError) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error('Error refreshing video render:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to refresh video render',
+      });
+    }
+  }
+);
+
+// GET .../video — stream Maestro-stored produced video for SME in-app review
+router.get(
+  '/courses/:courseCode/objects/:objectId/video',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, objectId } = req.params;
+      const filePath = resolveStoredProducedVideoPath(courseCode, objectId);
+      if (!filePath) {
+        return res.status(404).json({
+          error: 'Video not ingested into Maestro yet — refresh render status after HeyGen completes.',
+        });
+      }
+      streamProducedVideoFile(filePath, req, res);
+    } catch (error) {
+      console.error('Error streaming produced video:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to stream video',
+      });
+    }
+  }
+);
+
+// POST /api/node-engine/courses/:courseCode/produced-objects/hydrate — batch read by object_id
+router.post('/courses/:courseCode/produced-objects/hydrate', async (req: Request, res: Response) => {
+  try {
+    const { courseCode } = req.params;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const objectIds = Array.isArray(body.object_ids)
+      ? (body.object_ids as unknown[]).filter((id): id is string => typeof id === 'string')
+      : [];
+    const produced = await getProducedObjectsForNodes(courseCode, objectIds);
+    res.json({ produced });
+  } catch (error) {
+    console.error('Error hydrating produced objects:', error);
+    res.status(500).json({ error: 'Failed to hydrate produced objects' });
+  }
+});
 
 export default router;

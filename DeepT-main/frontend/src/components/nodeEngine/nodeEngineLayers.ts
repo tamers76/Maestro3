@@ -15,10 +15,9 @@
  *    ENGINEERING/spec register, kept for developer clarity only. They should not
  *    be surfaced verbatim to end users unless they fit the design.
  *
- * `active: true` marks the only operational layer in this phase (Layer 1, wired
- * to the M7 node-generation backend). Layers 2–5 are UI placeholders that unlock
- * in sequence once the previous layer is approved — they have NO backend logic
- * (M8/M9/M10/Step 9 arrive in later phases).
+ * `active: true` marks operational layers wired to a backend in this phase.
+ * Layers 4–5 unlock in sequence once the previous layer is approved (M10/M11
+ * arrive in later phases).
  */
 export interface NodeEngineLayer {
   layer: number
@@ -51,7 +50,7 @@ export const NODE_ENGINE_LAYER_MAP: NodeEngineLayer[] = [
     label: 'Experience Blueprint',
     module: 'M8',
     specReference: 'Build Spec §8.0',
-    active: false,
+    active: true,
     job: 'Shape each approved node into a learning experience blueprint.',
     output: 'Experience Blueprint',
     lockReason: 'Approve Layer 1 — Node Generation first.',
@@ -61,7 +60,7 @@ export const NODE_ENGINE_LAYER_MAP: NodeEngineLayer[] = [
     label: 'Content Specification',
     module: 'M9',
     specReference: 'Build Spec §8.1',
-    active: false,
+    active: true,
     job: 'Specify the full content contract for each blueprinted node.',
     output: 'Content Specification',
     lockReason: 'Approve Layer 2 — Experience Blueprint first.',
@@ -71,7 +70,7 @@ export const NODE_ENGINE_LAYER_MAP: NodeEngineLayer[] = [
     label: 'Modality Production',
     module: 'M10',
     specReference: 'Build Spec §8.2–§8.14',
-    active: false,
+    active: true,
     job: 'Produce the learning objects across their chosen modalities.',
     output: 'Produced Learning Objects',
     lockReason: 'Approve Layer 3 — Content Specification first.',
