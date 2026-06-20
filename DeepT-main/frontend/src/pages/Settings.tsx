@@ -185,7 +185,7 @@ export default function Settings() {
     try {
       setTestingOpenRouter(true)
       setOpenRouterStatus('idle')
-      const result = await testOpenRouterConnection()
+      const result = await testOpenRouterConnection(settings?.openrouter?.apiKey, settings?.openrouter?.baseUrl)
       setOpenRouterStatus(result.success ? 'success' : 'error')
       showToast({
         title: result.success ? 'Connected' : 'Connection Failed',
@@ -231,7 +231,7 @@ export default function Settings() {
     try {
       setTestingOpenAI(true)
       setOpenAIStatus('idle')
-      const result = await testOpenAIConnection()
+      const result = await testOpenAIConnection(settings?.openai?.apiKey, settings?.openai?.baseUrl)
       setOpenAIStatus(result.success ? 'success' : 'error')
       showToast({
         title: result.success ? 'Connected' : 'Connection Failed',

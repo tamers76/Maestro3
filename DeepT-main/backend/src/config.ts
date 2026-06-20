@@ -456,16 +456,46 @@ export function loadSettings(): Settings {
   return overlayEnvSecrets(mergedSettings);
 }
 
-/** Strip secrets — they are sourced from env at runtime and never persisted. */
+/**
+ * Strip only the Postgres connection secrets, which are managed exclusively via
+ * environment/.env (the DB pool is bootstrapped from env before settings exist).
+ * API keys (OpenRouter/OpenAI) and the Neo4j password ARE persisted to
+ * `app_settings` so credentials entered in the UI survive a server restart.
+ * Environment variables still take precedence at load time (overlayEnvSecrets).
+ */
 function sanitizeSettings(settings: Settings): Settings {
   return {
     ...settings,
-    openrouter: { ...settings.openrouter, apiKey: '' },
-    openai: { ...settings.openai, apiKey: '' },
-    neo4j: { ...settings.neo4j, password: '' },
     postgres: { ...settings.postgres, connectionString: '', password: '' },
   };
 }
+
+/**
+ * A secret is "masked" when it is the display echo returned by GET /api/settings.
+ * API keys are masked as `sk-or...wxyz` (contains `...`) and the Neo4j password is
+ * masked as `********` (all asterisks). Persisting either would clobber the real
+ * stored secret, so both forms must be treated as "no change".
+ */
+function isMaskedSecret(value?: string): boolean {
+  if (!value) return false;
+  const v = value.trim();
+  return v.includes('...') || /^\*+$/.test(v);
+}
+
+/**
+ * Pick the secret to persist. The GET endpoint returns a masked key, so a PUT
+ * that echoes it back (user didn't retype) must NOT overwrite the stored value.
+ * An omitted field (undefined) also keeps the current value. An explicit empty
+ * string IS honored so a user can intentionally clear a key.
+ */
+function chooseSecret(incoming: string | undefined, current: string): string {
+  if (incoming === undefined) return current;
+  const trimmed = incoming.trim();
+  if (isMaskedSecret(trimmed)) return current;
+  return trimmed;
+}
+
+export { isMaskedSecret };
 
 // Persist settings to the `app_settings` table (secrets are sanitized out).
 export async function saveSettings(settings: Settings): Promise<void> {
@@ -518,8 +548,16 @@ export async function updateSettings(newSettings: Partial<Settings>): Promise<Se
   const updated: Settings = {
     ...current,
     ...newSettings,
-    openrouter: { ...current.openrouter, ...newSettings.openrouter },
-    openai: { ...current.openai, ...newSettings.openai },
+    openrouter: {
+      ...current.openrouter,
+      ...newSettings.openrouter,
+      apiKey: chooseSecret(newSettings.openrouter?.apiKey, current.openrouter.apiKey),
+    },
+    openai: {
+      ...current.openai,
+      ...newSettings.openai,
+      apiKey: chooseSecret(newSettings.openai?.apiKey, current.openai?.apiKey || ''),
+    },
     ollama: { 
       ...current.ollama, 
       ...newSettings.ollama,
@@ -527,7 +565,11 @@ export async function updateSettings(newSettings: Partial<Settings>): Promise<Se
     },
     embedding: { ...current.embedding, ...newSettings.embedding },
     models: { ...current.models, ...newSettings.models },
-    neo4j: { ...current.neo4j, ...newSettings.neo4j },
+    neo4j: {
+      ...current.neo4j,
+      ...newSettings.neo4j,
+      password: chooseSecret(newSettings.neo4j?.password, current.neo4j.password),
+    },
     postgres: { ...current.postgres, ...newSettings.postgres },
     // NEW: Per-stage configs with deep merge
     stageConfigs: {

@@ -1090,8 +1090,12 @@ export async function testNeo4jConnection(): Promise<{ success: boolean; message
   return response.json();
 }
 
-export async function testOpenRouterConnection(): Promise<{ success: boolean; message: string }> {
-  const response = await fetch(`${API_BASE}/settings/test-openrouter`, { method: 'POST' });
+export async function testOpenRouterConnection(apiKey?: string, baseUrl?: string): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE}/settings/test-openrouter`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiKey, baseUrl }),
+  });
   return response.json();
 }
 
@@ -1100,8 +1104,12 @@ export async function testOllamaConnection(): Promise<{ success: boolean; messag
   return response.json();
 }
 
-export async function testOpenAIConnection(): Promise<{ success: boolean; message: string }> {
-  const response = await fetch(`${API_BASE}/settings/test-openai`, { method: 'POST' });
+export async function testOpenAIConnection(apiKey?: string, baseUrl?: string): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE}/settings/test-openai`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiKey, baseUrl }),
+  });
   return response.json();
 }
 

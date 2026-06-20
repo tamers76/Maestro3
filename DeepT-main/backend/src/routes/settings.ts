@@ -250,18 +250,32 @@ router.post('/test-neo4j', async (_req: Request, res: Response) => {
 });
 
 // POST /api/settings/test-openrouter - Test OpenRouter API
-router.post('/test-openrouter', async (_req: Request, res: Response) => {
+// Accepts an optional { apiKey, baseUrl } in the body so the UI can validate the
+// key the user just typed (even before saving). Masked/empty values fall back to
+// the stored key.
+router.post('/test-openrouter', async (req: Request, res: Response) => {
   try {
     const settings = getSettings();
-    
-    const response = await fetch(`${settings.openrouter.baseUrl}/models`, {
+
+    const bodyKey = typeof req.body?.apiKey === 'string' ? req.body.apiKey.trim() : '';
+    const apiKey = (bodyKey && !bodyKey.includes('...')) ? bodyKey : settings.openrouter.apiKey?.trim();
+    if (!apiKey) {
+      throw new Error('OpenRouter API key not configured. Enter your API key and try again.');
+    }
+    const baseUrl = (typeof req.body?.baseUrl === 'string' && req.body.baseUrl.trim())
+      || settings.openrouter.baseUrl
+      || 'https://openrouter.ai/api/v1';
+
+    const response = await fetch(`${baseUrl}/models`, {
       headers: {
-        'Authorization': `Bearer ${settings.openrouter.apiKey}`
+        'Authorization': `Bearer ${apiKey}`
       }
     });
     
     if (!response.ok) {
-      throw new Error(`API returned ${response.status}`);
+      const errorData = await response.json().catch(() => ({})) as { error?: { message?: string } };
+      const errorMessage = errorData.error?.message || `HTTP ${response.status}`;
+      throw new Error(`OpenRouter error: ${errorMessage}`);
     }
     
     res.json({ success: true, message: 'OpenRouter API connection successful' });
@@ -328,16 +342,22 @@ router.post('/test-ollama', async (_req: Request, res: Response) => {
 });
 
 // POST /api/settings/test-openai - Test OpenAI API
-router.post('/test-openai', async (_req: Request, res: Response) => {
+// Accepts an optional { apiKey, baseUrl } in the body so the UI can validate the
+// key the user just typed (even before saving). Masked/empty values fall back to
+// the stored key.
+router.post('/test-openai', async (req: Request, res: Response) => {
   try {
     const settings = getSettings();
-    
-    const apiKey = settings.openai?.apiKey?.trim();
+
+    const bodyKey = typeof req.body?.apiKey === 'string' ? req.body.apiKey.trim() : '';
+    const apiKey = (bodyKey && !bodyKey.includes('...')) ? bodyKey : settings.openai?.apiKey?.trim();
     if (!apiKey) {
-      throw new Error('OpenAI API key not configured. Please enter your API key and save settings first.');
+      throw new Error('OpenAI API key not configured. Please enter your API key and try again.');
     }
     
-    const baseUrl = settings.openai?.baseUrl || 'https://api.openai.com/v1';
+    const baseUrl = (typeof req.body?.baseUrl === 'string' && req.body.baseUrl.trim())
+      || settings.openai?.baseUrl
+      || 'https://api.openai.com/v1';
     
     console.log(`Testing OpenAI connection at: ${baseUrl}/models`);
     
