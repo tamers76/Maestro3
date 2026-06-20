@@ -88,7 +88,7 @@ export default function WizardStepShell({
       </div>
 
       {steps && steps.length > 0 && (
-        <div className="rounded-xl border border-border bg-card p-4">
+        <div className="glass-strong rounded-xl p-4">
           <StageStepper steps={steps} onSelect={onSelectStep} />
         </div>
       )}

@@ -13,7 +13,6 @@ import {
   updateSettings,
   testNeo4jConnection,
   testOpenRouterConnection,
-  testOllamaConnection,
   testOpenAIConnection,
   fetchEmbeddingHealth,
   fetchReferenceCoverageConfig,
@@ -23,7 +22,7 @@ import {
   type EmbeddingHealth,
   type ReferenceCoverageThresholds,
 } from '@/services/api'
-import { Loader2, Check, X, Save, RefreshCw, Database, Key, Cpu, Server, Users, Sparkles, Layers, Activity, Network } from 'lucide-react'
+import { Loader2, Check, X, Save, RefreshCw, Database, Key, Cpu, Users, Sparkles, Layers, Activity, Network } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 /** The coverage-judgment prompt id in the node-engine registry (Phase A seed). */
@@ -39,11 +38,9 @@ export default function Settings() {
   const [saving, setSaving] = useState(false)
   const [testingNeo4j, setTestingNeo4j] = useState(false)
   const [testingOpenRouter, setTestingOpenRouter] = useState(false)
-  const [testingOllama, setTestingOllama] = useState(false)
   const [testingOpenAI, setTestingOpenAI] = useState(false)
   const [neo4jStatus, setNeo4jStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [openRouterStatus, setOpenRouterStatus] = useState<'idle' | 'success' | 'error'>('idle')
-  const [ollamaStatus, setOllamaStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [openAIStatus, setOpenAIStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [embeddingHealth, setEmbeddingHealth] = useState<EmbeddingHealth | null>(null)
   const [checkingEmbedding, setCheckingEmbedding] = useState(false)
@@ -204,29 +201,6 @@ export default function Settings() {
     }
   }
   
-  async function handleTestOllama() {
-    try {
-      setTestingOllama(true)
-      setOllamaStatus('idle')
-      const result = await testOllamaConnection()
-      setOllamaStatus(result.success ? 'success' : 'error')
-      showToast({
-        title: result.success ? 'Connected' : 'Connection Failed',
-        description: result.message,
-        variant: result.success ? 'success' : 'destructive',
-      })
-    } catch (error) {
-      setOllamaStatus('error')
-      showToast({
-        title: 'Error',
-        description: 'Failed to test Ollama connection. Is Ollama running?',
-        variant: 'destructive',
-      })
-    } finally {
-      setTestingOllama(false)
-    }
-  }
-  
   async function handleTestOpenAI() {
     try {
       setTestingOpenAI(true)
@@ -366,12 +340,12 @@ export default function Settings() {
             </div>
             <div>
               <CardTitle>AI Provider</CardTitle>
-              <CardDescription>Choose between cloud (OpenRouter, OpenAI) or local (Ollama) AI models</CardDescription>
+              <CardDescription>Choose between cloud providers OpenRouter and OpenAI for AI models</CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2">
             <button
               type="button"
               onClick={() => handleProviderChange('openrouter')}
@@ -411,27 +385,6 @@ export default function Settings() {
               </div>
               <p className="text-sm text-muted-foreground">
                 Direct access to OpenAI's GPT-4, GPT-4o, o1, and other models
-              </p>
-            </button>
-            
-            <button
-              type="button"
-              onClick={() => handleProviderChange('ollama')}
-              className={cn(
-                'flex flex-col items-start gap-2 rounded-lg border-2 p-4 text-left transition-all',
-                settings.aiProvider === 'ollama'
-                  ? 'border-emerald-500 bg-emerald-500/10 dark:bg-emerald-500/20'
-                  : 'border-border hover:border-primary/50 hover:bg-muted/50'
-              )}
-            >
-              <div className="flex items-center gap-2">
-                <Server className={cn('h-5 w-5', settings.aiProvider === 'ollama' ? 'text-emerald-500' : 'text-muted-foreground')} />
-                <span className={cn('font-medium', settings.aiProvider === 'ollama' ? 'text-emerald-500' : 'text-foreground')}>
-                  Ollama (Local)
-                </span>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Run AI models locally on your machine. Free, private, and no internet required
               </p>
             </button>
           </div>
@@ -562,63 +515,6 @@ export default function Settings() {
                 )}
                 Test Connection
               </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-      
-      {/* Ollama Settings - Only show when Ollama is selected */}
-      {settings.aiProvider === 'ollama' && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500">
-                <Server className="h-5 w-5" />
-              </div>
-              <div>
-                <CardTitle>Ollama (Local)</CardTitle>
-                <CardDescription>Local AI model server settings</CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Base URL</label>
-              <Input
-                placeholder="http://localhost:11434"
-                value={settings.ollama?.baseUrl || 'http://localhost:11434'}
-                onChange={e => setSettings(prev => prev ? {
-                  ...prev,
-                  ollama: { ...prev.ollama, baseUrl: e.target.value }
-                } : prev)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Default is http://localhost:11434. Change only if Ollama runs on a different port or machine.
-              </p>
-            </div>
-            <div className="flex items-center justify-between pt-2">
-              <div className="flex items-center gap-2">
-                {ollamaStatus === 'success' && <Check className="h-4 w-4 text-emerald-500" />}
-                {ollamaStatus === 'error' && <X className="h-4 w-4 text-red-500" />}
-                <span className="text-sm text-muted-foreground">
-                  {ollamaStatus === 'success' ? 'Ollama is running' : 
-                   ollamaStatus === 'error' ? 'Cannot connect to Ollama' : ''}
-                </span>
-              </div>
-              <Button variant="outline" onClick={handleTestOllama} disabled={testingOllama}>
-                {testingOllama ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                )}
-                Test Connection
-              </Button>
-            </div>
-            <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 p-3 text-sm text-amber-600 dark:text-amber-400">
-              <p className="font-medium">Tip: Pull models with Ollama CLI</p>
-              <p className="mt-1 text-amber-600/80 dark:text-amber-400/80">
-                Run <code className="rounded bg-amber-500/20 px-1">ollama pull llama3.2</code> or <code className="rounded bg-amber-500/20 px-1">ollama pull mistral</code> to download models.
-              </p>
             </div>
           </CardContent>
         </Card>

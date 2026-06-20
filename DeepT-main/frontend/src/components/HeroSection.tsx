@@ -490,11 +490,9 @@ const InteractiveHero: React.FC = () => {
     ];
 
   return (
-    <div className="relative bg-[#111111] text-gray-300 min-h-screen flex flex-col overflow-x-hidden">
-        <canvas ref={canvasRef} className="absolute inset-0 z-0 pointer-events-none opacity-80" />
-        <div className="absolute inset-0 z-1 pointer-events-none" style={{
-            background: 'linear-gradient(to bottom, transparent 0%, #111111 90%), radial-gradient(ellipse at center, transparent 40%, #111111 95%)'
-        }}></div>
+    <div className="relative bg-[#f7f7f7] text-[#1a1a1a] min-h-screen flex flex-col overflow-x-hidden font-sans">
+        <canvas ref={canvasRef} className="absolute inset-0 z-0 pointer-events-none opacity-20" />
+        <div className="absolute inset-0 z-1 pointer-events-none bg-[#f7f7f7]/90" />
 
         <main className="flex-grow flex flex-col items-center justify-start text-center px-4 pt-20 sm:pt-28 pb-16 relative z-10">
 
@@ -504,14 +502,14 @@ const InteractiveHero: React.FC = () => {
                 animate="visible"
                 className="mb-6"
             >
-                <ShinyText text="Curriculum Intelligence System" className="bg-white/5 border border-white/10 text-gray-300 px-4 py-1 rounded-full text-xs sm:text-sm font-medium cursor-pointer hover:border-white/20 transition-colors" />
+                <ShinyText text="Curriculum Intelligence System v3.1.1" className="bg-white border border-[#e8e8e8] text-[#636363] px-4 py-1 rounded-full text-xs sm:text-sm font-medium" />
             </motion.div>
 
             <motion.h1
                 variants={headlineVariants}
                 initial="hidden"
                 animate="visible"
-                className="text-4xl sm:text-5xl lg:text-[64px] font-semibold text-white leading-tight max-w-4xl mb-4"
+                className="text-4xl sm:text-5xl lg:text-[56px] font-medium text-[#1a1a1a] leading-none max-w-4xl mb-4 tracking-normal"
             >
                 Build the next generation of<br />{' '}
                 <span className="inline-block align-bottom">
@@ -523,7 +521,7 @@ const InteractiveHero: React.FC = () => {
                             'smarter course design',
                             'curriculum intelligence',
                         ]}
-                        mainClassName="text-indigo-400 mx-1"
+                        mainClassName="text-[#024ad8] mx-1"
                         staggerFrom={"first"}
                         initial={{ y: "-100%", opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
@@ -542,7 +540,7 @@ const InteractiveHero: React.FC = () => {
                 variants={subHeadlineVariants}
                 initial="hidden"
                 animate="visible"
-                className="text-base sm:text-lg lg:text-xl text-gray-400 max-w-2xl mx-auto mb-8"
+                className="text-base sm:text-lg lg:text-xl text-[#636363] max-w-2xl mx-auto mb-8"
             >
                 Design, analyze, and improve your courses with an AI copilot that understands learning outcomes, content gaps, and student needs — so you can build better curricula, faster.
             </motion.p>
@@ -555,7 +553,7 @@ const InteractiveHero: React.FC = () => {
             >
                 <motion.a
                     href="/courses/new"
-                    className="w-full sm:w-auto bg-indigo-500 text-white px-6 py-2.5 rounded-md text-sm font-semibold hover:bg-indigo-600 transition-colors duration-200 whitespace-nowrap shadow-sm hover:shadow-md text-center"
+                    className="w-full sm:w-auto bg-[#024ad8] text-white px-6 py-3 rounded-md text-sm font-semibold uppercase tracking-wide hover:bg-[#0e3191] transition-colors duration-200 whitespace-nowrap text-center min-h-[44px] inline-flex items-center justify-center"
                     whileHover={{ scale: 1.03, y: -1 }}
                     whileTap={{ scale: 0.97 }}
                     transition={{ type: "spring", stiffness: 400, damping: 15 }}
@@ -564,7 +562,7 @@ const InteractiveHero: React.FC = () => {
                 </motion.a>
                 <motion.a
                     href="/dashboard"
-                    className="w-full sm:w-auto bg-white/5 text-gray-200 border border-white/15 px-6 py-2.5 rounded-md text-sm font-semibold hover:bg-white/10 hover:border-white/25 transition-colors duration-200 whitespace-nowrap text-center"
+                    className="w-full sm:w-auto bg-white text-[#024ad8] border border-[#024ad8] px-6 py-3 rounded-md text-sm font-semibold uppercase tracking-wide hover:bg-[#eef4ff] transition-colors duration-200 whitespace-nowrap text-center min-h-[44px] inline-flex items-center justify-center"
                     whileHover={{ scale: 1.03, y: -1 }}
                     whileTap={{ scale: 0.97 }}
                     transition={{ type: "spring", stiffness: 400, damping: 15 }}
@@ -579,12 +577,12 @@ const InteractiveHero: React.FC = () => {
                 animate="visible"
                 className="flex flex-col items-center justify-center space-y-3 mb-10"
             >
-                <span className="text-xs uppercase text-gray-500 tracking-wider font-medium">Designed for</span>
+                <span className="text-xs uppercase text-[#636363] tracking-wider font-medium">Designed for</span>
                 <div className="flex flex-wrap items-center justify-center gap-2">
                     {designedForItems.map((item) => (
                         <span
                             key={item}
-                            className="whitespace-nowrap rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs sm:text-sm text-gray-300"
+                            className="whitespace-nowrap rounded-full border border-[#e8e8e8] bg-white px-3 py-1 text-xs sm:text-sm text-[#1a1a1a]"
                         >
                             {item}
                         </span>

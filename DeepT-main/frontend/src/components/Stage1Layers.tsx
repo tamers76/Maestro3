@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { Markdown } from '@/components/ui/Markdown'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import { showToast } from '@/components/ui/Toaster'
@@ -34,21 +33,7 @@ import type {
 function FormattedReport({ markdown }: { markdown: string }) {
   return (
     <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-      <div
-        className={cn(
-          'prose prose-sm dark:prose-invert max-w-none',
-          'prose-headings:font-semibold prose-headings:text-foreground',
-          'prose-h1:text-lg prose-h1:mb-3 prose-h1:pb-2 prose-h1:border-b prose-h1:border-border',
-          'prose-h2:text-base prose-h2:mt-6 prose-h2:mb-2',
-          'prose-h3:text-xs prose-h3:mt-4 prose-h3:mb-1 prose-h3:uppercase prose-h3:tracking-wide prose-h3:text-muted-foreground',
-          'prose-p:leading-relaxed prose-li:my-0.5 prose-strong:text-foreground',
-          'prose-table:text-sm prose-table:my-3',
-          'prose-th:bg-muted/60 prose-th:p-2 prose-th:text-left prose-th:border prose-th:border-border',
-          'prose-td:p-2 prose-td:border prose-td:border-border prose-td:align-top'
-        )}
-      >
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
-      </div>
+      <Markdown>{markdown}</Markdown>
     </div>
   )
 }
@@ -232,9 +217,18 @@ export default function Stage1Layers({
     if (alignmentFetchSignal > 0) void refreshAlignmentReadiness()
   }, [alignmentFetchSignal, refreshAlignmentReadiness])
 
+  // Load once per course. We intentionally depend on `courseCode` (not the
+  // `loadLayers` identity) so that an unstable `onAllApproved` callback from a
+  // parent — which `loadLayers` invokes and which may itself trigger a parent
+  // re-render — cannot create an infinite fetch loop. A ref keeps the latest
+  // implementation without re-running the effect.
+  const loadLayersRef = useRef(loadLayers)
   useEffect(() => {
-    loadLayers()
+    loadLayersRef.current = loadLayers
   }, [loadLayers])
+  useEffect(() => {
+    void loadLayersRef.current()
+  }, [courseCode])
 
   // Wizard solo mode: keep the rendered layer expanded so its editor + auto-run
   // and scroll effects behave exactly as in the accordion.
@@ -481,23 +475,32 @@ export default function Stage1Layers({
           // Server says "running" but this client did not start it -> stale (e.g. interrupted run)
           const staleRunning = layer.status === 'running' && !clientRunning
           const isRunning = clientRunning
+          // Any running state we should surface with an animated indicator. Stale
+          // server-running (interrupted) is handled separately with a regenerate hint.
+          const showRunning = clientRunning
           const showRunButton = layer.canRun || staleRunning
 
           // Once a layer is approved, surface a "continue" affordance to the next
           // not-yet-approved layer so the frontier layer (e.g. Layer 5 -> Layer 6)
           // always has the same forward navigation the approve-and-continue buttons
-          // provide at approval time.
+          // provide at approval time. In the wizard (solo) view the sticky
+          // WizardActionBar already owns "Next layer" navigation, so this in-card
+          // affordance would be redundant — only show it in the legacy list view.
           const layerIndex = layers.findIndex((l) => l.layerId === layer.layerId)
           const nextLayer = layerIndex >= 0 ? layers[layerIndex + 1] : undefined
           const showContinueToNext =
-            layer.status === 'approved' && !!nextLayer && nextLayer.status !== 'approved'
+            !solo && layer.status === 'approved' && !!nextLayer && nextLayer.status !== 'approved'
 
           const actionButtons = (
             <div className="flex flex-wrap gap-2">
               {showContinueToNext && nextLayer && (
-                <Button size="sm" onClick={() => goToLayer(nextLayer.layerId)}>
+                <Button
+                  size="default"
+                  onClick={() => goToLayer(nextLayer.layerId)}
+                  className="group order-first shadow-glow ring-2 ring-primary/25 ring-offset-2 ring-offset-background"
+                >
                   Continue to Layer {nextLayer.config.order}
-                  <ChevronRight className="ml-2 h-4 w-4" />
+                  <ChevronRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
                 </Button>
               )}
               {staleRunning && (
@@ -507,7 +510,12 @@ export default function Stage1Layers({
                 </p>
               )}
               {showRunButton && (
-                <Button size="sm" disabled={isRunning} onClick={() => handleRun(layer.layerId)}>
+                <Button
+                  size="sm"
+                  variant={layer.status === 'approved' ? 'secondary' : 'default'}
+                  disabled={isRunning}
+                  onClick={() => handleRun(layer.layerId)}
+                >
                   {isRunning ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : layer.reportMarkdown ? (
@@ -590,8 +598,8 @@ export default function Stage1Layers({
                 layerRefs.current[layer.layerId] = el
               }}
               className={cn(
-                'scroll-mt-4 rounded-lg border',
-                layer.status === 'approved' ? 'border-emerald-500/40' : 'border-border'
+                'scroll-mt-4 glass-strong rounded-xl',
+                layer.status === 'approved' && '!border-emerald-500/50'
               )}
             >
               <button
@@ -607,9 +615,24 @@ export default function Stage1Layers({
                     <span className="font-medium">
                       {layer.config.order}. {layer.config.name}
                     </span>
-                    <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', statusColor(layer.status))}>
-                      {layer.status === 'locked' && <Lock className="mr-1 inline h-3 w-3" />}
-                      {STATUS_LABELS[layer.status] || layer.status}
+                    <span
+                      className={cn(
+                        'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
+                        statusColor(showRunning ? 'running' : layer.status),
+                        showRunning && 'animate-pulse'
+                      )}
+                    >
+                      {showRunning ? (
+                        <>
+                          <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+                          Running…
+                        </>
+                      ) : (
+                        <>
+                          {layer.status === 'locked' && <Lock className="mr-1 inline h-3 w-3" />}
+                          {STATUS_LABELS[layer.status] || layer.status}
+                        </>
+                      )}
                     </span>
                     <span className="text-xs text-muted-foreground capitalize">
                       {layer.config.mode === 'council' ? 'LLM Council' : 'Single Agent'}
@@ -627,6 +650,25 @@ export default function Stage1Layers({
                 <div className="space-y-4 border-t border-border px-4 pb-4">
                   {layer.error && (
                     <p className="rounded-md bg-red-500/10 p-2 text-sm text-red-600">{layer.error}</p>
+                  )}
+
+                  {showRunning && (
+                    <div className="mt-4 flex items-center gap-3 overflow-hidden rounded-md border border-blue-500/30 bg-blue-500/5 p-3">
+                      <Loader2 className="h-5 w-5 shrink-0 animate-spin text-blue-600 dark:text-blue-400" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                          Running {layer.config.mode === 'council' ? 'LLM Council' : 'AI agent'}…
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Generating {layer.config.productOutput}. This can take up to a minute — you can stay
+                          on this step while it works.
+                        </p>
+                      </div>
+                      <span className="relative flex h-2.5 w-2.5 shrink-0">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-500/60" />
+                        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" />
+                      </span>
+                    </div>
                   )}
 
                   {layer.layerId !== 'layer1-intake' && actionButtons}

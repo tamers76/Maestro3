@@ -73,6 +73,46 @@ function isReasoningModel(model: string): boolean {
   return reasoningModels.some(rm => lowerModel.includes(rm));
 }
 
+const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
+const DEFAULT_OPENROUTER_MODEL = 'openai/gpt-4o-mini';
+
+function normalizeModelForProvider(
+  model: string,
+  provider: 'openrouter' | 'openai' | 'ollama'
+): string {
+  const raw = (model || '').trim();
+
+  if (provider === 'ollama') {
+    return raw;
+  }
+
+  if (provider === 'openai') {
+    if (!raw) return DEFAULT_OPENAI_MODEL;
+    if (raw.startsWith('openai/')) return raw.slice('openai/'.length);
+    if (!raw.includes('/')) return raw;
+
+    const [, candidate = ''] = raw.split('/', 2);
+    const looksLikeOpenAIModel = /^(gpt-|o1|o3|chatgpt)/i.test(candidate);
+    if (looksLikeOpenAIModel) return candidate;
+
+    console.warn(
+      `[AI] Model "${raw}" is not valid for OpenAI provider. Falling back to ${DEFAULT_OPENAI_MODEL}.`
+    );
+    return DEFAULT_OPENAI_MODEL;
+  }
+
+  // openrouter
+  if (!raw) return DEFAULT_OPENROUTER_MODEL;
+  if (raw.includes('/')) return raw;
+
+  // Allow users to keep plain OpenAI IDs when provider is OpenRouter.
+  if (/^(gpt-|o1|o3|chatgpt)/i.test(raw)) {
+    return `openai/${raw}`;
+  }
+
+  return raw;
+}
+
 async function callOpenRouter(
   messages: AIMessage[],
   model: string,
@@ -314,16 +354,21 @@ export async function callModel(
   options: CouncilOptions = {}
 ): Promise<string> {
   const provider = getActiveAIProvider();
+  const resolvedModel = normalizeModelForProvider(model, provider);
+
+  if (resolvedModel !== model) {
+    console.log(`[AI] Normalized model "${model}" -> "${resolvedModel}" for provider ${provider}`);
+  }
 
   if (provider === 'ollama') {
-    return callOllama(messages, model, options);
+    return callOllama(messages, resolvedModel, options);
   }
 
   if (provider === 'openai') {
-    return callOpenAI(messages, model, options);
+    return callOpenAI(messages, resolvedModel, options);
   }
 
-  return callOpenRouter(messages, model, options);
+  return callOpenRouter(messages, resolvedModel, options);
 }
 
 // ============================================================================

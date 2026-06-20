@@ -26,6 +26,19 @@ export default function NewCourse() {
     clos: [''],
   })
   const [submitting, setSubmitting] = useState(false)
+
+  function openFilePicker() {
+    if (uploading) return
+    const input = fileInputRef.current
+    if (!input) return
+
+    // Prefer the native picker API when available; fall back to click for older browsers.
+    if (typeof input.showPicker === 'function') {
+      input.showPicker()
+      return
+    }
+    input.click()
+  }
   
   // File upload handlers
   async function handleFileUpload(file: File) {
@@ -91,6 +104,8 @@ export default function NewCourse() {
   function handleFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (file) handleFileUpload(file)
+    // Allow re-selecting the same file name to trigger onChange again.
+    e.target.value = ''
   }
   
   // Form handlers
@@ -197,19 +212,13 @@ export default function NewCourse() {
                 onDragOver={e => { e.preventDefault(); setDragOver(true) }}
                 onDragLeave={() => setDragOver(false)}
                 onDrop={handleDrop}
-                onClick={() => {
-                  if (!uploading && fileInputRef.current) {
-                    fileInputRef.current.click()
-                  }
-                }}
+                onClick={openFilePicker}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault()
-                    if (!uploading && fileInputRef.current) {
-                      fileInputRef.current.click()
-                    }
+                    openFilePicker()
                   }
                 }}
               >
@@ -217,7 +226,11 @@ export default function NewCourse() {
                   ref={fileInputRef}
                   type="file"
                   accept=".pdf,.docx"
-                  className="hidden"
+                  className="sr-only"
+                  onClick={e => {
+                    // Reset before open so choosing same file still emits change.
+                    ;(e.currentTarget as HTMLInputElement).value = ''
+                  }}
                   onChange={handleFileInputChange}
                 />
                 

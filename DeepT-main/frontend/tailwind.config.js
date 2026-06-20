@@ -1,6 +1,21 @@
 /** @type {import('tailwindcss').Config} */
-export default {
-  darkMode: ["class"],
+
+/** HP Electric Blue scale — remaps legacy violet/purple/indigo utilities app-wide */
+const hpBlue = {
+  50: '#eef4ff',
+  100: '#c9e0fc',
+  200: '#a8cef9',
+  300: '#7aabf5',
+  400: '#4d88ef',
+  500: '#296ef9',
+  600: '#024ad8',
+  700: '#0e3191',
+  800: '#0a256f',
+  900: '#061845',
+  950: '#030d28',
+}
+
+export default {  darkMode: ["class"],
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
@@ -41,16 +56,73 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        hp: {
+          ink: "#1a1a1a",
+          primary: "#024ad8",
+          "primary-bright": "#296ef9",
+          "primary-deep": "#0e3191",
+          cloud: "#f7f7f7",
+          fog: "#e8e8e8",
+          graphite: "#636363",
+        },
+        success: {
+          DEFAULT: "hsl(var(--success))",
+          foreground: "hsl(var(--success-foreground))",
+        },
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          foreground: "hsl(var(--warning-foreground))",
+        },
+        /* Colorful glass accent hues */
+        glass: {
+          blue: "hsl(var(--c-blue))",
+          violet: "hsl(var(--c-violet))",
+          teal: "hsl(var(--c-teal))",
+          rose: "hsl(var(--c-rose))",
+          amber: "hsl(var(--c-amber))",
+        },
+        /* Remap legacy purple/violet UI to a richer violet so the app reads colorful */
+        violet: hpBlue,
+        purple: hpBlue,
+        indigo: hpBlue,
+      },
+      boxShadow: {
+        glass: "0 10px 30px -12px hsl(222 47% 25% / 0.28), inset 0 1px 0 0 rgb(255 255 255 / 0.5)",
+        "glass-lg": "0 24px 56px -20px hsl(222 47% 22% / 0.34), inset 0 1px 0 0 rgb(255 255 255 / 0.55)",
+      },
+      backdropBlur: {
+        xs: "2px",
       },
       borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        lg: "var(--radius-lg)",
+        md: "var(--radius-md)",
+        sm: "var(--radius-sm)",
+        xl: "var(--radius-xl)",
+        pill: "9999px",
       },
       fontFamily: {
-        sans: ['DM Sans', 'system-ui', 'sans-serif'],
-        display: ['Instrument Serif', 'Georgia', 'serif'],
-        mono: ['JetBrains Mono', 'monospace'],
+        sans: [
+          'Forma DJR Micro',
+          'Manrope',
+          'system-ui',
+          '-apple-system',
+          'sans-serif',
+        ],
+        display: [
+          'Forma DJR Micro',
+          'Manrope',
+          'system-ui',
+          'sans-serif',
+        ],
+        mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+      },
+      fontSize: {
+        body: ['16px', { lineHeight: '1.38', letterSpacing: '0' }],
+        caption: ['14px', { lineHeight: '1.5', letterSpacing: '0' }],
+        'fine-print': ['12px', { lineHeight: '1.33', letterSpacing: '0' }],
+      },
+      maxWidth: {
+        content: '1280px',
       },
     },
   },

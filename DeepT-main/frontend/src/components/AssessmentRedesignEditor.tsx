@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Textarea'
+import { Markdown } from '@/components/ui/Markdown'
 import { showToast } from '@/components/ui/Toaster'
 import {
   fetchAssessmentRedesigns,
@@ -59,12 +60,21 @@ function approvalBadgeClass(status: CloApprovalStatus): string {
   }
 }
 
+function FieldLabel({ label }: { label: string }) {
+  return (
+    <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-primary">
+      <span className="h-3 w-1 shrink-0 rounded-full bg-primary/70" />
+      {label}
+    </p>
+  )
+}
+
 function TextField({ label, value }: { label: string; value?: string }) {
   if (!value?.trim()) return null
   return (
-    <div>
-      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</p>
-      <p className="text-sm mt-0.5 leading-relaxed whitespace-pre-line">{value}</p>
+    <div className="space-y-1">
+      <FieldLabel label={label} />
+      <Markdown className="pl-2.5 text-foreground">{value}</Markdown>
     </div>
   )
 }
@@ -83,11 +93,13 @@ function EditField({ label, children }: { label: string; children: React.ReactNo
 function ListBlock({ label, items }: { label: string; items?: string[] }) {
   if (!items || items.length === 0) return null
   return (
-    <div>
-      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</p>
-      <ul className="list-disc pl-5 space-y-0.5 text-sm mt-1 leading-relaxed">
+    <div className="space-y-1">
+      <FieldLabel label={label} />
+      <ul className="ml-2.5 list-disc space-y-1 pl-4 text-sm leading-relaxed marker:text-primary">
         {items.map((it, i) => (
-          <li key={i}>{it}</li>
+          <li key={i} className="text-foreground/90">
+            <Markdown className="[&_p]:my-0 text-foreground/90">{it}</Markdown>
+          </li>
         ))}
       </ul>
     </div>
@@ -103,6 +115,42 @@ function fromLines(text: string): string[] {
     .split('\n')
     .map((s) => s.trim())
     .filter((s) => !!s)
+}
+
+/**
+ * A section whose body can be expanded/collapsed via a disclosure triangle.
+ * Used to keep long blocks (AI redesign, final assessment) compact by default.
+ */
+function CollapsibleSection({
+  title,
+  defaultOpen = false,
+  children,
+}: {
+  title: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <section className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 text-left rounded-md border-l-2 border-primary/60 bg-primary/5 px-2.5 py-1.5 hover:bg-primary/10 transition-colors"
+      >
+        <ChevronRight
+          className={cn(
+            'h-4 w-4 shrink-0 text-primary transition-transform duration-200',
+            open && 'rotate-90'
+          )}
+        />
+        <h4 className="text-sm font-bold uppercase tracking-wide text-primary">{title}</h4>
+        {!open && <span className="ml-auto text-[11px] font-semibold text-primary/80">Show</span>}
+      </button>
+      {open && <div className="space-y-2 pl-6">{children}</div>}
+    </section>
+  )
 }
 
 function FullAnalysisDisclosure({ analysis }: { analysis: FullAssessmentCouncilAnalysis }) {
@@ -123,11 +171,12 @@ function FullAnalysisDisclosure({ analysis }: { analysis: FullAssessmentCouncilA
   if (!hasAny) return null
 
   return (
-    <details className="rounded-lg border border-dashed border-border">
-      <summary className="cursor-pointer px-4 py-2.5 text-sm font-medium text-primary hover:underline">
+    <details className="rounded-lg border border-border bg-card overflow-hidden">
+      <summary className="flex cursor-pointer items-center gap-2 bg-primary/5 px-4 py-2.5 text-sm font-bold uppercase tracking-wide text-primary hover:bg-primary/10">
+        <Sparkles className="h-4 w-4" />
         View Full Council Analysis
       </summary>
-      <div className="px-4 pb-4 space-y-3 border-t border-border pt-3">
+      <div className="px-4 pb-4 space-y-3.5 border-t border-border pt-3">
         {textFields.map(({ label, key }) => (
           <TextField key={key} label={label} value={analysis[key] as string | undefined} />
         ))}
@@ -265,8 +314,10 @@ function AssessmentRedesignZone({
         <div className="p-4 space-y-5">
           {/* 1. Original Assessment (read-only, sourced from syllabus snapshot) */}
           <section className="space-y-2">
-            <h4 className="text-xs font-bold uppercase tracking-wide text-foreground">Original Assessment</h4>
-            <div className="p-3 rounded-md bg-muted/50 border space-y-2">
+            <h4 className="flex items-center gap-2 rounded-md border-l-2 border-muted-foreground/40 bg-muted/60 px-2.5 py-1.5 text-sm font-bold uppercase tracking-wide text-foreground">
+              Original Assessment
+            </h4>
+            <div className="p-3 rounded-md bg-muted/40 border space-y-3">
               <TextField label="Title" value={original.title} />
               <TextField label="Type or format" value={original.type_or_format} />
               <TextField label="Weight" value={original.weight} />
@@ -275,11 +326,12 @@ function AssessmentRedesignZone({
           </section>
 
           {/* 2. Council Summary */}
-          <details className="rounded-lg border border-dashed border-border">
-            <summary className="cursor-pointer px-4 py-2.5 text-sm font-medium text-primary hover:underline">
+          <details className="rounded-lg border border-border bg-card overflow-hidden">
+            <summary className="flex cursor-pointer items-center gap-2 bg-primary/5 px-4 py-2.5 text-sm font-bold uppercase tracking-wide text-primary hover:bg-primary/10">
+              <Sparkles className="h-4 w-4" />
               Council Summary
             </summary>
-            <div className="px-4 pb-4 space-y-2 border-t border-border pt-3">
+            <div className="px-4 pb-4 space-y-3.5 border-t border-border pt-3">
               {hasCouncilSummary ? (
                 <>
                   <TextField label="What works well" value={item.council_summary.what_works_well} />
@@ -293,12 +345,9 @@ function AssessmentRedesignZone({
             </div>
           </details>
 
-          {/* 3. AI Suggested Contribution Redesign */}
-          <section className="space-y-2">
-            <h4 className="text-xs font-bold uppercase tracking-wide text-foreground">
-              AI Suggested Contribution Redesign
-            </h4>
-            <div className="p-3 rounded-md border border-purple-200 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-900/20 space-y-2">
+          {/* 3. AI Suggested Contribution Redesign (collapsible) */}
+          <CollapsibleSection title="AI Suggested Contribution Redesign">
+            <div className="p-4 rounded-md border border-purple-200 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-900/20 space-y-3.5">
               <TextField label="Redesigned title" value={ai.redesigned_title} />
               <TextField label="Redesigned description" value={ai.redesigned_description} />
               <ListBlock label="Refined CLO alignment" items={ai.refined_clo_alignment} />
@@ -329,32 +378,14 @@ function AssessmentRedesignZone({
                 </ul>
               </div>
             )}
-          </section>
+          </CollapsibleSection>
 
-          {/* 4. SME Decision */}
-          {!readOnlyRedesign && (
-            <section>
-              <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-2">SME Decision</h4>
-              <div className="flex flex-wrap gap-2">
-                {(['keep_original', 'accept_ai_redesign', 'custom_redesign'] as const).map((d) => (
-                  <Button
-                    key={d}
-                    size="sm"
-                    variant={item.sme_decision === d ? 'default' : 'outline'}
-                    onClick={() => applyDecision(d)}
-                  >
-                    {DECISION_LABELS[d]}
-                  </Button>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* 5. Final Assessment for Maestro */}
-          <section className="space-y-2">
-            <h4 className="text-xs font-bold uppercase tracking-wide text-foreground">
-              Final Assessment for Maestro
-            </h4>
+          {/* 4. Final Assessment for Maestro (collapsible) */}
+          <CollapsibleSection
+            key={finalEditable ? 'final-edit' : 'final-view'}
+            title="Final Assessment for Maestro"
+            defaultOpen={finalEditable}
+          >
             <p className="text-xs text-muted-foreground leading-relaxed">
               This is the version later Maestro layers (weighting, integrity, subtopics) will use.
             </p>
@@ -463,7 +494,7 @@ function AssessmentRedesignZone({
                 </EditField>
               </div>
             ) : (
-              <div className="p-3 rounded-md border border-emerald-500/30 bg-emerald-500/5 space-y-2">
+              <div className="p-4 rounded-md border border-emerald-500/30 bg-emerald-500/5 space-y-3.5">
                 <TextField label="Title" value={final.title} />
                 <TextField label="Description" value={final.description} />
                 <ListBlock label="Refined CLO alignment" items={final.refined_clo_alignment} />
@@ -479,10 +510,10 @@ function AssessmentRedesignZone({
             )}
             {!readOnlyRedesign && item.sme_decision !== 'custom_redesign' && (
               <p className="text-xs text-muted-foreground">
-                Select &quot;Edit redesign&quot; to customize the final assessment.
+                Select &quot;Edit redesign&quot; below to customize the final assessment.
               </p>
             )}
-          </section>
+          </CollapsibleSection>
 
           {/* 6. SME Internal Note */}
           <section>
@@ -510,48 +541,80 @@ function AssessmentRedesignZone({
           {/* Full council analysis (reasoning only) */}
           <FullAnalysisDisclosure analysis={item.full_council_analysis} />
 
-          {/* Per-assessment approval */}
+          {/* SME Decision + per-assessment approval — the decision sits directly
+              above the approval action and gates it. */}
           {!readOnlyRedesign && (
-            <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
-              <Button
-                size="sm"
-                variant="default"
-                disabled={item.approval_status === 'approved' || saving}
-                onClick={() => {
-                  if (!item.final_assessment_for_maestro?.title?.trim()) {
-                    showToast({
-                      title: 'Final assessment required',
-                      description: 'Choose a decision and ensure the final title is set.',
-                      variant: 'destructive',
-                    })
-                    return
-                  }
-                  if (item.sme_decision === 'pending') {
-                    showToast({
-                      title: 'Decision required',
-                      description: 'Select Keep original, Accept AI redesign, or Edit redesign first.',
-                      variant: 'destructive',
-                    })
-                    return
-                  }
-                  onApproveItem?.({ ...item, approval_status: 'approved' })
-                }}
-              >
-                {saving ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Check className="mr-2 h-4 w-4" />
+            <div className="space-y-3 pt-3 border-t border-border">
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-2">
+                  SME Decision
+                  <span className="ml-1.5 font-medium text-destructive">*</span>
+                </h4>
+                <div className="flex flex-wrap gap-2">
+                  {(['keep_original', 'accept_ai_redesign', 'custom_redesign'] as const).map((d) => (
+                    <Button
+                      key={d}
+                      size="sm"
+                      variant={item.sme_decision === d ? 'default' : 'outline'}
+                      onClick={() => applyDecision(d)}
+                    >
+                      {item.sme_decision === d && <Check className="mr-2 h-4 w-4" />}
+                      {DECISION_LABELS[d]}
+                    </Button>
+                  ))}
+                </div>
+                {item.sme_decision === 'pending' && (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Choose a decision above to enable approval.
+                  </p>
                 )}
-                Approve assessment
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => onUpdate({ ...item, approval_status: 'needs_revision' })}
-              >
-                <XCircle className="mr-2 h-4 w-4" />
-                Needs revision
-              </Button>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="default"
+                  disabled={
+                    item.approval_status === 'approved' ||
+                    item.sme_decision === 'pending' ||
+                    saving
+                  }
+                  onClick={() => {
+                    if (item.sme_decision === 'pending') {
+                      showToast({
+                        title: 'Decision required',
+                        description: 'Select Keep original, Accept AI redesign, or Edit redesign first.',
+                        variant: 'destructive',
+                      })
+                      return
+                    }
+                    if (!item.final_assessment_for_maestro?.title?.trim()) {
+                      showToast({
+                        title: 'Final assessment required',
+                        description: 'Ensure the final assessment title is set.',
+                        variant: 'destructive',
+                      })
+                      return
+                    }
+                    onApproveItem?.({ ...item, approval_status: 'approved' })
+                  }}
+                >
+                  {saving ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Check className="mr-2 h-4 w-4" />
+                  )}
+                  Approve assessment
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onUpdate({ ...item, approval_status: 'needs_revision' })}
+                >
+                  <XCircle className="mr-2 h-4 w-4" />
+                  Needs revision
+                </Button>
+              </div>
             </div>
           )}
         </div>
@@ -840,14 +903,14 @@ export default function AssessmentRedesignEditor({
                 size="sm"
                 onClick={handleReadyForNextLayer}
                 disabled={saving || continuing}
-                className="gap-2 bg-green-600 text-white hover:bg-green-700"
+                className="gap-2"
               >
                 {saving || continuing ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <Check className="h-4 w-4" />
                 )}
-                I am ready to move to Layer 4
+                Approve Layer 3
               </Button>
             )
           ) : (

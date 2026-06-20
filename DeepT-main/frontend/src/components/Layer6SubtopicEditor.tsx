@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Textarea'
 import { Input } from '@/components/ui/Input'
+import { Markdown } from '@/components/ui/Markdown'
 import { showToast } from '@/components/ui/Toaster'
 import {
   fetchSubtopicArchitecture,
@@ -867,9 +868,7 @@ export default function Layer6SubtopicEditor({
               View Full Subtopic Architecture Report
             </summary>
             <div className="px-4 pb-4 border-t border-border pt-3">
-              <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-line">
-                {course.full_report}
-              </div>
+              <Markdown>{course.full_report}</Markdown>
             </div>
           </details>
         )}
@@ -893,14 +892,14 @@ export default function Layer6SubtopicEditor({
                 size="sm"
                 onClick={handleReadyForNextLayer}
                 disabled={saving || continuing}
-                className="gap-2 bg-green-600 text-white hover:bg-green-700"
+                className="gap-2"
               >
                 {saving || continuing ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <Check className="h-4 w-4" />
                 )}
-                I am ready to approve Layer 6 subtopics
+                Approve Layer 6
               </Button>
             )
           ) : (

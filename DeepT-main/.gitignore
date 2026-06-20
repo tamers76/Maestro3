@@ -24,6 +24,9 @@ config/settings.json
 # Runtime data
 data/courses/
 
+# Local dev infrastructure (PostgreSQL install, pgdata, pgvector binaries)
+.local/
+
 # IDE
 .vscode/
 .idea/

@@ -1,6 +1,10 @@
 # Bundled third-party tooling / binaries (not part of the project source)
 tools/
 
+# SSH private keys — never commit
+ssh/
+*.pem
+
 # Dependencies
 node_modules/
 

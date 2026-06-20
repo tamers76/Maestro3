@@ -1,5 +1,17 @@
 import { type ClassValue, clsx } from 'clsx'
-import { twMerge } from 'tailwind-merge'
+import { extendTailwindMerge } from 'tailwind-merge'
+
+// Register our custom font-size tokens (see tailwind.config.js `fontSize`) with
+// tailwind-merge. Without this, classes like `text-caption`/`text-fine-print`
+// are mistaken for text-color utilities and conflict with `text-white` /
+// `text-primary`, silently stripping the color (e.g. black text on blue buttons).
+const twMerge = extendTailwindMerge({
+  extend: {
+    classGroups: {
+      'font-size': [{ text: ['body', 'caption', 'fine-print'] }],
+    },
+  },
+})
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))

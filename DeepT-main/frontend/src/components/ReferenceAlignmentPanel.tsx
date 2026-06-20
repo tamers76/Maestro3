@@ -36,14 +36,14 @@ function subtopicMatchScore(mapping: AlignmentChunkMapping, subtopicId: string):
 function StatusBadge({ state }: { state: AlignmentStateSummary }) {
   if (state.is_stale) {
     return (
-      <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+      <span className="inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-center text-xs font-medium leading-none text-amber-600 dark:text-amber-400">
         Stale — re-activate
       </span>
     )
   }
   if (state.pending_activation) {
     return (
-      <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+      <span className="inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-center text-xs font-medium leading-none text-amber-600 dark:text-amber-400">
         Preview — not active
       </span>
     )
@@ -56,7 +56,16 @@ function StatusBadge({ state }: { state: AlignmentStateSummary }) {
     approved: { label: 'Active', cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' },
   }
   const s = map[state.status]
-  return <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', s.cls)}>{s.label}</span>
+  return (
+    <span
+      className={cn(
+        'inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-full px-2 py-0.5 text-center text-xs font-medium leading-none',
+        s.cls
+      )}
+    >
+      {s.label}
+    </span>
+  )
 }
 
 function AlignmentGateBanner({ state }: { state: AlignmentStateSummary }) {

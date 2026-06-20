@@ -11,7 +11,7 @@ import {
   Award,
   Percent
 } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
+import { Markdown } from '@/components/ui/Markdown'
 import type { CourseRubric, CLORubricCriteria, RubricCriterion } from '@/services/api'
 
 interface RubricViewerProps {
@@ -232,9 +232,7 @@ export default function RubricViewer({ rubric }: RubricViewerProps) {
               <CardTitle className="text-base">Marking Guide for Instructors</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="prose prose-sm dark:prose-invert max-w-none">
-                <ReactMarkdown>{rubric.marking_guide}</ReactMarkdown>
-              </div>
+              <Markdown>{rubric.marking_guide}</Markdown>
             </CardContent>
           </Card>
         </TabsContent>
@@ -245,9 +243,7 @@ export default function RubricViewer({ rubric }: RubricViewerProps) {
               <CardTitle className="text-base">Guide for Learners</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="prose prose-sm dark:prose-invert max-w-none">
-                <ReactMarkdown>{rubric.learner_instructions}</ReactMarkdown>
-              </div>
+              <Markdown>{rubric.learner_instructions}</Markdown>
             </CardContent>
           </Card>
         </TabsContent>

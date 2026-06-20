@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Textarea'
 import { Input } from '@/components/ui/Input'
+import { Markdown } from '@/components/ui/Markdown'
 import { showToast } from '@/components/ui/Toaster'
 import {
   fetchWeightingRubric,
@@ -98,12 +99,21 @@ function approvalBadgeClass(status: CloApprovalStatus): string {
   }
 }
 
+function FieldLabel({ label }: { label: string }) {
+  return (
+    <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-primary">
+      <span className="h-3 w-1 shrink-0 rounded-full bg-primary/70" />
+      {label}
+    </p>
+  )
+}
+
 function TextField({ label, value }: { label: string; value?: string }) {
   if (!value?.trim()) return null
   return (
-    <div>
-      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</p>
-      <p className="text-sm mt-0.5 leading-relaxed whitespace-pre-line">{value}</p>
+    <div className="space-y-1">
+      <FieldLabel label={label} />
+      <Markdown className="pl-2.5 text-foreground">{value}</Markdown>
     </div>
   )
 }
@@ -111,11 +121,13 @@ function TextField({ label, value }: { label: string; value?: string }) {
 function ListBlock({ label, items }: { label: string; items?: string[] }) {
   if (!items || items.length === 0) return null
   return (
-    <div>
-      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</p>
-      <ul className="list-disc pl-5 space-y-0.5 text-sm mt-1 leading-relaxed">
+    <div className="space-y-1">
+      <FieldLabel label={label} />
+      <ul className="ml-2.5 list-disc space-y-1 pl-4 text-sm leading-relaxed text-foreground/90 marker:text-primary">
         {items.map((it, i) => (
-          <li key={i}>{it}</li>
+          <li key={i}>
+            <Markdown className="[&_p]:my-0 text-foreground/90">{it}</Markdown>
+          </li>
         ))}
       </ul>
     </div>
@@ -410,7 +422,7 @@ function WeightingStep({
               <Button
                 onClick={() => onApproveStep1()}
                 disabled={!decided || !balanced || saving}
-                className="gap-2 bg-green-600 text-white hover:bg-green-700"
+                className="gap-2"
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                 Approve Weight Structure &amp; Continue
@@ -455,11 +467,36 @@ function WeightingStep({
 // Rubric table
 // ----------------------------------------------------------------------------
 
-const RUBRIC_LEVELS: { key: keyof AnalyticRubricCriterion; label: string }[] = [
-  { key: 'exceeds_standard', label: 'Exceeds Standard' },
-  { key: 'meets_standard', label: 'Meets Standard' },
-  { key: 'developing', label: 'Developing' },
-  { key: 'not_yet_evident', label: 'Not Yet Evident' },
+const RUBRIC_LEVELS: {
+  key: keyof AnalyticRubricCriterion
+  label: string
+  headClass: string
+  dotClass: string
+}[] = [
+  {
+    key: 'exceeds_standard',
+    label: 'Exceeds Standard',
+    headClass: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+    dotClass: 'bg-emerald-500',
+  },
+  {
+    key: 'meets_standard',
+    label: 'Meets Standard',
+    headClass: 'bg-blue-500/10 text-blue-700 dark:text-blue-300',
+    dotClass: 'bg-blue-500',
+  },
+  {
+    key: 'developing',
+    label: 'Developing',
+    headClass: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+    dotClass: 'bg-amber-500',
+  },
+  {
+    key: 'not_yet_evident',
+    label: 'Not Yet Evident',
+    headClass: 'bg-rose-500/10 text-rose-700 dark:text-rose-300',
+    dotClass: 'bg-rose-500',
+  },
 ]
 
 function emptyCriterion(): AnalyticRubricCriterion {
@@ -500,27 +537,44 @@ function RubricTable({
   }
 
   return (
-    <div className="space-y-2">
-      <div className="overflow-x-auto rounded-md border">
-        <table className="w-full text-xs min-w-[1100px]">
+    <div className="min-w-0 space-y-2">
+      <div className="min-w-0 overflow-x-auto rounded-lg border border-border">
+        <table className="w-full text-xs min-w-[1100px] border-collapse">
           <thead>
-            <tr className="bg-muted/50 text-left align-top">
-              <th className="px-2 py-2 font-semibold w-40">Rubric Criterion</th>
-              <th className="px-2 py-2 font-semibold w-16 text-right">Weight</th>
+            <tr className="text-left align-top">
+              <th className="border-b border-border bg-muted/60 px-2.5 py-2.5 font-bold uppercase tracking-wide text-foreground w-40">
+                Rubric Criterion
+              </th>
+              <th className="border-b border-l border-border bg-muted/60 px-2.5 py-2.5 font-bold uppercase tracking-wide text-foreground w-16 text-right">
+                Weight
+              </th>
               {RUBRIC_LEVELS.map((l) => (
-                <th key={l.key} className="px-2 py-2 font-semibold w-44">
-                  {l.label}
+                <th
+                  key={l.key}
+                  className={cn(
+                    'border-b border-l border-border px-2.5 py-2.5 font-bold uppercase tracking-wide w-44',
+                    l.headClass
+                  )}
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className={cn('h-2 w-2 shrink-0 rounded-full', l.dotClass)} />
+                    {l.label}
+                  </span>
                 </th>
               ))}
-              <th className="px-2 py-2 font-semibold w-44">Evidence Required</th>
-              <th className="px-2 py-2 font-semibold w-44">AI Scoring Guidance</th>
-              {editable && <th className="px-2 py-2 w-8" />}
+              <th className="border-b border-l border-border bg-muted/60 px-2.5 py-2.5 font-bold uppercase tracking-wide text-foreground w-44">
+                Evidence Required
+              </th>
+              <th className="border-b border-l border-border bg-muted/60 px-2.5 py-2.5 font-bold uppercase tracking-wide text-foreground w-44">
+                AI Scoring Guidance
+              </th>
+              {editable && <th className="border-b border-l border-border bg-muted/60 px-2 py-2.5 w-8" />}
             </tr>
           </thead>
           <tbody>
             {rubric.map((c, i) => (
-              <tr key={i} className="border-t align-top">
-                <td className="px-2 py-2">
+              <tr key={i} className="border-t border-border align-top even:bg-muted/20">
+                <td className="border-l-2 border-l-primary/50 px-2.5 py-2.5">
                   {editable ? (
                     <Textarea
                       rows={2}
@@ -529,10 +583,10 @@ function RubricTable({
                       onChange={(e) => updateRow(i, { rubric_criterion: e.target.value })}
                     />
                   ) : (
-                    <span className="font-medium">{c.rubric_criterion}</span>
+                    <span className="font-semibold text-foreground">{c.rubric_criterion}</span>
                   )}
                 </td>
-                <td className="px-2 py-2 text-right">
+                <td className="border-l border-border px-2.5 py-2.5 text-right">
                   {editable ? (
                     <Input
                       type="number"
@@ -543,11 +597,13 @@ function RubricTable({
                       onChange={(e) => updateRow(i, { criterion_weight: e.target.value })}
                     />
                   ) : (
-                    <span className="tabular-nums font-medium">{c.criterion_weight}</span>
+                    <span className="inline-block rounded-full bg-primary/10 px-2 py-0.5 font-semibold tabular-nums text-primary">
+                      {c.criterion_weight}
+                    </span>
                   )}
                 </td>
                 {RUBRIC_LEVELS.map((l) => (
-                  <td key={l.key} className="px-2 py-2">
+                  <td key={l.key} className="border-l border-border px-2.5 py-2.5">
                     {editable ? (
                       <Textarea
                         rows={3}
@@ -556,11 +612,13 @@ function RubricTable({
                         onChange={(e) => updateRow(i, { [l.key]: e.target.value })}
                       />
                     ) : (
-                      <span className="leading-relaxed whitespace-pre-line">{c[l.key] as string}</span>
+                      <span className="leading-relaxed whitespace-pre-line text-foreground/90">
+                        {c[l.key] as string}
+                      </span>
                     )}
                   </td>
                 ))}
-                <td className="px-2 py-2">
+                <td className="border-l border-border px-2.5 py-2.5">
                   {editable ? (
                     <Textarea
                       rows={3}
@@ -569,10 +627,12 @@ function RubricTable({
                       onChange={(e) => updateRow(i, { evidence_required: e.target.value })}
                     />
                   ) : (
-                    <span className="leading-relaxed whitespace-pre-line">{c.evidence_required}</span>
+                    <span className="leading-relaxed whitespace-pre-line text-foreground/90">
+                      {c.evidence_required}
+                    </span>
                   )}
                 </td>
-                <td className="px-2 py-2">
+                <td className="border-l border-border px-2.5 py-2.5">
                   {editable ? (
                     <Textarea
                       rows={3}
@@ -587,7 +647,7 @@ function RubricTable({
                   )}
                 </td>
                 {editable && (
-                  <td className="px-2 py-2">
+                  <td className="border-l border-border px-2 py-2.5">
                     <button
                       type="button"
                       className="text-muted-foreground hover:text-red-600"
@@ -600,17 +660,23 @@ function RubricTable({
                 )}
               </tr>
             ))}
-            <tr className="border-t bg-muted/30 font-semibold">
-              <td className="px-2 py-2">Total</td>
+            <tr className="border-t-2 border-border bg-muted/40 font-bold">
+              <td className="px-2.5 py-2.5 uppercase tracking-wide text-foreground">Total</td>
               <td
                 className={cn(
-                  'px-2 py-2 text-right tabular-nums',
+                  'border-l border-border px-2.5 py-2.5 text-right tabular-nums',
                   balanced ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
                 )}
               >
                 {formatPct(total)}
               </td>
-              <td className="px-2 py-2 text-xs" colSpan={editable ? 7 : 6}>
+              <td
+                className={cn(
+                  'border-l border-border px-2.5 py-2.5 text-xs font-medium',
+                  balanced ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
+                )}
+                colSpan={editable ? 7 : 6}
+              >
                 {balanced ? 'Criterion weights total 100%' : 'Criterion weights must total 100%'}
               </td>
             </tr>
@@ -715,7 +781,7 @@ function AssessmentStructureCard({
   }
 
   return (
-    <div className={cn('rounded-xl border-2 overflow-hidden', colors.border)}>
+    <div className={cn('min-w-0 rounded-xl border-2 overflow-hidden', colors.border)}>
       {/* Header */}
       <div
         className={cn('px-5 py-4 border-b cursor-pointer', colors.border, colors.bg)}
@@ -755,11 +821,13 @@ function AssessmentStructureCard({
       {expanded && (
       <div className="p-4 space-y-5">
         {/* Approved assessment from Layer 3 (reference only, collapsed by default) */}
-        <details className="rounded-lg border border-dashed border-border">
-          <summary className="cursor-pointer px-4 py-2.5 text-sm font-medium text-primary hover:underline">
+        <details className="group rounded-lg border border-border bg-card overflow-hidden">
+          <summary className="flex cursor-pointer list-none items-center gap-2 bg-primary/5 px-4 py-2.5 text-sm font-bold uppercase tracking-wide text-primary hover:bg-primary/10 [&::-webkit-details-marker]:hidden">
+            <ChevronRight className="h-4 w-4 shrink-0 transition-transform duration-200 group-[[open]]:rotate-90" />
+            <ClipboardList className="h-4 w-4 shrink-0" />
             Approved Assessment from Layer 3 (reference only)
           </summary>
-          <div className="px-4 pb-4 space-y-2 border-t border-border pt-3">
+          <div className="px-4 pb-4 space-y-3.5 border-t border-border pt-3">
             <TextField label="Final assessment title" value={ref.title} />
             <TextField label="Short description" value={ref.description} />
             <TextField label="Required artifact" value={ref.required_artifact} />
@@ -774,7 +842,8 @@ function AssessmentStructureCard({
         {/* AI-Assisted Analytic Rubric */}
         <section className="space-y-2">
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <h4 className="text-xs font-bold uppercase tracking-wide text-foreground">
+            <h4 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-primary">
+              <ClipboardList className="h-4 w-4" />
               AI-Assisted Analytic Rubric
             </h4>
             {!readOnly && (
@@ -920,10 +989,10 @@ function AssessmentStructureCard({
                 ))}
               </div>
             </>
+          ) : review.ai_use_disclosure_rule?.trim() ? (
+            <Markdown>{review.ai_use_disclosure_rule}</Markdown>
           ) : (
-            <p className="text-sm leading-relaxed whitespace-pre-line">
-              {review.ai_use_disclosure_rule || '—'}
-            </p>
+            <p className="text-sm leading-relaxed text-muted-foreground">—</p>
           )}
         </section>
 
@@ -951,10 +1020,10 @@ function AssessmentStructureCard({
                 ))}
               </div>
             </>
+          ) : review.revision_policy?.trim() ? (
+            <Markdown>{review.revision_policy}</Markdown>
           ) : (
-            <p className="text-sm leading-relaxed whitespace-pre-line">
-              {review.revision_policy || '—'}
-            </p>
+            <p className="text-sm leading-relaxed text-muted-foreground">—</p>
           )}
         </section>
 
@@ -968,10 +1037,10 @@ function AssessmentStructureCard({
               value={review.grading_policy}
               onChange={(e) => onUpdate({ ...review, grading_policy: e.target.value })}
             />
+          ) : review.grading_policy?.trim() ? (
+            <Markdown>{review.grading_policy}</Markdown>
           ) : (
-            <p className="text-sm leading-relaxed whitespace-pre-line">
-              {review.grading_policy || '—'}
-            </p>
+            <p className="text-sm leading-relaxed text-muted-foreground">—</p>
           )}
         </section>
 
@@ -1335,7 +1404,7 @@ export default function Layer4WeightingRubricEditor({
             <h4 className="font-bold text-sm">
               Step 2 — Assessment-Level Rubric and Structure Review
             </h4>
-            <div className="grid gap-5">
+            <div className="grid min-w-0 grid-cols-1 gap-5">
               {reviews.map((review, index) => {
                 const w = selectedById.get(review.assessment_id)
                 const initial = initialReviews.find(
@@ -1350,6 +1419,7 @@ export default function Layer4WeightingRubricEditor({
                       zoneRefs.current[review.assessment_id] = el
                     }}
                     style={{ scrollMarginTop: 16 }}
+                    className="min-w-0"
                   >
                     <AssessmentStructureCard
                       review={review}
@@ -1381,9 +1451,7 @@ export default function Layer4WeightingRubricEditor({
               View Full Assessment Structure Report
             </summary>
             <div className="px-4 pb-4 border-t border-border pt-3">
-              <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-line">
-                {fullReport}
-              </div>
+              <Markdown>{fullReport}</Markdown>
             </div>
           </details>
         )}
@@ -1406,14 +1474,14 @@ export default function Layer4WeightingRubricEditor({
                 size="sm"
                 onClick={handleReadyForNextLayer}
                 disabled={saving || continuing}
-                className="gap-2 bg-green-600 text-white hover:bg-green-700"
+                className="gap-2"
               >
                 {saving || continuing ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <Check className="h-4 w-4" />
                 )}
-                I am ready to move to Layer 5
+                Approve Layer 4
               </Button>
             )
           ) : (

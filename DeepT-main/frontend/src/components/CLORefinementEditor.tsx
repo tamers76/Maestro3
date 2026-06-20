@@ -14,7 +14,7 @@ import {
   type SmeRefinementDecision,
 } from '@/services/api'
 import { cn } from '@/lib/utils'
-import { SegmentedRadio } from '@/components/wizard/SegmentedRadio'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
   Save,
   Loader2,
@@ -43,6 +43,36 @@ const DECISION_LABELS: Record<SmeRefinementDecision, string> = {
   accept_ai_refinement: 'Accept AI refinement',
   custom_wording: 'Edit wording',
 }
+
+const DECISION_OPTIONS: {
+  value: Exclude<SmeRefinementDecision, 'pending'>
+  label: string
+  icon: JSX.Element
+  selectedClass: string
+  iconClass: string
+}[] = [
+  {
+    value: 'keep_official',
+    label: DECISION_LABELS.keep_official,
+    icon: <Lock className="h-4 w-4" />,
+    selectedClass: 'border-slate-500 bg-slate-500/10',
+    iconClass: 'text-slate-600 dark:text-slate-300',
+  },
+  {
+    value: 'accept_ai_refinement',
+    label: DECISION_LABELS.accept_ai_refinement,
+    icon: <Sparkles className="h-4 w-4" />,
+    selectedClass: 'border-purple-500 bg-purple-500/10',
+    iconClass: 'text-purple-600 dark:text-purple-400',
+  },
+  {
+    value: 'custom_wording',
+    label: DECISION_LABELS.custom_wording,
+    icon: <Pencil className="h-4 w-4" />,
+    selectedClass: 'border-blue-500 bg-blue-500/10',
+    iconClass: 'text-blue-600 dark:text-blue-400',
+  },
+]
 
 const APPROVAL_LABELS: Record<CloApprovalStatus, string> = {
   pending: 'Pending approval',
@@ -233,36 +263,7 @@ function CLORefinementZone({
             )}
           </section>
 
-          {/* 4. SME Decision — segmented liquid-glass control */}
-          {!readOnlyRefinement && (
-            <section>
-              <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-2">SME Decision</h4>
-              <SegmentedRadio<SmeRefinementDecision>
-                aria-label={`Decision for ${clo.clo_id}`}
-                value={item.sme_decision}
-                onValueChange={(d) => applyDecision(d)}
-                options={[
-                  {
-                    value: 'keep_official',
-                    label: DECISION_LABELS.keep_official,
-                    icon: <Lock className="h-3.5 w-3.5" />,
-                  },
-                  {
-                    value: 'accept_ai_refinement',
-                    label: DECISION_LABELS.accept_ai_refinement,
-                    icon: <Sparkles className="h-3.5 w-3.5" />,
-                  },
-                  {
-                    value: 'custom_wording',
-                    label: DECISION_LABELS.custom_wording,
-                    icon: <Pencil className="h-3.5 w-3.5" />,
-                  },
-                ]}
-              />
-            </section>
-          )}
-
-          {/* 5. Final CLO for Adaptive Design */}
+          {/* 4. Final CLO for Adaptive Design */}
           <section>
             <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-1">
               Final CLO for Adaptive Design
@@ -299,7 +300,7 @@ function CLORefinementZone({
             )}
           </section>
 
-          {/* 6. SME Internal Note */}
+          {/* 5. SME Internal Note */}
           <section>
             <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-1">
               SME Internal Note
@@ -326,13 +327,49 @@ function CLORefinementZone({
             )}
           </section>
 
+          {/* 6. SME Decision — radio buttons, directly above approval */}
+          {!readOnlyRefinement && (
+            <section className="pt-2 border-t border-border">
+              <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-2">SME Decision</h4>
+              <RadioGroup
+                value={item.sme_decision === 'pending' ? '' : item.sme_decision}
+                onValueChange={(d) => applyDecision(d as SmeRefinementDecision)}
+                aria-label={`Decision for ${clo.clo_id}`}
+                className="gap-2"
+              >
+                {DECISION_OPTIONS.map((opt) => {
+                  const selected = item.sme_decision === opt.value
+                  const itemId = `${clo.clo_id}-${opt.value}`
+                  return (
+                    <label
+                      key={opt.value}
+                      htmlFor={itemId}
+                      className={cn(
+                        'flex items-center gap-3 rounded-lg border-2 px-4 py-3 cursor-pointer transition-colors',
+                        selected
+                          ? opt.selectedClass
+                          : 'border-border bg-card hover:bg-muted/50'
+                      )}
+                    >
+                      <RadioGroupItem id={itemId} value={opt.value} className="size-5" />
+                      <span className={cn('flex items-center justify-center', selected ? opt.iconClass : 'text-muted-foreground')}>
+                        {opt.icon}
+                      </span>
+                      <span className="text-sm font-semibold">{opt.label}</span>
+                    </label>
+                  )
+                })}
+              </RadioGroup>
+            </section>
+          )}
+
           {/* Per-CLO approval */}
           {!readOnlyRefinement && (
-            <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
+            <div className="flex flex-wrap gap-3 pt-2">
               <Button
                 size="sm"
-                variant="default"
                 disabled={item.approval_status === 'approved' || saving}
+                className="bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm disabled:opacity-60"
                 onClick={() => {
                   if (!item.final_clo_for_adaptive_design?.trim()) {
                     showToast({
@@ -362,7 +399,7 @@ function CLORefinementZone({
               </Button>
               <Button
                 size="sm"
-                variant="outline"
+                className="bg-red-600 text-white hover:bg-red-700 shadow-sm"
                 onClick={() => onUpdate({ ...item, approval_status: 'needs_revision' })}
               >
                 <XCircle className="mr-2 h-4 w-4" />
@@ -641,14 +678,14 @@ export default function CLORefinementEditor({
                 size="sm"
                 onClick={handleReadyForNextLayer}
                 disabled={saving || continuing}
-                className="gap-2 bg-green-600 text-white hover:bg-green-700"
+                className="gap-2"
               >
                 {saving || continuing ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <Check className="h-4 w-4" />
                 )}
-                I am ready to move to Layer 3
+                Approve Layer 2
               </Button>
             )
           ) : (

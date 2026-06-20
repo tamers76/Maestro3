@@ -3,71 +3,94 @@
 @tailwind utilities;
 
 @layer base {
-  /* Light theme — clean, violet-accented */
+  /* HP design — see frontend/design.md (hp/DESIGN.md)
+     Colorful glassmorphism refresh: cool tinted base, translucent surfaces,
+     multi-hue ambient gradient, vivid-but-accessible accents. */
   :root {
-    --background: 240 11% 96%;
-    --foreground: 224 20% 15%;
+    --background: 218 40% 96%;
+    --foreground: 222 30% 12%;
     --card: 0 0% 100%;
-    --card-foreground: 224 20% 15%;
+    --card-foreground: 222 30% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 224 20% 15%;
-    --primary: 263 70% 50%;
+    --popover-foreground: 222 30% 12%;
+    --primary: 221 90% 50%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 11% 96%;
-    --secondary-foreground: 224 20% 20%;
-    --muted: 240 11% 96%;
-    --muted-foreground: 220 10% 46%;
-    --accent: 263 70% 50%;
+    --secondary: 220 30% 94%;
+    --secondary-foreground: 222 30% 18%;
+    --muted: 220 28% 94%;
+    --muted-foreground: 220 12% 42%;
+    --accent: 262 78% 60%;
     --accent-foreground: 0 0% 100%;
-    --destructive: 0 84% 60%;
+    --destructive: 356 70% 50%;
     --destructive-foreground: 0 0% 100%;
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
-    --ring: 263 70% 50%;
-    --radius: 0.75rem;
-    
-    /* Extended palette for light mode */
-    --surface: 240 11% 98%;
-    --surface-hover: 240 11% 95%;
-    --glow-primary: 263 70% 50%;
-    --glow-accent: 263 70% 50%;
-    --success: 142 76% 36%;
+    --border: 220 24% 88%;
+    --input: 220 24% 88%;
+    --ring: 221 90% 50%;
+    --radius-sm: 8px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 20px;
+    --radius: 10px;
+
+    --surface: 0 0% 100%;
+    --surface-hover: 220 30% 97%;
+    --glow-primary: 221 90% 50%;
+    --glow-accent: 262 78% 60%;
+    --success: 158 64% 42%;
     --success-foreground: 0 0% 100%;
-    --warning: 38 92% 50%;
+    --warning: 32 95% 52%;
     --warning-foreground: 0 0% 100%;
+
+    /* Accent hues for the colorful glass palette */
+    --c-blue: 221 90% 56%;
+    --c-violet: 262 78% 62%;
+    --c-teal: 178 70% 44%;
+    --c-rose: 340 82% 62%;
+    --c-amber: 32 95% 56%;
+
+    /* Glass tokens */
+    --glass-bg: 255 255 255;
+    --glass-border: 255 255 255;
   }
 
-  /* Dark theme */
   .dark {
-    --background: 240 20% 7%;
-    --foreground: 210 40% 98%;
-    --card: 240 20% 10%;
-    --card-foreground: 210 40% 98%;
-    --popover: 240 20% 10%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 263 70% 58%;
+    --background: 224 32% 8%;
+    --foreground: 0 0% 100%;
+    --card: 224 24% 13%;
+    --card-foreground: 0 0% 100%;
+    --popover: 224 24% 13%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 221 92% 62%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 20% 16%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 240 20% 14%;
-    --muted-foreground: 215 20% 55%;
-    --accent: 263 70% 58%;
+    --secondary: 224 20% 20%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 224 20% 20%;
+    --muted-foreground: 220 14% 68%;
+    --accent: 262 80% 68%;
     --accent-foreground: 0 0% 100%;
-    --destructive: 0 72% 51%;
+    --destructive: 356 70% 56%;
     --destructive-foreground: 0 0% 100%;
-    --border: 240 20% 16%;
-    --input: 240 20% 16%;
-    --ring: 263 70% 58%;
-    
-    /* Extended palette for dark mode */
-    --surface: 240 20% 12%;
-    --surface-hover: 240 20% 16%;
-    --glow-primary: 263 70% 58%;
-    --glow-accent: 263 70% 58%;
-    --success: 142 71% 45%;
+    --border: 222 18% 26%;
+    --input: 222 18% 26%;
+    --ring: 221 92% 62%;
+
+    --surface: 224 24% 13%;
+    --surface-hover: 224 20% 18%;
+    --glow-primary: 221 92% 62%;
+    --glow-accent: 262 80% 68%;
+    --success: 158 64% 48%;
     --success-foreground: 0 0% 100%;
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 0%;
+    --warning: 32 95% 56%;
+    --warning-foreground: 224 32% 8%;
+
+    --c-blue: 221 92% 66%;
+    --c-violet: 262 80% 70%;
+    --c-teal: 178 70% 52%;
+    --c-rose: 340 82% 68%;
+    --c-amber: 32 95% 60%;
+
+    --glass-bg: 30 35 54;
+    --glass-border: 255 255 255;
   }
 }
 
@@ -84,8 +107,39 @@
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
     font-size: 16px;
+    line-height: 1.38;
+    letter-spacing: 0;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    position: relative;
+    min-height: 100vh;
+  }
+
+  /* Colorful ambient backdrop — soft drifting blobs behind every surface */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(42rem 42rem at 8% -5%, hsl(var(--c-blue) / 0.22), transparent 60%),
+      radial-gradient(38rem 38rem at 100% 0%, hsl(var(--c-violet) / 0.20), transparent 58%),
+      radial-gradient(40rem 40rem at 50% 108%, hsl(var(--c-teal) / 0.18), transparent 60%),
+      radial-gradient(30rem 30rem at 92% 75%, hsl(var(--c-rose) / 0.14), transparent 62%);
+    background-attachment: fixed;
+  }
+
+  .dark body::before {
+    background:
+      radial-gradient(42rem 42rem at 8% -5%, hsl(var(--c-blue) / 0.30), transparent 60%),
+      radial-gradient(38rem 38rem at 100% 0%, hsl(var(--c-violet) / 0.26), transparent 58%),
+      radial-gradient(40rem 40rem at 50% 108%, hsl(var(--c-teal) / 0.20), transparent 60%),
+      radial-gradient(30rem 30rem at 92% 75%, hsl(var(--c-rose) / 0.16), transparent 62%);
+  }
+
+  h1, h2, h3 {
+    @apply font-display font-medium leading-none tracking-normal;
   }
 }
 
@@ -170,36 +224,80 @@
   animation: glow-pulse 3s ease-in-out infinite;
 }
 
-/* Gradient text */
+/* Gradient text — Action Blue accent only */
 .gradient-text {
-  @apply bg-clip-text text-transparent bg-gradient-to-r from-violet-600 via-purple-500 to-indigo-500;
+  @apply text-primary;
 }
 
 .dark .gradient-text {
-  @apply from-violet-400 via-purple-400 to-indigo-400;
+  @apply text-primary;
 }
 
-/* Glass morphism effect */
+/* ---- Apple-style glassmorphism ---------------------------------------- */
+/* Frosted translucent surface with blur, soft inner highlight + drop shadow. */
 .glass {
-  @apply bg-white/80 backdrop-blur-xl border border-white/20;
+  background: rgb(var(--glass-bg) / 0.62);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgb(var(--glass-border) / 0.45);
+  box-shadow:
+    0 1px 0 0 rgb(var(--glass-border) / 0.55) inset,
+    0 10px 30px -12px hsl(222 47% 25% / 0.28);
+}
+
+/* Stronger, more opaque variant for content that must stay highly readable. */
+.glass-strong {
+  background: rgb(var(--glass-bg) / 0.82);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgb(var(--glass-border) / 0.5);
+  box-shadow:
+    0 1px 0 0 rgb(var(--glass-border) / 0.6) inset,
+    0 16px 40px -16px hsl(222 47% 22% / 0.30);
+}
+
+/* Subtle tinted-glass panels for accents/headers. */
+.glass-panel {
+  background: rgb(var(--glass-bg) / 0.7);
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  backdrop-filter: blur(18px) saturate(170%);
+  border: 1px solid rgb(var(--glass-border) / 0.4);
 }
 
 .dark .glass {
-  @apply bg-slate-900/80 border-slate-700/50;
+  border-color: rgb(var(--glass-border) / 0.1);
+  box-shadow:
+    0 1px 0 0 rgb(var(--glass-border) / 0.08) inset,
+    0 14px 40px -16px hsl(224 60% 2% / 0.7);
 }
 
-/* Card hover effects */
+.dark .glass-strong,
+.dark .glass-panel {
+  border-color: rgb(var(--glass-border) / 0.12);
+}
+
+/* Gradient buttons + glow (defined here so they don't depend on JIT config
+   token pickup; works identically in dev and production). */
+.btn-gradient-primary {
+  background-image: linear-gradient(135deg, hsl(var(--c-blue)), hsl(var(--primary)));
+}
+
+.btn-gradient-danger {
+  background-image: linear-gradient(135deg, hsl(var(--c-rose)), hsl(var(--destructive)));
+}
+
+.shadow-glow {
+  box-shadow: 0 12px 36px -12px hsl(var(--glow-primary) / 0.5);
+}
+
+/* Card hover — lift + accent border for the glass aesthetic. */
 .card-hover {
-  @apply transition-all duration-300 ease-out;
+  @apply transition-all duration-200 ease-out;
 }
 
 .card-hover:hover {
-  @apply -translate-y-1 shadow-xl;
-}
-
-.dark .card-hover:hover {
-  box-shadow: 0 20px 40px -12px hsl(var(--primary) / 0.15),
-              0 0 0 1px hsl(var(--primary) / 0.1);
+  @apply border-primary/40 -translate-y-0.5;
+  box-shadow: 0 18px 44px -18px hsl(var(--primary) / 0.35);
 }
 
 /* Stage progress indicator */

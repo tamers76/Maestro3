@@ -89,11 +89,16 @@ function PhaseGroup({
           locked && 'pointer-events-none opacity-70'
         )}
       >
-        <span className="flex items-center gap-2 font-semibold text-foreground">
+        <span className="flex min-w-0 items-center gap-2 font-semibold text-foreground">
           {icon}
-          {title}
+          <span className="truncate">{title}</span>
         </span>
-        <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-medium', badgeClass[badge.tone])}>
+        <span
+          className={cn(
+            'inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-full px-2 py-0.5 text-center text-[10px] font-medium leading-none',
+            badgeClass[badge.tone]
+          )}
+        >
           {badge.text}
         </span>
       </Link>

@@ -66,7 +66,7 @@ import {
   Shield,
   Boxes,
 } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
+import { Markdown } from '@/components/ui/Markdown'
 import { cn } from '@/lib/utils'
 import { LEGACY_STAGES_ENABLED } from '@/config/featureFlags'
 import NodeEnginePanel from '@/components/nodeEngine/NodeEnginePanel'
@@ -531,7 +531,7 @@ export default function CourseDetail() {
           {course.current_stage >= 5 && (
             <>
               <a href={getDownloadUrl(course.course_code, 'zip')} download>
-                <Button className="gap-2 bg-green-600 hover:bg-green-700">
+                <Button className="gap-2">
                   <Package className="h-4 w-4" />
                   Download Course (ZIP)
                 </Button>
@@ -1079,9 +1079,7 @@ export default function CourseDetail() {
                         <Loader2 className="h-6 w-6 animate-spin text-primary" />
                       </div>
                     ) : nodeContent ? (
-                      <div className="prose prose-sm max-w-none dark:prose-invert">
-                        <ReactMarkdown>{nodeContent.substring(0, 1000) + '...'}</ReactMarkdown>
-                      </div>
+                      <Markdown>{nodeContent.substring(0, 1000) + '...'}</Markdown>
                     ) : (
                       <p className="text-sm text-muted-foreground">
                         No content generated for this node yet.

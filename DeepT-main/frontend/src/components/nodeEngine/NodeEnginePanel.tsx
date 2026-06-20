@@ -924,10 +924,8 @@ export default function NodeEnginePanel({
               <div
                 key={layer.layer}
                 className={cn(
-                  'rounded-lg border',
-                  status === 'approved' || status === 'completed'
-                    ? 'border-emerald-500/40'
-                    : 'border-border'
+                  'glass-strong rounded-xl',
+                  (status === 'approved' || status === 'completed') && '!border-emerald-500/50'
                 )}
               >
                 <button
@@ -1020,6 +1018,7 @@ export default function NodeEnginePanel({
                         cloFullyApprovedCount={cloFullyApprovedCount}
                         cloTotalCount={cloGroups.length}
                         onContinueLayer2={() => goToLayer(2)}
+                        solo={solo}
                       />
                     ) : layer.layer === 2 ? (
                       <>
@@ -1045,10 +1044,12 @@ export default function NodeEnginePanel({
                           filters={layerFilters}
                           onFiltersChange={setLayerFilters}
                         />
-                        <Layer2ContinueCta
-                          layer2Approved={layer2Approved}
-                          onContinue={() => goToLayer(3)}
-                        />
+                        {!solo && (
+                          <Layer2ContinueCta
+                            layer2Approved={layer2Approved}
+                            onContinue={() => goToLayer(3)}
+                          />
+                        )}
                       </>
                     ) : layer.layer === 3 ? (
                       <>
@@ -1075,10 +1076,12 @@ export default function NodeEnginePanel({
                           filters={layerFilters}
                           onFiltersChange={setLayerFilters}
                         />
-                        <Layer3ContinueCta
-                          layer3Approved={layer3Approved}
-                          onContinue={() => goToLayer(4)}
-                        />
+                        {!solo && (
+                          <Layer3ContinueCta
+                            layer3Approved={layer3Approved}
+                            onContinue={() => goToLayer(4)}
+                          />
+                        )}
                       </>
                     ) : layer.layer === 4 ? (
                       <>
@@ -1101,10 +1104,12 @@ export default function NodeEnginePanel({
                           filters={layerFilters}
                           onFiltersChange={setLayerFilters}
                         />
-                        <Layer4ContinueCta
-                          layer4Complete={layer4Complete}
-                          onContinue={() => goToLayer(5)}
-                        />
+                        {!solo && (
+                          <Layer4ContinueCta
+                            layer4Complete={layer4Complete}
+                            onContinue={() => goToLayer(5)}
+                          />
+                        )}
                       </>
                     ) : (
                       <PlaceholderLayerBody status={status} layer={layer} />
@@ -1146,6 +1151,7 @@ interface Layer1BodyProps {
   cloFullyApprovedCount: number
   cloTotalCount: number
   onContinueLayer2: () => void
+  solo: boolean
 }
 
 interface FlatNodeMatch {
@@ -1195,6 +1201,7 @@ function Layer1Body({
   cloFullyApprovedCount,
   cloTotalCount,
   onContinueLayer2,
+  solo,
 }: Layer1BodyProps) {
   if (status === 'locked') {
     return (
@@ -1361,18 +1368,20 @@ function Layer1Body({
           />
         ))}
 
-        <div className="rounded-md border border-border bg-muted/20 p-4">
-          <Button size="sm" variant="default" disabled={!layer1Approved} onClick={onContinueLayer2}>
-            Continue to Layer 2 — Experience Blueprint
-            <ChevronRight className="ml-2 h-4 w-4" />
-          </Button>
-          {!layer1Approved && cloTotalCount > 0 && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              {cloFullyApprovedCount} of {cloTotalCount} CLOs approved · approve all node sets to
-              continue
-            </p>
-          )}
-        </div>
+        {!solo && (
+          <div className="rounded-md border border-border bg-muted/20 p-4">
+            <Button size="sm" variant="default" disabled={!layer1Approved} onClick={onContinueLayer2}>
+              Continue to Layer 2 — Experience Blueprint
+              <ChevronRight className="ml-2 h-4 w-4" />
+            </Button>
+            {!layer1Approved && cloTotalCount > 0 && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                {cloFullyApprovedCount} of {cloTotalCount} CLOs approved · approve all node sets to
+                continue
+              </p>
+            )}
+          </div>
+        )}
         </>
       )}
     </div>

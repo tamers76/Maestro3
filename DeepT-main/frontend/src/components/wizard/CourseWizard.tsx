@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Routes, Route, Navigate, useNavigate, useParams, useLocation } from 'react-router-dom'
 import { ArrowLeft, Boxes, ChevronRight, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -71,6 +71,26 @@ function ArchitectScreen({
   const goLayer = (id: string) => navigate(`${base}/architect/${id}`)
   const goEngine = () => navigate(`${base}/engine/${journey.engineFrontierLayer}`)
 
+  // Stabilize the callbacks handed to Stage1Layers. These are invoked from
+  // inside Stage1Layers' data-loading effects; an unstable identity here would
+  // re-trigger those effects on every parent re-render (refetch loop).
+  const journeyRefresh = journey.refresh
+  const handleAllApproved = useCallback(
+    (v: boolean) => {
+      onArchitectAllApproved(v)
+      void journeyRefresh()
+    },
+    [onArchitectAllApproved, journeyRefresh]
+  )
+  const handleAlignmentSignals = useCallback(() => {
+    onAlignmentAutoPropose()
+    onAlignmentFetch()
+  }, [onAlignmentAutoPropose, onAlignmentFetch])
+  const handleAlignmentApproved = useCallback(() => {
+    onAlignmentFetch()
+    void journeyRefresh()
+  }, [onAlignmentFetch, journeyRefresh])
+
   return (
     <>
       <WizardStepShell
@@ -79,31 +99,17 @@ function ArchitectScreen({
         title={active?.label ?? 'Course Architect'}
         subtitle="Review, run, and approve this layer. Approving unlocks the next step in the journey."
         statusBadge={stepBadge(active?.status)}
-        steps={steps.map((s) => ({ id: s.id, label: s.label, status: s.status }))}
-        onSelectStep={(id) => goLayer(id)}
       >
         <Stage1Layers
           courseCode={courseCode}
           soloLayerId={layerId}
           onNavigateLayer={goLayer}
-          onAllApproved={(v) => {
-            onArchitectAllApproved(v)
-            void journey.refresh()
-          }}
-          onAlignmentAutoPropose={() => {
-            onAlignmentAutoPropose()
-            onAlignmentFetch()
-          }}
-          onReferenceUploaded={() => {
-            onAlignmentAutoPropose()
-            onAlignmentFetch()
-          }}
+          onAllApproved={handleAllApproved}
+          onAlignmentAutoPropose={handleAlignmentSignals}
+          onReferenceUploaded={handleAlignmentSignals}
           alignmentFetchSignal={alignmentFetchSignal}
           alignmentAutoProposeSignal={alignmentAutoProposeSignal}
-          onAlignmentApproved={() => {
-            onAlignmentFetch()
-            void journey.refresh()
-          }}
+          onAlignmentApproved={handleAlignmentApproved}
           intake={intake}
         />
       </WizardStepShell>
@@ -166,7 +172,6 @@ function EngineScreen({ courseCode, journey, alignmentFetchSignal }: EngineScree
           title="Maestro Node Engine"
           subtitle="Turn each approved subtopic into governed adaptive learning nodes."
           statusBadge={{ label: 'Locked', tone: 'locked' }}
-          steps={journey.engineSteps.map((s) => ({ id: s.id, label: s.label, status: s.status }))}
         >
           <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-16 text-center">
             <Boxes className="mb-3 h-10 w-10 text-muted-foreground/50" />
@@ -205,8 +210,6 @@ function EngineScreen({ courseCode, journey, alignmentFetchSignal }: EngineScree
         title={active?.label ?? 'Maestro Node Engine'}
         subtitle="Generate and approve this layer's output. Approving unlocks the next layer."
         statusBadge={stepBadge(active?.status)}
-        steps={steps.map((s) => ({ id: s.id, label: s.label, status: s.status }))}
-        onSelectStep={(id) => goLayer(layerOf(id))}
       >
         <NodeEnginePanel
           courseCode={courseCode}
@@ -256,6 +259,11 @@ export default function CourseWizard() {
   const [, setArchitectAllApproved] = useState(false)
 
   const journey = useCourseJourney(code)
+
+  // Stable signal bumpers so child screens/panels don't see new callback
+  // identities on every render.
+  const bumpAlignmentFetch = useCallback(() => setAlignmentFetchSignal((n) => n + 1), [])
+  const bumpAlignmentAutoPropose = useCallback(() => setAlignmentAutoProposeSignal((n) => n + 1), [])
 
   useEffect(() => {
     if (!code) return
@@ -342,7 +350,7 @@ export default function CourseWizard() {
 
       <div className="flex flex-col gap-6 lg:flex-row">
         <aside className="lg:sticky lg:top-[68px] lg:h-fit lg:w-[264px] lg:shrink-0">
-          <div className="rounded-xl border border-border bg-card p-3">
+          <div className="glass-strong rounded-xl p-3">
             <JourneyRail
               courseCode={course.course_code}
               currentPhase={currentPhase}
@@ -373,8 +381,8 @@ export default function CourseWizard() {
                     intake={intake}
                     alignmentFetchSignal={alignmentFetchSignal}
                     alignmentAutoProposeSignal={alignmentAutoProposeSignal}
-                    onAlignmentFetch={() => setAlignmentFetchSignal((n) => n + 1)}
-                    onAlignmentAutoPropose={() => setAlignmentAutoProposeSignal((n) => n + 1)}
+                    onAlignmentFetch={bumpAlignmentFetch}
+                    onAlignmentAutoPropose={bumpAlignmentAutoPropose}
                     onArchitectAllApproved={setArchitectAllApproved}
                   />
                 }

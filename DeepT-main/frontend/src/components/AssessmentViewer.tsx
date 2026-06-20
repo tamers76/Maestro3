@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   Lightbulb
 } from 'lucide-react'
+import { Markdown } from '@/components/ui/Markdown'
 import type { 
   NodeAssessment, 
   AssessmentQuestion, 
@@ -95,7 +96,7 @@ function QuestionCard({ question, index }: { question: AssessmentQuestion; index
             </span>
           </div>
           
-          <p className="text-sm text-foreground mb-3">{question.question_text}</p>
+          <Markdown className="mb-3 text-foreground">{question.question_text}</Markdown>
           
           {question.options && question.options.length > 0 && (
             <div className="space-y-2 mb-3">
@@ -117,7 +118,7 @@ function QuestionCard({ question, index }: { question: AssessmentQuestion; index
           {question.rubric_criteria && (
             <div className="mb-3 p-3 rounded bg-muted/50 border border-muted">
               <p className="text-xs font-medium text-muted-foreground mb-1">Rubric Criteria:</p>
-              <p className="text-sm text-foreground whitespace-pre-wrap">{question.rubric_criteria}</p>
+              <Markdown className="text-foreground">{question.rubric_criteria}</Markdown>
             </div>
           )}
           
@@ -195,7 +196,7 @@ function SingleAssessment({ assessment, defaultExpanded = false }: SingleAssessm
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-3 rounded-lg bg-muted/30">
               <div>
                 <p className="text-xs font-medium text-muted-foreground mb-1">Description</p>
-                <p className="text-sm">{assessment.description}</p>
+                <Markdown>{assessment.description}</Markdown>
               </div>
               <div>
                 <p className="text-xs font-medium text-muted-foreground mb-1">Pass Threshold</p>
@@ -212,14 +213,14 @@ function SingleAssessment({ assessment, defaultExpanded = false }: SingleAssessm
                 <HelpCircle className="h-3 w-3" />
                 Adaptive Function
               </p>
-              <p className="text-sm">{assessment.adaptive_function}</p>
+              <Markdown>{assessment.adaptive_function}</Markdown>
             </div>
             
             {/* Instructions */}
             {assessment.instructions && (
               <div className="p-3 rounded-lg bg-primary/5">
                 <p className="text-xs font-medium text-primary mb-1">Instructions for Learners</p>
-                <p className="text-sm text-foreground">{assessment.instructions}</p>
+                <Markdown className="text-foreground">{assessment.instructions}</Markdown>
               </div>
             )}
             
