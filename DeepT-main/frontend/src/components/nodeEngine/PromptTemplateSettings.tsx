@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Textarea'
 import { Input } from '@/components/ui/Input'
 import { showToast } from '@/components/ui/Toaster'
+import { HeyGenRenderSettingsPicker } from './HeyGenRenderSettingsPicker'
+import { GlassPanel } from '@/components/ui/GlassPanel'
 import {
   fetchPromptTemplates,
   updatePromptTemplate,
@@ -331,11 +333,11 @@ export default function PromptTemplateSettings({
         </p>
       </div>
 
-      <div className={showList ? 'grid grid-cols-1 md:grid-cols-3 gap-4' : 'grid grid-cols-1 gap-4'}>
+      <div className={showList ? 'grid grid-cols-1 md:grid-cols-3 lg:grid-cols-12 gap-4' : 'grid grid-cols-1 gap-4'}>
         {/* Template list — shown whenever there is more than one template (incl.
             the focused variant filtered to multiple ids). */}
         {showList && (
-        <Card className="md:col-span-1">
+        <Card className={showList ? 'md:col-span-1 lg:col-span-3' : ''}>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Templates</CardTitle>
           </CardHeader>
@@ -374,7 +376,7 @@ export default function PromptTemplateSettings({
         )}
 
         {/* Editor */}
-        <Card className={showList ? 'md:col-span-2' : ''}>
+        <Card className={showList ? 'md:col-span-2 lg:col-span-9' : ''}>
           {selected ? (
             <>
               <CardHeader className="pb-3">
@@ -592,39 +594,22 @@ export default function PromptTemplateSettings({
 
                     {/* Video Render Settings — only for the `video` vehicle. */}
                     {selected.vehicle === 'video' && (
-                      <div className="space-y-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
-                        <h4 className="text-xs font-semibold text-amber-700 dark:text-amber-400">
-                          Video Render Settings (HeyGen v3 — mocked in V1)
-                        </h4>
-                        <p className="text-[11px] text-muted-foreground -mt-1">
-                          Render settings only — the brief prompt produces the script, never these IDs. Real video
-                          rendering is <span className="font-medium">mocked in V1</span>; saving here is a model/settings
-                          edit (no prompt-version bump). API key is referenced by name, never entered here.
-                        </p>
+                      <div className="space-y-4">
+                        <HeyGenRenderSettingsPicker
+                          videoSettings={modelDraft.videoSettings}
+                          onPatch={patchVideoSettings}
+                        />
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div className="space-y-1">
-                            <label className="text-xs font-medium text-muted-foreground">Avatar ID</label>
-                            <Input
-                              value={modelDraft.videoSettings?.avatar_id ?? ''}
-                              onChange={(e) => patchVideoSettings({ avatar_id: e.target.value })}
-                              placeholder="(from HeyGen account — mocked)"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-xs font-medium text-muted-foreground">Voice ID</label>
-                            <Input
-                              value={modelDraft.videoSettings?.voice_id ?? ''}
-                              onChange={(e) => patchVideoSettings({ voice_id: e.target.value })}
-                              placeholder="(prefer avatar default_voice_id)"
-                            />
-                          </div>
+                        <GlassPanel>
+                          <div className="space-y-3">
+                            <h5 className="text-xs font-semibold text-foreground">Output & delivery</h5>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="space-y-1">
                             <label className="text-xs font-medium text-muted-foreground">Engine</label>
                             <select
                               value={modelDraft.videoSettings?.engine ?? ''}
                               onChange={(e) => patchVideoSettings({ engine: (e.target.value || undefined) as VideoSettings['engine'] })}
-                              className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                              className="w-full h-9 rounded-md border border-black/10 dark:border-white/10 bg-background/50 px-3 text-sm"
                             >
                               <option value="">(default avatar_iv)</option>
                               {VIDEO_ENGINES.map((v) => (
@@ -637,7 +622,7 @@ export default function PromptTemplateSettings({
                             <select
                               value={modelDraft.videoSettings?.resolution ?? ''}
                               onChange={(e) => patchVideoSettings({ resolution: (e.target.value || undefined) as VideoSettings['resolution'] })}
-                              className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                              className="w-full h-9 rounded-md border border-black/10 dark:border-white/10 bg-background/50 px-3 text-sm"
                             >
                               <option value="">(default 1080p)</option>
                               {VIDEO_RESOLUTIONS.map((v) => (
@@ -650,7 +635,7 @@ export default function PromptTemplateSettings({
                             <select
                               value={modelDraft.videoSettings?.aspect_ratio ?? ''}
                               onChange={(e) => patchVideoSettings({ aspect_ratio: (e.target.value || undefined) as VideoSettings['aspect_ratio'] })}
-                              className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                              className="w-full h-9 rounded-md border border-black/10 dark:border-white/10 bg-background/50 px-3 text-sm"
                             >
                               <option value="">(default auto)</option>
                               {VIDEO_ASPECT_RATIOS.map((v) => (
@@ -663,7 +648,7 @@ export default function PromptTemplateSettings({
                             <select
                               value={modelDraft.videoSettings?.output_format ?? ''}
                               onChange={(e) => patchVideoSettings({ output_format: (e.target.value || undefined) as VideoSettings['output_format'] })}
-                              className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                              className="w-full h-9 rounded-md border border-black/10 dark:border-white/10 bg-background/50 px-3 text-sm"
                             >
                               <option value="">(default mp4)</option>
                               {VIDEO_OUTPUT_FORMATS.map((v) => (
@@ -679,6 +664,7 @@ export default function PromptTemplateSettings({
                             value={modelDraft.videoSettings?.motion_prompt ?? ''}
                             onChange={(e) => patchVideoSettings({ motion_prompt: e.target.value })}
                             placeholder="Natural-language body/gesture control"
+                            className="bg-background/50 border-black/10 dark:border-white/10"
                           />
                         </div>
 
@@ -693,6 +679,7 @@ export default function PromptTemplateSettings({
                                 patchVoiceSettings({ speed: e.target.value === '' ? undefined : Number(e.target.value) })
                               }
                               placeholder="(unset)"
+                              className="bg-background/50 border-black/10 dark:border-white/10"
                             />
                           </div>
                           <div className="space-y-1">
@@ -705,6 +692,7 @@ export default function PromptTemplateSettings({
                                 patchVoiceSettings({ pitch: e.target.value === '' ? undefined : Number(e.target.value) })
                               }
                               placeholder="(unset)"
+                              className="bg-background/50 border-black/10 dark:border-white/10"
                             />
                           </div>
                           <div className="space-y-1">
@@ -713,6 +701,7 @@ export default function PromptTemplateSettings({
                               value={modelDraft.videoSettings?.voice_settings?.locale ?? ''}
                               onChange={(e) => patchVoiceSettings({ locale: e.target.value || undefined })}
                               placeholder="e.g. en-US"
+                              className="bg-background/50 border-black/10 dark:border-white/10"
                             />
                           </div>
                         </div>
@@ -724,6 +713,7 @@ export default function PromptTemplateSettings({
                               value={modelDraft.videoSettings?.callback_url ?? ''}
                               onChange={(e) => patchVideoSettings({ callback_url: e.target.value || undefined })}
                               placeholder="Webhook on completion"
+                              className="bg-background/50 border-black/10 dark:border-white/10"
                             />
                           </div>
                           <div className="space-y-1">
@@ -732,6 +722,7 @@ export default function PromptTemplateSettings({
                               value={modelDraft.videoSettings?.apiKeyRef ?? ''}
                               onChange={(e) => patchVideoSettings({ apiKeyRef: e.target.value || undefined })}
                               placeholder="e.g. HEYGEN_API_KEY"
+                              className="bg-background/50 border-black/10 dark:border-white/10"
                             />
                           </div>
                         </div>
@@ -744,6 +735,8 @@ export default function PromptTemplateSettings({
                           />
                           Remove background
                         </label>
+                          </div>
+                        </GlassPanel>
                       </div>
                     )}
 

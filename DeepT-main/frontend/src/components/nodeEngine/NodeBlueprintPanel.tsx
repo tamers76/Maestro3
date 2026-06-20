@@ -18,16 +18,17 @@ import {
   type BlueprintObjectPatch,
   type BlueprintVehicle,
   type NodeEngineBlueprint,
-  type NodeEngineNode,
   type NodeEngineNodeSet,
 } from '@/services/api'
-
-interface ApprovedNodeRef {
-  node: NodeEngineNode
-  subtopicId: string
-  subtopicTitle: string
-  cloId: string
-}
+import {
+  countLayerMatches,
+  filterVisibleObjects,
+  isFilterActive,
+  nodeIsVisible,
+  type ApprovedNodeRef,
+  type NodeEngineFilterState,
+} from './nodeEngineFilters'
+import { EntityCodeBadge, MasteryNodeSummary, NodeEngineFilterBar } from './NodeEngineUi'
 
 interface CloBlueprintGroup {
   clo_id: string
@@ -113,6 +114,8 @@ export interface Layer2BodyProps {
   layer2Approved: boolean
   approverLabel: string
   courseCode: string
+  filters: NodeEngineFilterState
+  onFiltersChange: (filters: NodeEngineFilterState) => void
 }
 
 export function Layer2Body({
@@ -130,11 +133,29 @@ export function Layer2Body({
   layer2Approved,
   approverLabel,
   courseCode,
+  filters,
+  onFiltersChange,
 }: Layer2BodyProps) {
   const groups = useMemo(
     () => buildApprovedNodeGroups(cloGroups, nodeSetsBySubtopicId),
     [cloGroups, nodeSetsBySubtopicId]
   )
+
+  const allNodes = useMemo(() => groups.flatMap((g) => g.nodes), [groups])
+
+  const matchCount = useMemo(
+    () =>
+      countLayerMatches(
+        allNodes,
+        filters,
+        'blueprint',
+        (nodeId) => blueprintsByNodeId[nodeId],
+        (ref) => blueprintsByNodeId[ref.node.node_id]?.objects ?? []
+      ),
+    [allNodes, filters, blueprintsByNodeId]
+  )
+
+  const filterActive = isFilterActive(filters)
 
   const totalNodes = groups.reduce((sum, g) => sum + g.nodes.length, 0)
   const generatedCount = groups.reduce(
@@ -173,6 +194,13 @@ export function Layer2Body({
 
   return (
     <div className="space-y-4">
+      <NodeEngineFilterBar
+        layer="blueprint"
+        filters={filters}
+        onChange={onFiltersChange}
+        matchCount={filterActive ? matchCount : undefined}
+      />
+
       <div className="flex flex-wrap gap-2">
         <Pill className="bg-muted text-muted-foreground">{totalNodes} approved node(s)</Pill>
         <Pill className="bg-blue-500/15 text-blue-600 dark:text-blue-400">
@@ -188,10 +216,22 @@ export function Layer2Body({
         )}
       </div>
 
-      {groups.map((group) => (
+      {groups.map((group) => {
+        const visibleNodes = filterActive
+          ? group.nodes.filter((ref) =>
+              nodeIsVisible(
+                ref,
+                blueprintsByNodeId[ref.node.node_id]?.objects ?? [],
+                filters,
+                { layer: 'blueprint', blueprint: blueprintsByNodeId[ref.node.node_id] }
+              )
+            )
+          : group.nodes
+        if (filterActive && visibleNodes.length === 0) return null
+        return (
         <CloBlueprintGroupCard
           key={group.clo_id}
-          group={group}
+          group={{ ...group, nodes: visibleNodes }}
           blueprintsByNodeId={blueprintsByNodeId}
           generating={generatingCloId === group.clo_id}
           approving={approvingCloId === group.clo_id}
@@ -201,8 +241,15 @@ export function Layer2Body({
           onBlueprintUpdated={onBlueprintUpdated}
           approverLabel={approverLabel}
           courseCode={courseCode}
+          filters={filters}
+          filterActive={filterActive}
         />
-      ))}
+        )
+      })}
+
+      {filterActive && matchCount.nodes === 0 && (
+        <p className="text-sm text-muted-foreground">No nodes or objects match the current filters.</p>
+      )}
     </div>
   )
 }
@@ -218,6 +265,8 @@ interface CloBlueprintGroupCardProps {
   onBlueprintUpdated: (nodeId: string, blueprint: NodeEngineBlueprint) => void
   approverLabel: string
   courseCode: string
+  filters: NodeEngineFilterState
+  filterActive: boolean
 }
 
 function CloBlueprintGroupCard({
@@ -231,6 +280,8 @@ function CloBlueprintGroupCard({
   onBlueprintUpdated,
   approverLabel,
   courseCode,
+  filters,
+  filterActive,
 }: CloBlueprintGroupCardProps) {
   const generated = group.nodes.filter((n) => blueprintsByNodeId[n.node.node_id]).length
   const approved = group.nodes.filter(
@@ -282,15 +333,18 @@ function CloBlueprintGroupCard({
       </div>
 
       <div className="space-y-3 border-t border-border px-4 py-3">
-        {group.nodes.map((ref) => (
+        {group.nodes.map((ref, nodeIndex) => (
           <NodeBlueprintCard
             key={ref.node.node_id}
             ref_={ref}
+            nodeIndex={nodeIndex + 1}
             blueprint={blueprintsByNodeId[ref.node.node_id] ?? null}
             busy={busy}
             onBlueprintUpdated={onBlueprintUpdated}
             approverLabel={approverLabel}
             courseCode={courseCode}
+            filters={filters}
+            filterActive={filterActive}
           />
         ))}
       </div>
@@ -300,22 +354,45 @@ function CloBlueprintGroupCard({
 
 function NodeBlueprintCard({
   ref_,
+  nodeIndex,
   blueprint,
   busy,
   onBlueprintUpdated,
   approverLabel,
   courseCode,
+  filters,
+  filterActive,
 }: {
   ref_: ApprovedNodeRef
+  nodeIndex: number
   blueprint: NodeEngineBlueprint | null
   busy: boolean
   onBlueprintUpdated: (nodeId: string, blueprint: NodeEngineBlueprint) => void
   approverLabel: string
   courseCode: string
+  filters: NodeEngineFilterState
+  filterActive: boolean
 }) {
   const [generating, setGenerating] = useState(false)
   const [approving, setApproving] = useState(false)
   const [savingId, setSavingId] = useState<string | null>(null)
+
+  const sortedObjects = useMemo(
+    () =>
+      [...(blueprint?.objects ?? [])].sort((a, b) => a.sequence_order - b.sequence_order),
+    [blueprint?.objects]
+  )
+
+  const visibleObjects = useMemo(
+    () =>
+      filterVisibleObjects(sortedObjects, ref_, filters, {
+        layer: 'blueprint',
+        blueprint,
+      }),
+    [sortedObjects, ref_, filters, blueprint]
+  )
+
+  const forceOpen = filterActive && visibleObjects.length > 0
 
   async function handleGenerate() {
     setGenerating(true)
@@ -375,29 +452,36 @@ function NodeBlueprintCard({
   }
 
   return (
-    <details className="rounded-md border border-border" open={!blueprint}>
-      <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-sm">
-        <span className="font-medium">{ref_.node.node_title}</span>
-        <Pill className="bg-muted text-muted-foreground">{ref_.subtopicTitle}</Pill>
-        {blueprint ? (
-          <Pill
-            className={
-              blueprint.status === 'approved'
-                ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-            }
-          >
-            {blueprint.status === 'approved' ? (
-              <>
-                <Check className="h-3 w-3" /> Approved
-              </>
-            ) : (
-              'Draft'
-            )}
-          </Pill>
-        ) : (
-          <Pill className="bg-muted text-muted-foreground">Not generated</Pill>
-        )}
+    <details className="rounded-md border border-border" open={forceOpen || !blueprint}>
+      <summary className="cursor-pointer px-3 py-2 text-sm">
+        <MasteryNodeSummary
+          nodeIndex={nodeIndex}
+          title={ref_.node.node_title}
+          nodeId={ref_.node.node_id}
+          highlight={forceOpen}
+        >
+          <Pill className="bg-muted text-muted-foreground">{ref_.subtopicTitle}</Pill>
+          <Pill className="bg-muted text-muted-foreground">{ref_.node.node_type}</Pill>
+          {blueprint ? (
+            <Pill
+              className={
+                blueprint.status === 'approved'
+                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+              }
+            >
+              {blueprint.status === 'approved' ? (
+                <>
+                  <Check className="h-3 w-3" /> Approved
+                </>
+              ) : (
+                'Draft'
+              )}
+            </Pill>
+          ) : (
+            <Pill className="bg-muted text-muted-foreground">Not generated</Pill>
+          )}
+        </MasteryNodeSummary>
       </summary>
 
       <div className="space-y-3 border-t border-border px-3 py-3">
@@ -421,15 +505,14 @@ function NodeBlueprintCard({
                 <tr className="border-b border-border text-muted-foreground">
                   <th className="py-2 pr-2">#</th>
                   <th className="py-2 pr-2">Object</th>
+                  <th className="py-2 pr-2">Code</th>
                   <th className="py-2 pr-2">Purpose</th>
                   <th className="py-2 pr-2">Vehicle</th>
                   <th className="py-2">Rationale</th>
                 </tr>
               </thead>
               <tbody>
-                {[...blueprint.objects]
-                  .sort((a, b) => a.sequence_order - b.sequence_order)
-                  .map((obj) => (
+                {visibleObjects.map((obj) => (
                     <tr
                       key={obj.object_id}
                       className={cn(
@@ -450,6 +533,9 @@ function NodeBlueprintCard({
                             Targets {obj.targets_misconception_id}
                           </Pill>
                         )}
+                      </td>
+                      <td className="py-2 pr-2 align-top">
+                        <EntityCodeBadge code={obj.object_id} />
                       </td>
                       <td className="py-2 pr-2 align-top">{obj.node_object_purpose ?? '—'}</td>
                       <td className="py-2 pr-2 align-top">

@@ -476,15 +476,64 @@ test('videoSettings rejects an invalid enum value (resolution "8k")', () => {
   assert.throws(() => parseVideoSettings({ provider: 'synthesia' }), NodeEngineValidationError);
 });
 
-test('videoSettings rejects style_id / brand_kit_id (deferred v2 Template API)', () => {
-  assert.throws(
-    () => parseVideoSettings({ provider: 'heygen', style_id: 'x' }),
-    NodeEngineValidationError
-  );
+test('videoSettings allows style_id (Video Agent) but rejects brand_kit_id (deferred v2 Template API)', () => {
+  // style_id is now a first-class Video Agent setting.
+  const withStyle = parseVideoSettings({ provider: 'heygen', style_id: 'style_noir' });
+  assert.equal(withStyle.style_id, 'style_noir');
+  // brand_kit_id (HeyGen workspace template ID) remains deferred — use inline brand_kit instead.
   assert.throws(
     () => parseVideoSettings({ provider: 'heygen', brand_kit_id: 'y' }),
     NodeEngineValidationError
   );
+});
+
+test('videoSettings parses approved_avatars library', () => {
+  const settings = parseVideoSettings({
+    provider: 'heygen',
+    approved_avatars: [
+      {
+        id: 'Daphne_public_1',
+        name: 'Daphne in Grey blazer',
+        avatar_type: 'studio_avatar',
+        default_voice_id: '812d4eea4a8442a382dcaf2dbaddbd93',
+      },
+    ],
+  });
+  assert.equal(settings.approved_avatars?.length, 1);
+  assert.equal(settings.approved_avatars?.[0]?.id, 'Daphne_public_1');
+});
+
+test('videoSettings migrates favorite_avatars to approved_avatars', () => {
+  const settings = parseVideoSettings({
+    provider: 'heygen',
+    favorite_avatars: [{ id: 'Gala_public_1', name: 'Gala' }],
+  });
+  assert.equal(settings.approved_avatars?.[0]?.name, 'Gala');
+});
+
+test('videoSettings rejects mixed-character avatar_rotation_pool', () => {
+  assert.throws(
+    () =>
+      parseVideoSettings({
+        provider: 'heygen',
+        avatar_rotation_pool: [
+          { id: 'raviy_1', name: 'Raviy suit', group_id: 'grp_raviy', character_name: 'Raviy' },
+          { id: 'darlene_1', name: 'Darlene blue', group_id: 'grp_darlene', character_name: 'Darlene' },
+        ],
+      }),
+    NodeEngineValidationError
+  );
+});
+
+test('videoSettings accepts avatar_rotation_pool from one character', () => {
+  const settings = parseVideoSettings({
+    provider: 'heygen',
+    avatar_rotation_pool: [
+      { id: 'raviy_1', name: 'Raviy suit', group_id: 'grp_raviy', character_name: 'Raviy' },
+      { id: 'raviy_2', name: 'Raviy casual', group_id: 'grp_raviy', character_name: 'Raviy' },
+    ],
+  });
+  assert.equal(settings.avatar_rotation_pool?.length, 2);
 });
 
 test('MockVideoRenderer returns completed with transcript === submitted script + a video_url', () => {

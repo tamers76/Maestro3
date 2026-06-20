@@ -254,6 +254,21 @@ export type VideoAspectRatio = (typeof VIDEO_ASPECT_RATIOS)[number];
 export const VIDEO_OUTPUT_FORMATS = ['mp4', 'webm'] as const;
 export type VideoOutputFormat = (typeof VIDEO_OUTPUT_FORMATS)[number];
 
+/**
+ * Render style for HeyGen video objects:
+ * - `studio_direct`        — POST /v3/videos (avatar + voice + verbatim script), talking head.
+ * - `video_agent_produced` — POST /v3/video-agents (structured section prompt; scenes + graphics).
+ */
+export const VIDEO_RENDER_STYLES = ['studio_direct', 'video_agent_produced'] as const;
+export type VideoRenderStyle = (typeof VIDEO_RENDER_STYLES)[number];
+
+/** Narration fidelity for the Video Agent path (academic guardrails). */
+export const NARRATION_FIDELITIES = ['strict', 'moderate'] as const;
+export type NarrationFidelity = (typeof NARRATION_FIDELITIES)[number];
+
+export const VIDEO_ORIENTATIONS = ['landscape', 'portrait'] as const;
+export type VideoOrientation = (typeof VIDEO_ORIENTATIONS)[number];
+
 /** Fixed Step 9 risk-flag vocabulary (§9.16, incl. `validator_uncertainty`). */
 export const RISK_FLAGS = [
   'weak_grounding',
@@ -439,6 +454,42 @@ export interface VideoVoiceSettings {
  * Intentionally OMITS style_id / brand_kit_id — branding/templating is a
  * separate v2 Template-API concern and is deferred entirely (do not add here).
  */
+/** Snapshot of an institution-approved HeyGen avatar look. */
+export interface AvatarLibraryEntry {
+  id: string;
+  name: string;
+  preview_image_url?: string | null;
+  avatar_type?: string | null;
+  default_voice_id?: string | null;
+  supported_api_engines?: string[];
+  group_id?: string | null;
+  character_name?: string | null;
+}
+
+/** @deprecated Use AvatarLibraryEntry */
+export type FavoriteAvatarRef = AvatarLibraryEntry;
+
+/**
+ * Brand kit for the Video Agent path — configured inline in Maestro Settings.
+ * Compiled into the agent prompt only when `enabled` is true.
+ */
+export interface VideoBrandKit {
+  enabled: boolean;
+  primaryColor?: string;
+  secondaryColor?: string;
+  accentColor?: string;
+  fontFamily?: string;
+  mediaTypeGuidance?: string;
+}
+
+/** Operator-editable directives compiled into the Video Agent prompt. */
+export interface VideoAgentPromptTemplates {
+  /** Fidelity framing (moderate vs strict) — overrides the built-in default. */
+  scriptFramingDirective?: string;
+  /** Default visual-style block used only when no `style_id` is selected. */
+  defaultStyleBlock?: string;
+}
+
 export interface VideoSettings {
   provider: 'heygen';
   /** Reference to the API key (env/setting NAME), NEVER the key value itself. */
@@ -447,6 +498,12 @@ export interface VideoSettings {
   avatar_id?: string;
   /** From GET /v3/voices; prefer the avatar's default_voice_id. */
   voice_id?: string;
+  /** HBMSU Avatar Library — configured looks available in the picker. */
+  approved_avatars?: AvatarLibraryEntry[];
+  /** Looks to rotate across course video objects (stable per object_id). */
+  avatar_rotation_pool?: AvatarLibraryEntry[];
+  /** @deprecated Migrated to approved_avatars on read. */
+  favorite_avatars?: AvatarLibraryEntry[];
   engine?: VideoEngine;
   resolution?: VideoResolution;
   aspect_ratio?: VideoAspectRatio;
@@ -458,6 +515,17 @@ export interface VideoSettings {
   output_format?: VideoOutputFormat;
   /** Webhook called on completion. */
   callback_url?: string;
+  /** Course-wide default render style (per-object override happens in Layer 4). */
+  video_render_style?: VideoRenderStyle;
+  /** Narration fidelity for the Video Agent path. */
+  narration_fidelity?: NarrationFidelity;
+  /** HeyGen Video Agent curated visual style (GET /v3/video-agents/styles). */
+  style_id?: string;
+  orientation?: VideoOrientation;
+  /** Target runtime hint for the agent (seconds). */
+  target_duration_seconds?: number;
+  brand_kit?: VideoBrandKit;
+  agent_prompt_templates?: VideoAgentPromptTemplates;
 }
 
 /**
@@ -627,9 +695,11 @@ export function parseVideoSettings(input: unknown): VideoSettings {
       `Invalid value for "VideoSettings.provider": ${JSON.stringify(obj.provider)}. Expected "heygen"`
     );
   }
-  if ('style_id' in obj || 'brand_kit_id' in obj) {
+  // `brand_kit_id` (HeyGen workspace template ID) remains a deferred v2 concern.
+  // `style_id` + inline `brand_kit` ARE supported for the Video Agent path.
+  if ('brand_kit_id' in obj) {
     throw new NodeEngineValidationError(
-      'VideoSettings must not include style_id/brand_kit_id (deferred v2 Template-API concern)'
+      'VideoSettings must not include brand_kit_id (deferred v2 Template-API concern); use inline brand_kit instead'
     );
   }
   const settings: VideoSettings = { provider: 'heygen' };
@@ -673,8 +743,126 @@ export function parseVideoSettings(input: unknown): VideoSettings {
   if (motionPrompt !== undefined) settings.motion_prompt = motionPrompt;
   const callbackUrl = optionalString(obj, 'callback_url');
   if (callbackUrl !== undefined) settings.callback_url = callbackUrl;
+  if (obj.favorite_avatars !== undefined && obj.favorite_avatars !== null) {
+    if (!Array.isArray(obj.favorite_avatars)) {
+      throw new NodeEngineValidationError('VideoSettings.favorite_avatars must be an array');
+    }
+    settings.favorite_avatars = parseAvatarLibraryEntries(obj.favorite_avatars, 'VideoSettings.favorite_avatars');
+  }
+  if (obj.approved_avatars !== undefined && obj.approved_avatars !== null) {
+    if (!Array.isArray(obj.approved_avatars)) {
+      throw new NodeEngineValidationError('VideoSettings.approved_avatars must be an array');
+    }
+    settings.approved_avatars = parseAvatarLibraryEntries(obj.approved_avatars, 'VideoSettings.approved_avatars');
+  } else if (settings.favorite_avatars?.length) {
+    settings.approved_avatars = settings.favorite_avatars;
+  }
+  if (obj.avatar_rotation_pool !== undefined && obj.avatar_rotation_pool !== null) {
+    if (!Array.isArray(obj.avatar_rotation_pool)) {
+      throw new NodeEngineValidationError('VideoSettings.avatar_rotation_pool must be an array');
+    }
+    settings.avatar_rotation_pool = normalizeAvatarRotationPool(
+      parseAvatarLibraryEntries(obj.avatar_rotation_pool, 'VideoSettings.avatar_rotation_pool')
+    );
+  }
+  if (obj.video_render_style !== undefined) {
+    settings.video_render_style = assertEnum(
+      VIDEO_RENDER_STYLES,
+      obj.video_render_style,
+      'VideoSettings.video_render_style'
+    );
+  }
+  if (obj.narration_fidelity !== undefined) {
+    settings.narration_fidelity = assertEnum(
+      NARRATION_FIDELITIES,
+      obj.narration_fidelity,
+      'VideoSettings.narration_fidelity'
+    );
+  }
+  const styleId = optionalString(obj, 'style_id');
+  if (styleId !== undefined) settings.style_id = styleId;
+  if (obj.orientation !== undefined) {
+    settings.orientation = assertEnum(
+      VIDEO_ORIENTATIONS,
+      obj.orientation,
+      'VideoSettings.orientation'
+    );
+  }
+  const targetDuration = optionalNumber(obj, 'target_duration_seconds');
+  if (targetDuration !== undefined) settings.target_duration_seconds = targetDuration;
+  if (obj.brand_kit !== undefined && obj.brand_kit !== null) {
+    settings.brand_kit = parseVideoBrandKit(obj.brand_kit);
+  }
+  if (obj.agent_prompt_templates !== undefined && obj.agent_prompt_templates !== null) {
+    const tpl = asRecord(obj.agent_prompt_templates, 'VideoSettings.agent_prompt_templates');
+    const templates: VideoAgentPromptTemplates = {};
+    const framing = optionalString(tpl, 'scriptFramingDirective');
+    if (framing !== undefined) templates.scriptFramingDirective = framing;
+    const styleBlock = optionalString(tpl, 'defaultStyleBlock');
+    if (styleBlock !== undefined) templates.defaultStyleBlock = styleBlock;
+    settings.agent_prompt_templates = templates;
+  }
 
   return settings;
+}
+
+function parseVideoBrandKit(input: unknown): VideoBrandKit {
+  const obj = asRecord(input, 'VideoSettings.brand_kit');
+  const brandKit: VideoBrandKit = { enabled: obj.enabled === true };
+  const primary = optionalString(obj, 'primaryColor');
+  if (primary !== undefined) brandKit.primaryColor = primary;
+  const secondary = optionalString(obj, 'secondaryColor');
+  if (secondary !== undefined) brandKit.secondaryColor = secondary;
+  const accent = optionalString(obj, 'accentColor');
+  if (accent !== undefined) brandKit.accentColor = accent;
+  const fontFamily = optionalString(obj, 'fontFamily');
+  if (fontFamily !== undefined) brandKit.fontFamily = fontFamily;
+  const mediaGuidance = optionalString(obj, 'mediaTypeGuidance');
+  if (mediaGuidance !== undefined) brandKit.mediaTypeGuidance = mediaGuidance;
+  return brandKit;
+}
+
+/** Rotation pool must be one character only — drop stray looks from other avatars. */
+function normalizeAvatarRotationPool(entries: AvatarLibraryEntry[]): AvatarLibraryEntry[] {
+  if (entries.length <= 1) return entries;
+  const key = entries[0].group_id ?? entries[0].character_name ?? entries[0].id;
+  const filtered = entries.filter(
+    (entry) => (entry.group_id ?? entry.character_name ?? entry.id) === key
+  );
+  if (filtered.length !== entries.length) {
+    throw new NodeEngineValidationError(
+      'VideoSettings.avatar_rotation_pool must contain looks from a single avatar character only'
+    );
+  }
+  return filtered;
+}
+
+function parseAvatarLibraryEntries(input: unknown[], context: string): AvatarLibraryEntry[] {
+  return input.map((raw, index) => {
+    const item = asRecord(raw, `${context}[${index}]`);
+    const id = optionalString(item, 'id');
+    const name = optionalString(item, 'name');
+    if (!id || !name) {
+      throw new NodeEngineValidationError(`${context}[${index}] requires non-empty "id" and "name"`);
+    }
+    const ref: AvatarLibraryEntry = { id, name };
+    const preview = optionalString(item, 'preview_image_url');
+    if (preview !== undefined) ref.preview_image_url = preview;
+    const avatarType = optionalString(item, 'avatar_type');
+    if (avatarType !== undefined) ref.avatar_type = avatarType;
+    const defaultVoiceId = optionalString(item, 'default_voice_id');
+    if (defaultVoiceId !== undefined) ref.default_voice_id = defaultVoiceId;
+    if (Array.isArray(item.supported_api_engines)) {
+      ref.supported_api_engines = (item.supported_api_engines as unknown[]).filter(
+        (x): x is string => typeof x === 'string'
+      );
+    }
+    const groupId = optionalString(item, 'group_id');
+    if (groupId !== undefined) ref.group_id = groupId;
+    const characterName = optionalString(item, 'character_name');
+    if (characterName !== undefined) ref.character_name = characterName;
+    return ref;
+  });
 }
 
 // ===========================================================================
@@ -777,6 +965,131 @@ export function resolveGenerationModel(input: ResolveGenerationModelInput): Reso
     chairmanModel: mode === 'council' ? (chairmanCandidate ?? globalDefaultModel) : undefined,
     temperature,
     maxTokens,
+  };
+}
+
+// ===========================================================================
+// M10 — Text learning object payload (§8.8 / text_generation_prompt)
+// ===========================================================================
+
+export const TEXT_SEGMENT_TYPES = [
+  'heading',
+  'subheading',
+  'body',
+  'key_term',
+  'definition',
+  'example',
+  'non_example',
+  'list',
+  'step',
+  'annotation',
+  'note',
+  'callout',
+  'quotation',
+  'table',
+  'formula',
+  'summary',
+] as const;
+export type TextSegmentType = (typeof TEXT_SEGMENT_TYPES)[number];
+
+export interface TextSegment {
+  type: TextSegmentType;
+  text: string;
+  citation?: Citation;
+  items?: string[];
+  columns?: string[];
+  rows?: string[][];
+}
+
+export interface TextFidelityCheck {
+  status: 'passed' | 'needs_review';
+  notes: string[];
+}
+
+/** Persisted M10 artifact wrapping the §8.6 envelope + production audit. */
+export interface ProducedObjectRecord {
+  object_id: string;
+  content_spec_id: string;
+  node_id: string;
+  subtopic_id: string;
+  course_id: string;
+  /** Blueprint vehicle hint — production may render as text equivalent (Phase A). */
+  blueprint_suggested_vehicle: Vehicle;
+  produced_modality: ProducedModality;
+  envelope: GeneratedObjectEnvelope;
+  prompt_template_id: string;
+  prompt_version: number;
+  generation_mode: GenerationMode;
+  produced_at: string;
+}
+
+function parseCitationField(value: unknown, context: string): Citation | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === 'string') {
+    return { citation: value, passage_ref: '' };
+  }
+  const cit = asRecord(value, context);
+  return {
+    citation: typeof cit.citation === 'string' ? cit.citation : '',
+    passage_ref: typeof cit.passage_ref === 'string' ? cit.passage_ref : '',
+  };
+}
+
+function parseTextSegment(input: unknown, context: string): TextSegment {
+  const obj = asRecord(input, context);
+  const segment: TextSegment = {
+    type: assertEnum(TEXT_SEGMENT_TYPES, obj.type, `${context}.type`),
+    text: optionalString(obj, 'text') ?? '',
+  };
+  const citation = parseCitationField(obj.citation, `${context}.citation`);
+  if (citation) segment.citation = citation;
+  if (Array.isArray(obj.items)) {
+    segment.items = obj.items.filter((x): x is string => typeof x === 'string');
+  }
+  if (Array.isArray(obj.columns)) {
+    segment.columns = obj.columns.filter((x): x is string => typeof x === 'string');
+  }
+  if (Array.isArray(obj.rows)) {
+    segment.rows = obj.rows
+      .filter((row) => Array.isArray(row))
+      .map((row) => (row as unknown[]).filter((x): x is string => typeof x === 'string'));
+  }
+  return segment;
+}
+
+export function parseTextSegments(value: unknown, context = 'TextSegment[]'): TextSegment[] {
+  if (!Array.isArray(value)) {
+    throw new NodeEngineValidationError(`Expected TextSegment[] in ${context}`);
+  }
+  return value.map((entry, i) => parseTextSegment(entry, `${context}[${i}]`));
+}
+
+export function parseProducedObjectRecord(input: unknown): ProducedObjectRecord {
+  const obj = asRecord(input, 'ProducedObjectRecord');
+  return {
+    object_id: requireString(obj, 'object_id', 'ProducedObjectRecord'),
+    content_spec_id: requireString(obj, 'content_spec_id', 'ProducedObjectRecord'),
+    node_id: requireString(obj, 'node_id', 'ProducedObjectRecord'),
+    subtopic_id: requireString(obj, 'subtopic_id', 'ProducedObjectRecord'),
+    course_id: requireString(obj, 'course_id', 'ProducedObjectRecord'),
+    blueprint_suggested_vehicle: assertEnum(
+      VEHICLES,
+      obj.blueprint_suggested_vehicle,
+      'ProducedObjectRecord.blueprint_suggested_vehicle'
+    ),
+    produced_modality: assertEnum(
+      PRODUCED_MODALITIES,
+      obj.produced_modality,
+      'ProducedObjectRecord.produced_modality'
+    ),
+    envelope: parseGeneratedObjectEnvelope(obj.envelope),
+    prompt_template_id: requireString(obj, 'prompt_template_id', 'ProducedObjectRecord'),
+    prompt_version:
+      typeof obj.prompt_version === 'number' && Number.isFinite(obj.prompt_version)
+        ? obj.prompt_version
+        : 1,
+    generation_mode: assertEnum(GENERATION_MODES, obj.generation_mode, 'ProducedObjectRecord.generation_mode'),
+    produced_at: optionalString(obj, 'produced_at') ?? new Date(0).toISOString(),
   };
 }
 
@@ -1580,6 +1893,218 @@ export function parseNodeExperienceBlueprint(input: unknown): NodeExperienceBlue
   const approvedAt = optionalString(obj, 'approved_at');
   if (approvedAt !== undefined) blueprint.approved_at = approvedAt;
   return blueprint;
+}
+
+// ===========================================================================
+// M9 — Learning Object Content Specification (Level 2, Build Spec §8.1).
+// Academic source-of-truth per blueprint object — preservation_rules + grounding.
+// ===========================================================================
+
+export interface ContentSpecExample {
+  label: string;
+  content: string;
+  citation?: Citation;
+}
+
+export interface ContentSpecNonExample {
+  label: string;
+  content: string;
+  why_not: string;
+}
+
+/** Purpose-specific EC contract when node_object_purpose = evidence_check. */
+export interface EvidenceCheckContentSpec {
+  learner_task: string;
+  response_prompt: string;
+  reasoning_prompt: string;
+  confidence_prompt: string;
+  evidence_criteria_summary: string;
+  misconception_trap?: string;
+  no_feedback_before_submission: boolean;
+  preferred_evidence_mode: PreferredEvidenceMode;
+  must_capture_signals: CaptureSignal[];
+}
+
+/** One Level-2 content spec — not yet a produced envelope (that is M10). */
+export interface LearningObjectContentSpec {
+  content_spec_id: string;
+  object_id: string;
+  blueprint_id: string;
+  course_id: string;
+  subtopic_id: string;
+  node_id: string;
+  object_family: ObjectFamily;
+  node_object_purpose: NodeObjectPurpose | null;
+  milestone_support_purpose: MilestoneSupportPurpose | null;
+  content_pattern: ContentPattern;
+  suggested_vehicle: Vehicle;
+  is_primary_evidence_check: boolean;
+  parent_node_id: string;
+  parent_milestone_pack_id?: string | null;
+  kc_ids: string[];
+  title: string;
+  required_explanation: string;
+  examples: ContentSpecExample[];
+  non_examples: ContentSpecNonExample[];
+  preservation_rules: string[];
+  addresses_misconception_ids: string[];
+  targets_misconception_id?: string | null;
+  grounding_references: Citation[];
+  grounding_strength: GroundingStrength;
+  grounding_note?: string;
+  evidence_check_spec?: EvidenceCheckContentSpec;
+  status: NodeEngineStatus;
+  created_at: string;
+  updated_at: string;
+  approved_by?: string;
+  approved_at?: string;
+}
+
+/** Persisted bundle of content specs for one node's blueprint objects. */
+export interface NodeContentSpecsBundle {
+  bundle_id: string;
+  course_id: string;
+  subtopic_id: string;
+  node_id: string;
+  specs: LearningObjectContentSpec[];
+  updated_at: string;
+}
+
+function parseContentSpecExample(input: unknown, context: string): ContentSpecExample {
+  const obj = asRecord(input, context);
+  const example: ContentSpecExample = {
+    label: optionalString(obj, 'label') ?? '',
+    content: optionalString(obj, 'content') ?? '',
+  };
+  if (obj.citation !== undefined && obj.citation !== null) {
+    const cit = asRecord(obj.citation, `${context}.citation`);
+    example.citation = {
+      citation: typeof cit.citation === 'string' ? cit.citation : '',
+      passage_ref: typeof cit.passage_ref === 'string' ? cit.passage_ref : '',
+    };
+  }
+  return example;
+}
+
+function parseContentSpecNonExample(input: unknown, context: string): ContentSpecNonExample {
+  const obj = asRecord(input, context);
+  return {
+    label: optionalString(obj, 'label') ?? '',
+    content: optionalString(obj, 'content') ?? '',
+    why_not: optionalString(obj, 'why_not') ?? '',
+  };
+}
+
+function parseEvidenceCheckContentSpec(input: unknown, context: string): EvidenceCheckContentSpec {
+  const obj = asRecord(input, context);
+  const mustCapture = Array.isArray(obj.must_capture_signals)
+    ? obj.must_capture_signals.map((s, i) =>
+        assertEnum(CAPTURE_SIGNALS, s, `${context}.must_capture_signals[${i}]`)
+      )
+    : [...DEFAULT_CAPTURED_SIGNALS];
+  return {
+    learner_task: optionalString(obj, 'learner_task') ?? '',
+    response_prompt: optionalString(obj, 'response_prompt') ?? '',
+    reasoning_prompt: optionalString(obj, 'reasoning_prompt') ?? '',
+    confidence_prompt: optionalString(obj, 'confidence_prompt') ?? '',
+    evidence_criteria_summary: optionalString(obj, 'evidence_criteria_summary') ?? '',
+    no_feedback_before_submission: obj.no_feedback_before_submission !== false,
+    preferred_evidence_mode: assertEnum(
+      PREFERRED_EVIDENCE_MODES,
+      obj.preferred_evidence_mode,
+      `${context}.preferred_evidence_mode`
+    ),
+    must_capture_signals: mustCapture,
+    ...(optionalString(obj, 'misconception_trap')
+      ? { misconception_trap: optionalString(obj, 'misconception_trap') }
+      : {}),
+  };
+}
+
+export function parseLearningObjectContentSpec(input: unknown): LearningObjectContentSpec {
+  const obj = asRecord(input, 'LearningObjectContentSpec');
+  const spec: LearningObjectContentSpec = {
+    content_spec_id: requireString(obj, 'content_spec_id', 'LearningObjectContentSpec'),
+    object_id: requireString(obj, 'object_id', 'LearningObjectContentSpec'),
+    blueprint_id: requireString(obj, 'blueprint_id', 'LearningObjectContentSpec'),
+    course_id: requireString(obj, 'course_id', 'LearningObjectContentSpec'),
+    subtopic_id: requireString(obj, 'subtopic_id', 'LearningObjectContentSpec'),
+    node_id: requireString(obj, 'node_id', 'LearningObjectContentSpec'),
+    object_family: assertEnum(OBJECT_FAMILIES, obj.object_family, 'LearningObjectContentSpec.object_family'),
+    node_object_purpose:
+      obj.node_object_purpose == null
+        ? null
+        : assertEnum(NODE_OBJECT_PURPOSES, obj.node_object_purpose, 'LearningObjectContentSpec.node_object_purpose'),
+    milestone_support_purpose:
+      obj.milestone_support_purpose == null
+        ? null
+        : assertEnum(
+            MILESTONE_SUPPORT_PURPOSES,
+            obj.milestone_support_purpose,
+            'LearningObjectContentSpec.milestone_support_purpose'
+          ),
+    content_pattern: isEnumMember(CONTENT_PATTERNS, obj.content_pattern)
+      ? obj.content_pattern
+      : 'none',
+    suggested_vehicle: assertEnum(VEHICLES, obj.suggested_vehicle, 'LearningObjectContentSpec.suggested_vehicle'),
+    is_primary_evidence_check: obj.is_primary_evidence_check === true,
+    parent_node_id: requireString(obj, 'parent_node_id', 'LearningObjectContentSpec'),
+    parent_milestone_pack_id:
+      typeof obj.parent_milestone_pack_id === 'string' ? obj.parent_milestone_pack_id : null,
+    kc_ids: optionalStringArray(obj, 'kc_ids') ?? [],
+    title: optionalString(obj, 'title') ?? '',
+    required_explanation: requireString(obj, 'required_explanation', 'LearningObjectContentSpec'),
+    examples: Array.isArray(obj.examples)
+      ? obj.examples.map((e, i) => parseContentSpecExample(e, `LearningObjectContentSpec.examples[${i}]`))
+      : [],
+    non_examples: Array.isArray(obj.non_examples)
+      ? obj.non_examples.map((e, i) => parseContentSpecNonExample(e, `LearningObjectContentSpec.non_examples[${i}]`))
+      : [],
+    preservation_rules: optionalStringArray(obj, 'preservation_rules') ?? [],
+    addresses_misconception_ids: optionalStringArray(obj, 'addresses_misconception_ids') ?? [],
+    grounding_references: parseCitations(obj.grounding_references, 'LearningObjectContentSpec'),
+    grounding_strength: assertEnum(
+      GROUNDING_STRENGTHS,
+      obj.grounding_strength,
+      'LearningObjectContentSpec.grounding_strength'
+    ),
+    status: assertEnum(NODE_ENGINE_STATUSES, obj.status, 'LearningObjectContentSpec.status'),
+    created_at: optionalString(obj, 'created_at') ?? new Date(0).toISOString(),
+    updated_at: optionalString(obj, 'updated_at') ?? new Date(0).toISOString(),
+  };
+  const targetsMisconceptionId = optionalString(obj, 'targets_misconception_id');
+  if (targetsMisconceptionId !== undefined) {
+    spec.targets_misconception_id = targetsMisconceptionId;
+  } else if (obj.targets_misconception_id === null) {
+    spec.targets_misconception_id = null;
+  }
+  const groundingNote = optionalString(obj, 'grounding_note');
+  if (groundingNote !== undefined) spec.grounding_note = groundingNote;
+  const approvedBy = optionalString(obj, 'approved_by');
+  if (approvedBy !== undefined) spec.approved_by = approvedBy;
+  const approvedAt = optionalString(obj, 'approved_at');
+  if (approvedAt !== undefined) spec.approved_at = approvedAt;
+  if (obj.evidence_check_spec !== undefined && obj.evidence_check_spec !== null) {
+    spec.evidence_check_spec = parseEvidenceCheckContentSpec(
+      obj.evidence_check_spec,
+      'LearningObjectContentSpec.evidence_check_spec'
+    );
+  }
+  return spec;
+}
+
+export function parseNodeContentSpecsBundle(input: unknown): NodeContentSpecsBundle {
+  const obj = asRecord(input, 'NodeContentSpecsBundle');
+  return {
+    bundle_id: requireString(obj, 'bundle_id', 'NodeContentSpecsBundle'),
+    course_id: requireString(obj, 'course_id', 'NodeContentSpecsBundle'),
+    subtopic_id: requireString(obj, 'subtopic_id', 'NodeContentSpecsBundle'),
+    node_id: requireString(obj, 'node_id', 'NodeContentSpecsBundle'),
+    specs: Array.isArray(obj.specs)
+      ? obj.specs.map((s, i) => parseLearningObjectContentSpec(s))
+      : [],
+    updated_at: optionalString(obj, 'updated_at') ?? new Date(0).toISOString(),
+  };
 }
 
 export interface InteractiveTemplateProfile {

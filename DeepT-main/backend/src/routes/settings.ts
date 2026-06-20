@@ -6,6 +6,23 @@ import type { Settings } from '../models/schemas.js';
 
 const router = Router();
 
+function neo4jCredentialsChanged(
+  before: Settings['neo4j'],
+  updates: Partial<Settings['neo4j']> | undefined
+): boolean {
+  if (!updates) return false;
+  const passwordChanged =
+    updates.password !== undefined &&
+    updates.password !== '' &&
+    updates.password !== '********' &&
+    updates.password !== before.password;
+  return (
+    (updates.uri !== undefined && updates.uri !== before.uri) ||
+    (updates.user !== undefined && updates.user !== before.user) ||
+    passwordChanged
+  );
+}
+
 // GET /api/settings/embedding-health - live embedding/RAG provider probe.
 // Makes the silent-failure mode visible so empty grounding can never again be
 // mistaken for "weak grounding" when the real cause is the embedding provider.
@@ -70,6 +87,7 @@ router.get('/raw', async (_req: Request, res: Response) => {
 router.put('/', async (req: Request, res: Response) => {
   try {
     const updates: Partial<Settings> = req.body;
+    const neo4jBefore = { ...getSettings().neo4j };
     
     // Log incoming model updates for debugging
     if (updates.models) {
@@ -86,15 +104,14 @@ router.put('/', async (req: Request, res: Response) => {
     
     console.log('[Settings] Updated stageConfigs in memory:', JSON.stringify(updated.stageConfigs, null, 2));
     
-    // If Neo4j settings changed, reconnect
-    if (updates.neo4j) {
+    let warning: string | undefined;
+    if (neo4jCredentialsChanged(neo4jBefore, updates.neo4j)) {
       try {
         await initNeo4j();
       } catch (neo4jError) {
-        return res.status(500).json({ 
-          error: 'Settings saved but Neo4j reconnection failed: ' + 
-            (neo4jError instanceof Error ? neo4jError.message : String(neo4jError))
-        });
+        warning =
+          'Neo4j reconnection failed: ' +
+          (neo4jError instanceof Error ? neo4jError.message : String(neo4jError));
       }
     }
     
@@ -122,7 +139,8 @@ router.put('/', async (req: Request, res: Response) => {
     
     res.json({ 
       message: 'Settings updated successfully',
-      settings: maskedSettings
+      settings: maskedSettings,
+      warning,
     });
   } catch (error) {
     console.error('Error updating settings:', error);

@@ -14,6 +14,7 @@
  * config in this document never mints a prompt-template version (D3).
  */
 import type { ModalityGenerationConfig } from '../models/nodeEngine.js';
+import { heygenApprovedAvatarsDefaults } from '../config/heygenApprovedAvatars.defaults.js';
 
 export const defaultModalityGenerationConfigs: ModalityGenerationConfig[] = [
   {
@@ -71,6 +72,21 @@ export const defaultModalityGenerationConfigs: ModalityGenerationConfig[] = [
       aspect_ratio: 'auto',
       output_format: 'mp4',
       remove_background: false,
+      approved_avatars: heygenApprovedAvatarsDefaults,
+      // Video Agent (Produced) is the course-wide default; Layer 4 can override per object.
+      video_render_style: 'video_agent_produced',
+      narration_fidelity: 'moderate',
+      orientation: 'landscape',
+      target_duration_seconds: 180,
+      brand_kit: {
+        enabled: false,
+        primaryColor: '#1E40AF',
+        secondaryColor: '#0F172A',
+        accentColor: '#38BDF8',
+        fontFamily: 'Inter',
+        mediaTypeGuidance:
+          'Use motion graphics for data, structure, and key terms. Use stock or AI visuals only for context that supports the approved narration — never to introduce new facts.',
+      },
     },
   },
   {

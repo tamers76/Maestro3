@@ -25,10 +25,17 @@ import {
   generateBlueprint,
   approveBlueprint,
   hydrateBlueprints,
+  generateContentSpecs,
+  approveContentSpec,
+  hydrateContentSpecs,
+  produceLayer4Object,
+  hydrateProducedObjects,
   AcademicApprovalRequiredError,
   reopenNodeSet,
   type AlignmentStateSummary,
   type NodeEngineBlueprint,
+  type NodeEngineContentSpec,
+  type NodeEngineProducedObject,
   type NodeEngineGroundingSource,
   type NodeEngineNode,
   type NodeEngineNodeSet,
@@ -37,6 +44,9 @@ import {
 import { NODE_ENGINE_LAYER_MAP, type NodeEngineLayer } from './nodeEngineLayers'
 import { NodeCard, isMustReviewNode } from './NodeSetReport'
 import { Layer2Body, Layer2ContinueCta } from './NodeBlueprintPanel'
+import { Layer3Body, Layer3ContinueCta } from './ContentSpecPanel'
+import { Layer4Body, Layer4ContinueCta } from './ModalityProductionPanel'
+import { DEFAULT_NODE_ENGINE_FILTERS, type NodeEngineFilterState } from './nodeEngineFilters'
 
 /**
  * Maestro Node Engine — operational layer workflow.
@@ -121,10 +131,10 @@ function buildCloGroups(arch: SubtopicArchitectureResponse | null): CloGroup[] {
 
 export default function NodeEnginePanel({
   courseCode,
-  alignmentRefreshSignal = 0,
+  alignmentFetchSignal = 0,
 }: {
   courseCode: string
-  alignmentRefreshSignal?: number
+  alignmentFetchSignal?: number
 }) {
   const { role } = useRole()
 
@@ -149,6 +159,7 @@ export default function NodeEnginePanel({
   const [generatingAll, setGeneratingAll] = useState(false)
   const [courseProgress, setCourseProgress] = useState<{ done: number; total: number } | null>(null)
   const [query, setQuery] = useState('')
+  const [layerFilters, setLayerFilters] = useState<NodeEngineFilterState>(DEFAULT_NODE_ENGINE_FILTERS)
 
   const [expandedLayer, setExpandedLayer] = useState<number | null>(1)
   const [collapsedCloIds, setCollapsedCloIds] = useState<Set<string>>(new Set())
@@ -159,6 +170,19 @@ export default function NodeEnginePanel({
   const [blueprintsHydrating, setBlueprintsHydrating] = useState(false)
   const [generatingBlueprintCloId, setGeneratingBlueprintCloId] = useState<string | null>(null)
   const [approvingBlueprintCloId, setApprovingBlueprintCloId] = useState<string | null>(null)
+
+  const [contentSpecsByObjectId, setContentSpecsByObjectId] = useState<
+    Record<string, NodeEngineContentSpec | null>
+  >({})
+  const [contentSpecsHydrating, setContentSpecsHydrating] = useState(false)
+  const [generatingContentSpecCloId, setGeneratingContentSpecCloId] = useState<string | null>(null)
+  const [approvingContentSpecCloId, setApprovingContentSpecCloId] = useState<string | null>(null)
+
+  const [producedByObjectId, setProducedByObjectId] = useState<
+    Record<string, NodeEngineProducedObject | null>
+  >({})
+  const [producedHydrating, setProducedHydrating] = useState(false)
+  const [producingTextCloId, setProducingTextCloId] = useState<string | null>(null)
 
   const approverLabel = role === 'sme' ? 'SME' : role === 'admin' ? 'Admin' : 'Author'
 
@@ -200,7 +224,7 @@ export default function NodeEnginePanel({
     return () => {
       active = false
     }
-  }, [courseCode, alignmentRefreshSignal])
+  }, [courseCode, alignmentFetchSignal])
 
   const nodeGenReady = alignmentState?.node_gen_ready === true
 
@@ -257,6 +281,34 @@ export default function NodeEnginePanel({
     approvedNodeRefs.length > 0 &&
     approvedNodeRefs.every((r) => blueprintsByNodeId[r.nodeId]?.status === 'approved')
 
+  const approvedBlueprintObjectIds = useMemo(() => {
+    const ids: string[] = []
+    for (const ref of approvedNodeRefs) {
+      const bp = blueprintsByNodeId[ref.nodeId]
+      if (bp?.status === 'approved') {
+        for (const obj of bp.objects) ids.push(obj.object_id)
+      }
+    }
+    return ids
+  }, [approvedNodeRefs, blueprintsByNodeId])
+
+  const layer3Approved =
+    layer2Approved &&
+    approvedBlueprintObjectIds.length > 0 &&
+    approvedBlueprintObjectIds.every((id) => contentSpecsByObjectId[id]?.status === 'approved')
+
+  const approvedSpecObjectIds = useMemo(
+    () =>
+      approvedBlueprintObjectIds.filter(
+        (id) => contentSpecsByObjectId[id]?.status === 'approved'
+      ),
+    [approvedBlueprintObjectIds, contentSpecsByObjectId]
+  )
+
+  const layer4Complete =
+    approvedSpecObjectIds.length > 0 &&
+    approvedSpecObjectIds.every((id) => producedByObjectId[id])
+
   // Hydrate existing M8 blueprints once Layer 1 is approved.
   useEffect(() => {
     if (!layer1Approved || approvedNodeRefs.length === 0) {
@@ -279,6 +331,52 @@ export default function NodeEnginePanel({
       active = false
     }
   }, [courseCode, layer1Approved, approvedNodeRefs])
+
+  // Hydrate existing M9 content specs once Layer 2 is approved.
+  useEffect(() => {
+    if (!layer2Approved || approvedNodeRefs.length === 0) {
+      setContentSpecsByObjectId({})
+      return
+    }
+    let active = true
+    setContentSpecsHydrating(true)
+    hydrateContentSpecs(courseCode, approvedNodeRefs)
+      .then((map) => {
+        if (active) setContentSpecsByObjectId(map)
+      })
+      .catch(() => {
+        if (active) setContentSpecsByObjectId({})
+      })
+      .finally(() => {
+        if (active) setContentSpecsHydrating(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [courseCode, layer2Approved, approvedNodeRefs])
+
+  // Hydrate existing M10 produced objects for approved content specs.
+  useEffect(() => {
+    if (approvedSpecObjectIds.length === 0) {
+      setProducedByObjectId({})
+      return
+    }
+    let active = true
+    setProducedHydrating(true)
+    hydrateProducedObjects(courseCode, approvedSpecObjectIds)
+      .then((map) => {
+        if (active) setProducedByObjectId(map)
+      })
+      .catch(() => {
+        if (active) setProducedByObjectId({})
+      })
+      .finally(() => {
+        if (active) setProducedHydrating(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [courseCode, approvedSpecObjectIds])
 
   const cloFullyApprovedCount = useMemo(
     () =>
@@ -315,7 +413,21 @@ export default function NodeEnginePanel({
       const anyBlueprint = approvedNodeRefs.some((r) => blueprintsByNodeId[r.nodeId])
       return anyBlueprint ? 'needs_review' : 'available'
     }
-    if (layer.layer === 3) return layer2Approved ? 'available' : 'locked'
+    if (layer.layer === 3) {
+      if (!layer2Approved) return 'locked'
+      if (generatingContentSpecCloId) return 'running'
+      if (layer3Approved) return 'approved'
+      const anySpec = approvedBlueprintObjectIds.some((id) => contentSpecsByObjectId[id])
+      return anySpec ? 'needs_review' : 'available'
+    }
+    if (layer.layer === 4) {
+      if (approvedSpecObjectIds.length === 0) return 'locked'
+      if (producingTextCloId) return 'running'
+      if (layer4Complete) return 'approved'
+      const anyProduced = approvedSpecObjectIds.some((id) => producedByObjectId[id])
+      return anyProduced ? 'needs_review' : 'available'
+    }
+    if (layer.layer === 5) return layer4Complete ? 'available' : 'locked'
     return 'locked'
   }
 
@@ -398,6 +510,175 @@ export default function NodeEnginePanel({
         description: layer2Approved
           ? 'Layer 2 approved. Layer 3 — Content Specification is now unlocked.'
           : 'Blueprint approvals recorded.',
+        variant: 'success',
+      })
+    }
+  }
+
+  async function handleGenerateContentSpecsClo(cloId: string) {
+    const group = cloGroups.find((g) => g.clo_id === cloId)
+    if (!group) return
+    const targets: Array<{ subtopicId: string; node: NodeEngineNode }> = []
+    for (const st of group.subtopics) {
+      const nodeSet = nodeSetsBySubtopicId[st.subtopic_id]
+      if (nodeSet?.status !== 'approved') continue
+      for (const node of nodeSet.nodes) {
+        if (node.status === 'approved' && blueprintsByNodeId[node.node_id]?.status === 'approved') {
+          targets.push({ subtopicId: st.subtopic_id, node })
+        }
+      }
+    }
+    if (targets.length === 0) return
+
+    setGeneratingContentSpecCloId(cloId)
+    const failures: string[] = []
+    for (const { subtopicId, node } of targets) {
+      try {
+        const specs = await generateContentSpecs(courseCode, subtopicId, node.node_id)
+        setContentSpecsByObjectId((prev) => {
+          const next = { ...prev }
+          for (const spec of specs) next[spec.object_id] = spec
+          return next
+        })
+      } catch {
+        failures.push(node.node_title)
+      }
+    }
+    setGeneratingContentSpecCloId(null)
+    if (failures.length > 0) {
+      showToast({
+        title: 'Some content specs failed',
+        description: failures.join(', '),
+        variant: 'destructive',
+      })
+    } else {
+      showToast({
+        title: `Content specs generated for ${cloId}`,
+        description: `Draft specifications ready for ${targets.length} node(s). Review and approve.`,
+        variant: 'success',
+      })
+    }
+  }
+
+  async function handleApproveContentSpecsClo(cloId: string) {
+    const group = cloGroups.find((g) => g.clo_id === cloId)
+    if (!group) return
+    const targets: Array<{ subtopicId: string; node: NodeEngineNode; objectIds: string[] }> = []
+    for (const st of group.subtopics) {
+      const nodeSet = nodeSetsBySubtopicId[st.subtopic_id]
+      if (nodeSet?.status !== 'approved') continue
+      for (const node of nodeSet.nodes) {
+        const bp = blueprintsByNodeId[node.node_id]
+        if (node.status === 'approved' && bp?.status === 'approved') {
+          targets.push({
+            subtopicId: st.subtopic_id,
+            node,
+            objectIds: bp.objects.map((o) => o.object_id),
+          })
+        }
+      }
+    }
+    if (targets.length === 0) return
+
+    setApprovingContentSpecCloId(cloId)
+    const failures: string[] = []
+    for (const { subtopicId, node, objectIds } of targets) {
+      for (const objectId of objectIds) {
+        const spec = contentSpecsByObjectId[objectId]
+        if (!spec || spec.status === 'approved') continue
+        try {
+          const approved = await approveContentSpec(
+            courseCode,
+            subtopicId,
+            node.node_id,
+            objectId,
+            approverLabel
+          )
+          setContentSpecsByObjectId((prev) => ({ ...prev, [objectId]: approved }))
+        } catch {
+          failures.push(`${node.node_title} / ${objectId}`)
+        }
+      }
+    }
+    setApprovingContentSpecCloId(null)
+    if (failures.length > 0) {
+      showToast({
+        title: 'Some spec approvals failed',
+        description: failures.slice(0, 3).join(', '),
+        variant: 'destructive',
+      })
+    } else {
+      showToast({
+        title: `Content specs approved for ${cloId}`,
+        description: layer3Approved
+          ? 'Layer 3 approved. Layer 4 — Modality Production is now unlocked.'
+          : 'Content spec approvals recorded.',
+        variant: 'success',
+      })
+    }
+  }
+
+  async function handleProduceTextClo(cloId: string, options: { regenerate?: boolean } = {}) {
+    const regenerate = options.regenerate ?? false
+    const group = cloGroups.find((g) => g.clo_id === cloId)
+    if (!group) return
+    const targets: Array<{
+      subtopicId: string
+      node: NodeEngineNode
+      objectIds: string[]
+    }> = []
+    for (const st of group.subtopics) {
+      const nodeSet = nodeSetsBySubtopicId[st.subtopic_id]
+      if (nodeSet?.status !== 'approved') continue
+      for (const node of nodeSet.nodes) {
+        const bp = blueprintsByNodeId[node.node_id]
+        if (node.status !== 'approved' || bp?.status !== 'approved') continue
+        const objectIds = bp.objects
+          .map((o) => o.object_id)
+          .filter((id) => contentSpecsByObjectId[id]?.status === 'approved')
+        if (objectIds.length > 0) {
+          targets.push({ subtopicId: st.subtopic_id, node, objectIds })
+        }
+      }
+    }
+    if (targets.length === 0) return
+
+    setProducingTextCloId(cloId)
+    const failures: string[] = []
+    for (const { subtopicId, node, objectIds } of targets) {
+      for (const objectId of objectIds) {
+        if (!regenerate && producedByObjectId[objectId]) continue
+        try {
+          const spec = contentSpecsByObjectId[objectId]
+          const bp = blueprintsByNodeId[node.node_id]
+          const bpObj = bp?.objects.find((o) => o.object_id === objectId)
+          const vehicle = spec?.suggested_vehicle ?? bpObj?.suggested_vehicle ?? 'text'
+          const produced = await produceLayer4Object(
+            courseCode,
+            subtopicId,
+            node.node_id,
+            objectId,
+            vehicle
+          )
+          setProducedByObjectId((prev) => ({ ...prev, [objectId]: produced }))
+        } catch {
+          failures.push(`${node.node_title} / ${objectId}`)
+        }
+      }
+    }
+    setProducingTextCloId(null)
+    if (failures.length > 0) {
+      showToast({
+        title: 'Some productions failed',
+        description: failures.slice(0, 3).join(', '),
+        variant: 'destructive',
+      })
+    } else {
+      showToast({
+        title: regenerate ? `Production regenerated for ${cloId}` : `Production complete for ${cloId}`,
+        description: layer4Complete
+          ? 'Layer 4 complete for all approved specs. Layer 5 unlocks when validation ships.'
+          : 'Produced objects recorded — review output before publish.',
         variant: 'success',
       })
     }
@@ -606,6 +887,11 @@ export default function NodeEnginePanel({
               <Check className="h-4 w-4" /> Layer 2 approved
             </span>
           )}
+          {layer3Approved && (
+            <span className="ml-2 inline-flex items-center gap-1 text-emerald-600">
+              <Check className="h-4 w-4" /> Layer 3 approved
+            </span>
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -646,7 +932,7 @@ export default function NodeEnginePanel({
                         {status === 'locked' && <Lock className="mr-1 inline h-3 w-3" />}
                         {STATUS_LABELS[status]}
                       </span>
-                      {!layer.active && layer.layer > 2 && (
+                      {!layer.active && layer.layer > 3 && (
                         <span className="text-xs text-muted-foreground">(upcoming)</span>
                       )}
                     </div>
@@ -735,10 +1021,68 @@ export default function NodeEnginePanel({
                           layer2Approved={layer2Approved}
                           approverLabel={approverLabel}
                           courseCode={courseCode}
+                          filters={layerFilters}
+                          onFiltersChange={setLayerFilters}
                         />
                         <Layer2ContinueCta
                           layer2Approved={layer2Approved}
                           onContinue={() => setExpandedLayer(3)}
+                        />
+                      </>
+                    ) : layer.layer === 3 ? (
+                      <>
+                        <Layer3Body
+                          status={status}
+                          cloGroups={cloGroups}
+                          nodeSetsBySubtopicId={nodeSetsBySubtopicId}
+                          blueprintsByNodeId={blueprintsByNodeId}
+                          contentSpecsByObjectId={contentSpecsByObjectId}
+                          hydrating={contentSpecsHydrating}
+                          busy={
+                            generatingContentSpecCloId !== null || approvingContentSpecCloId !== null
+                          }
+                          generatingCloId={generatingContentSpecCloId}
+                          approvingCloId={approvingContentSpecCloId}
+                          onGenerateClo={handleGenerateContentSpecsClo}
+                          onApproveClo={handleApproveContentSpecsClo}
+                          onContentSpecUpdated={(objectId, spec) =>
+                            setContentSpecsByObjectId((prev) => ({ ...prev, [objectId]: spec }))
+                          }
+                          layer3Approved={layer3Approved}
+                          approverLabel={approverLabel}
+                          courseCode={courseCode}
+                          filters={layerFilters}
+                          onFiltersChange={setLayerFilters}
+                        />
+                        <Layer3ContinueCta
+                          layer3Approved={layer3Approved}
+                          onContinue={() => setExpandedLayer(4)}
+                        />
+                      </>
+                    ) : layer.layer === 4 ? (
+                      <>
+                        <Layer4Body
+                          status={status}
+                          cloGroups={cloGroups}
+                          nodeSetsBySubtopicId={nodeSetsBySubtopicId}
+                          blueprintsByNodeId={blueprintsByNodeId}
+                          contentSpecsByObjectId={contentSpecsByObjectId}
+                          producedByObjectId={producedByObjectId}
+                          hydrating={producedHydrating}
+                          busy={producingTextCloId !== null}
+                          producingCloId={producingTextCloId}
+                          onProduceClo={handleProduceTextClo}
+                          onProducedUpdated={(objectId, produced) =>
+                            setProducedByObjectId((prev) => ({ ...prev, [objectId]: produced }))
+                          }
+                          layer4Complete={layer4Complete}
+                          courseCode={courseCode}
+                          filters={layerFilters}
+                          onFiltersChange={setLayerFilters}
+                        />
+                        <Layer4ContinueCta
+                          layer4Complete={layer4Complete}
+                          onContinue={() => setExpandedLayer(5)}
                         />
                       </>
                     ) : (
@@ -860,6 +1204,7 @@ function Layer1Body({
           return ns.nodes
             .filter(
               (n) =>
+                n.node_id.toLowerCase().includes(trimmedQuery) ||
                 n.node_title.toLowerCase().includes(trimmedQuery) ||
                 n.knowledge_component.toLowerCase().includes(trimmedQuery)
             )
@@ -941,7 +1286,7 @@ function Layer1Body({
           type="text"
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
-          placeholder="Spot-check: search nodes by title or knowledge component…"
+          placeholder="Spot-check: search nodes by code, title, or knowledge component…"
           className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       </div>

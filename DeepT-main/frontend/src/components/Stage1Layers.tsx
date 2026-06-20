@@ -90,8 +90,10 @@ interface Stage1LayersProps {
   onAlignmentAutoPropose?: () => void
   /** Called when a reference document is uploaded (any layer). */
   onReferenceUploaded?: () => void
-  /** Increment to refresh alignment readiness after uploads / activation. */
-  alignmentRefreshSignal?: number
+  /** Increment to refetch alignment readiness (no auto-preview). */
+  alignmentFetchSignal?: number
+  /** Increment to auto-preview alignment tags (reference upload / Layer 6 only). */
+  alignmentAutoProposeSignal?: number
   /** Called once alignment tags are activated — page can scroll to Node Engine. */
   onAlignmentApproved?: () => void
   intake?: IntakeSummaryProps
@@ -102,7 +104,8 @@ export default function Stage1Layers({
   onAllApproved,
   onAlignmentAutoPropose,
   onReferenceUploaded,
-  alignmentRefreshSignal = 0,
+  alignmentFetchSignal = 0,
+  alignmentAutoProposeSignal = 0,
   onAlignmentApproved,
   intake,
 }: Stage1LayersProps) {
@@ -220,8 +223,8 @@ export default function Stage1Layers({
   }, [courseCode, layers, onAllApproved])
 
   useEffect(() => {
-    if (alignmentRefreshSignal > 0) void refreshAlignmentReadiness()
-  }, [alignmentRefreshSignal, refreshAlignmentReadiness])
+    if (alignmentFetchSignal > 0) void refreshAlignmentReadiness()
+  }, [alignmentFetchSignal, refreshAlignmentReadiness])
 
   useEffect(() => {
     loadLayers()
@@ -743,7 +746,7 @@ export default function Stage1Layers({
                           <ReferenceAlignmentPanel
                             embedded
                             courseCode={courseCode}
-                            autoProposeSignal={alignmentRefreshSignal}
+                            autoProposeSignal={alignmentAutoProposeSignal}
                             onAlignmentApproved={() => {
                               void refreshAlignmentReadiness()
                               onAlignmentApproved?.()

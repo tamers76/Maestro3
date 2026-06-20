@@ -55,8 +55,8 @@ export interface VideoRenderResult {
   provider: 'heygen';
   /** Populated only when status === "failed" (mirrors the real fail payload). */
   failure_message?: string;
-  /** Always true here so callers can tell this came from the mock, not real render. */
-  mock: true;
+  /** Always true when the mock renderer was used; omitted for live HeyGen renders. */
+  mock?: true;
 }
 
 let mockCounter = 0;

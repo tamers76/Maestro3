@@ -106,6 +106,7 @@ export function initCourseDirectories(courseCode: string): void {
   const courseDir = getCourseDir(courseCode);
   ensureDir(join(courseDir, 'extracted'));
   ensureDir(join(courseDir, 'compiled'));
+  ensureDir(join(courseDir, 'media', 'video'));
 }
 
 /** Remove all course artifacts (Postgres), blob metadata, and on-disk binaries. */
