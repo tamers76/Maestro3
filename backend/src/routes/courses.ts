@@ -467,7 +467,21 @@ router.delete('/:code', async (req: Request, res: Response) => {
     if (!exists) {
       return res.status(404).json({ error: 'Course not found' });
     }
-    
+
+    // Block deletion while students are subscribed to the course. Their work/access
+    // must not be silently dropped — unassign all students first.
+    const assignedStudents = await userRepo.listStudentIdsForCourse(code);
+    if (assignedStudents.length > 0) {
+      const count = assignedStudents.length;
+      return res.status(409).json({
+        error:
+          `This course has ${count} student${count === 1 ? '' : 's'} associated with it and cannot be deleted. ` +
+          `Remove the assigned student${count === 1 ? '' : 's'} before deleting the course.`,
+        code: 'COURSE_HAS_STUDENTS',
+        studentCount: count,
+      });
+    }
+
     // Delete from Neo4j
     await neo4j.deleteCourse(code);
     

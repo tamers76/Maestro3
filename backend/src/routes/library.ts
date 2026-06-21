@@ -78,6 +78,35 @@ router.get('/books', async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/library/books/:id/file — stream the original book file for reading.
+// Available to any authenticated user, but non-admins may only read APPROVED books.
+// Declared before /books/:id so it isn't shadowed by the admin single-book route.
+router.get('/books/:id/file', async (req: Request, res: Response) => {
+  try {
+    const book = await getBook(req.params.id);
+    if (!book) return res.status(404).json({ error: 'Book not found' });
+    if (req.user?.role !== 'admin' && book.status !== 'approved') {
+      return res.status(403).json({ error: 'This book is not available' });
+    }
+    const full = resolveBookFile(book.book_id, book.file_path);
+    if (!full) return res.status(404).json({ error: 'Book file not found' });
+    const { stream, size, contentType } = streamBookFile(full);
+    const safeName = (book.title || 'book').replace(/[^\w.\- ]+/g, '_').slice(0, 120);
+    const ext = (book.file_path?.split('.').pop() || 'pdf').toLowerCase();
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Length', String(size));
+    res.setHeader('Content-Disposition', `inline; filename="${safeName}.${ext}"`);
+    res.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
+    stream.on('error', () => {
+      if (!res.headersSent) res.status(500).end();
+    });
+    stream.pipe(res);
+  } catch (error) {
+    console.error('[library] file stream failed:', error);
+    res.status(500).json({ error: 'Failed to load the book file' });
+  }
+});
+
 // GET /api/library/books/:id/cover — authenticated cover image stream.
 router.get('/books/:id/cover', async (req: Request, res: Response) => {
   try {

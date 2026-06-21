@@ -11,6 +11,7 @@
     "db:build-vector-index": "tsx src/db/migrate.ts --vector",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
+    "db:cleanup-orphaned-access": "tsx src/db/cleanupOrphanedAccess.ts",
     "test": "node --import tsx --test src/node-engine/__tests__/phase0.test.ts src/node-engine/__tests__/stage1Adapter.test.ts src/node-engine/__tests__/nodeGeneration.test.ts src/node-engine/__tests__/nodeEditing.test.ts src/node-engine/__tests__/nodeBlueprint.test.ts src/node-engine/__tests__/contentSpec.test.ts src/node-engine/__tests__/modalityProduction.test.ts src/node-engine/__tests__/videoBriefProduction.test.ts src/node-engine/__tests__/videoRender.test.ts src/node-engine/__tests__/structuredVisual.test.ts src/node-engine/__tests__/referenceGrounding.test.ts src/node-engine/__tests__/referenceQuality.test.ts src/node-engine/__tests__/nodeReviewTriage.test.ts src/node-engine/__tests__/referenceAnchoringV1.test.ts src/node-engine/__tests__/referenceCoverage.test.ts src/node-engine/__tests__/referenceSourceSuggestion.test.ts src/node-engine/__tests__/referenceRepo.pgvector.test.ts src/node-engine/__tests__/outboxRepo.poison.test.ts src/services/__tests__/referenceJudgment.test.ts src/auth/__tests__/authToken.test.ts src/auth/__tests__/courseAccess.test.ts src/auth/__tests__/reviewRequests.test.ts src/auth/__tests__/auditRepo.test.ts"
   },
   "dependencies": {

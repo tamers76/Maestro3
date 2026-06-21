@@ -64,9 +64,10 @@ app.use('/api/courses', requireAuth, coursesRouter);
 app.use('/api/courses', requireAuth, referencesRouter);
 app.use('/api/settings', requireAuth, requireRole('admin'), settingsRouter);
 app.use('/api/audit', requireAuth, requireRole('admin'), auditRouter);
-// Digital library: professors browse/use the approved catalog; admin-only curation
-// endpoints are guarded inside the router.
-app.use('/api/library', requireAuth, requireRole('admin', 'professor'), libraryRouter);
+// Digital library: everyone (admin/professor/student) can browse, search, and read
+// the approved catalog; professor add-to-course and admin-only curation endpoints
+// are guarded inside the router.
+app.use('/api/library', requireAuth, requireRole('admin', 'professor', 'student'), libraryRouter);
 app.use('/api/node-engine', requireAuth, nodeEngineRouter);
 
 // Health check

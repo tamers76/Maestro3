@@ -21,7 +21,7 @@ import ModelsPage from './pages/admin/ModelsPage'
 import PromptsPage from './pages/admin/PromptsPage'
 import RagPage from './pages/admin/RagPage'
 import AuditPage from './pages/admin/AuditPage'
-import LibraryPage from './pages/admin/LibraryPage'
+import LibraryRoute from './pages/LibraryRoute'
 
 function App() {
   return (
@@ -62,12 +62,13 @@ function App() {
               </ProtectedRoute>
             }
           />
-          {/* Digital Library — admin-only, lives in the main app shell (not the Admin Center) */}
+          {/* Digital Library — all authenticated users; admins get curation, others
+              get a read-only browse + read view (handled by LibraryRoute). */}
           <Route
             path="/library"
             element={
-              <ProtectedRoute roles={['admin']}>
-                <Layout><LibraryPage /></Layout>
+              <ProtectedRoute>
+                <Layout><LibraryRoute /></Layout>
               </ProtectedRoute>
             }
           />

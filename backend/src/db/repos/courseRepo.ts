@@ -6,6 +6,7 @@ import { referenceDocuments, referenceChunks } from '../schema/references.js';
 import { nodeSets, maestroNodes, knowledgeComponents, evidenceCheckRequirements, maestroNodePrerequisites } from '../schema/nodeEngine.js';
 import { stageArtifacts, blobFiles } from '../schema/artifacts.js';
 import { libraryBookUsages } from '../schema/library.js';
+import { courseReviewAssignments, courseReviewRequests, courseStudentAssignments } from '../schema/auth.js';
 import { exec, type Executor } from './_exec.js';
 
 export async function createCourse(course: Course, tx?: Executor): Promise<void> {
@@ -70,6 +71,12 @@ export async function deleteCourse(courseCode: string, tx?: Executor): Promise<v
   // artifacts + blobs
   await db.delete(stageArtifacts).where(eq(stageArtifacts.courseCode, courseCode));
   await db.delete(blobFiles).where(eq(blobFiles.courseCode, courseCode));
+  // access grants: reviewer/student assignments and pending peer review requests.
+  // These have no FK to courses, so they must be cleared explicitly or reviewers
+  // keep seeing a course that no longer exists.
+  await db.delete(courseReviewRequests).where(eq(courseReviewRequests.courseCode, courseCode));
+  await db.delete(courseReviewAssignments).where(eq(courseReviewAssignments.courseCode, courseCode));
+  await db.delete(courseStudentAssignments).where(eq(courseStudentAssignments.courseCode, courseCode));
   // course last (clos FK cascade already handled, but explicit deletes above keep order safe)
   await db.delete(courses).where(eq(courses.courseCode, courseCode));
 }

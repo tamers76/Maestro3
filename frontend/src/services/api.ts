@@ -1323,7 +1323,13 @@ export async function deleteCourse(code: string): Promise<void> {
   const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}`, {
     method: 'DELETE',
   });
-  if (!response.ok) throw new Error('Failed to delete course');
+  if (!response.ok) {
+    const message = await response
+      .json()
+      .then((body) => (body && typeof body.error === 'string' ? body.error : null))
+      .catch(() => null);
+    throw new Error(message ?? 'Failed to delete course');
+  }
 }
 
 export async function runStage(
@@ -2859,6 +2865,11 @@ export interface LibraryBookUsage {
 export function libraryCoverUrl(book: Pick<LibraryBook, 'book_id' | 'cover_path'>): string | null {
   if (!book.cover_path) return null
   return withAccessToken(`${API_BASE}/library/books/${encodeURIComponent(book.book_id)}/cover`)
+}
+
+/** Authenticated URL to read/open a library book's original file (PDF/DOCX). */
+export function libraryBookFileUrl(book: Pick<LibraryBook, 'book_id'>): string {
+  return withAccessToken(`${API_BASE}/library/books/${encodeURIComponent(book.book_id)}/file`)
 }
 
 /**

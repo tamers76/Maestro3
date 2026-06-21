@@ -1,0 +1,1153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Maestro — Professor & Administrator Onboarding</title>
+<style>
+  :root{
+    --ink:#1a1a1a;
+    --primary:#024ad8;
+    --primary-bright:#296ef9;
+    --primary-deep:#0e3191;
+    --cloud:#f7f7f7;
+    --fog:#e8e8e8;
+    --graphite:#636363;
+    --green:#0f9d6b;
+    --amber:#c77700;
+    --rose:#c0344d;
+    --card:#ffffff;
+    --slideW:1280px;
+    --slideH:720px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:'Manrope','Segoe UI',system-ui,-apple-system,sans-serif;
+    background:#0b1430;
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  /* ---------- Deck shell ---------- */
+  #stage{
+    position:fixed;inset:0;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .slide{
+    position:absolute;
+    width:var(--slideW);height:var(--slideH);
+    background:var(--cloud);
+    border-radius:18px;
+    overflow:hidden;
+    display:none;
+    box-shadow:0 30px 80px -20px rgba(0,0,0,.6);
+  }
+  .slide.active{display:block}
+  .pad{position:absolute;inset:0;padding:64px 72px;display:flex;flex-direction:column}
+  /* ---------- Brand furniture ---------- */
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:8px;
+    font-size:13px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--primary);margin-bottom:18px;
+  }
+  .eyebrow::before{content:"";width:26px;height:2px;background:var(--primary);display:inline-block}
+  h1{font-size:52px;line-height:1.05;font-weight:800;letter-spacing:-.02em}
+  h2{font-size:38px;line-height:1.1;font-weight:800;letter-spacing:-.02em;margin-bottom:8px}
+  h3{font-size:22px;font-weight:800;letter-spacing:-.01em}
+  .lead{font-size:21px;line-height:1.5;color:var(--graphite);max-width:62ch;margin-top:10px}
+  p{font-size:18px;line-height:1.55;color:#33373f}
+  .muted{color:var(--graphite)}
+  .footer{
+    position:absolute;left:72px;right:72px;bottom:26px;
+    display:flex;align-items:center;justify-content:space-between;
+    font-size:12px;color:var(--graphite);
+    border-top:1px solid var(--fog);padding-top:12px;
+  }
+  .footer .brand{display:flex;align-items:center;gap:9px;font-weight:700;color:var(--ink)}
+  .footer .brand img{height:18px;width:auto;opacity:.9}
+  .footer .dot{width:5px;height:5px;border-radius:50%;background:var(--primary)}
+  /* ---------- Lists ---------- */
+  ul.clean{list-style:none;display:flex;flex-direction:column;gap:14px;margin-top:18px}
+  ul.clean li{position:relative;padding-left:34px;font-size:19px;line-height:1.45;color:#2b2f37}
+  ul.clean li::before{
+    content:"";position:absolute;left:0;top:7px;width:18px;height:18px;border-radius:6px;
+    background:linear-gradient(135deg,var(--primary-bright),var(--primary));
+  }
+  ul.check li::before{
+    content:"\2713";color:#fff;font-size:12px;font-weight:900;
+    display:flex;align-items:center;justify-content:center;
+  }
+  /* ---------- Cards & grids ---------- */
+  .grid{display:grid;gap:18px;margin-top:8px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .card{
+    background:var(--card);border:1px solid var(--fog);border-radius:14px;padding:22px;
+    box-shadow:0 10px 24px -18px rgba(2,74,216,.35);
+  }
+  .card h3{margin-bottom:6px}
+  .card p{font-size:15.5px;line-height:1.5;color:var(--graphite)}
+  .card .num{
+    font-size:13px;font-weight:800;color:var(--primary);letter-spacing:.1em;
+  }
+  .pill{
+    display:inline-block;font-size:12.5px;font-weight:700;border-radius:999px;
+    padding:5px 12px;background:#eef4ff;color:var(--primary-deep);border:1px solid #d6e4ff;
+  }
+  .tag-green{background:#e7f7f0;color:#0a6b4a;border-color:#bce8d6}
+  .tag-amber{background:#fdf3e2;color:#915200;border-color:#f3dcae}
+  .tag-rose{background:#fdeef0;color:#9c283c;border-color:#f5cdd4}
+  /* ---------- Callout ---------- */
+  .callout{
+    margin-top:18px;border-left:5px solid var(--primary);
+    background:#fff;border-radius:0 14px 14px 0;padding:18px 22px;
+    box-shadow:0 10px 24px -20px rgba(2,74,216,.5);
+  }
+  .callout .k{font-size:13px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--primary);margin-bottom:6px}
+  .callout p{font-size:17px;color:#2b2f37}
+  .analogy{border-left-color:var(--amber)}
+  .analogy .k{color:var(--amber)}
+  /* ---------- Pipeline / steps ---------- */
+  .flow{display:flex;align-items:stretch;gap:0;margin-top:26px;flex-wrap:wrap}
+  .step{
+    flex:1;min-width:120px;background:#fff;border:1px solid var(--fog);
+    padding:16px 14px;text-align:center;position:relative;
+  }
+  .step:first-child{border-radius:12px 0 0 12px}
+  .step:last-child{border-radius:0 12px 12px 0}
+  .step .si{font-size:12px;font-weight:800;color:var(--primary)}
+  .step .st{font-size:15px;font-weight:800;margin-top:4px}
+  .step .sd{font-size:12.5px;color:var(--graphite);margin-top:4px;line-height:1.35}
+  .step:not(:last-child)::after{
+    content:"\203A";position:absolute;right:-9px;top:50%;transform:translateY(-50%);
+    color:var(--primary);font-size:22px;font-weight:900;z-index:2;background:var(--cloud);
+    width:18px;height:18px;display:flex;align-items:center;justify-content:center;border-radius:50%;
+  }
+  /* ---------- Title slide ---------- */
+  .title-slide{background:radial-gradient(1200px 700px at 80% -10%,#0e3191 0%,#061845 55%,#030d28 100%);}
+  .title-slide .pad{color:#fff}
+  .title-slide h1{font-size:62px;color:#fff;max-width:18ch}
+  .title-slide .lead{color:#c9d6f5;max-width:54ch}
+  .title-slide .eyebrow{color:#7aabf5}
+  .title-slide .eyebrow::before{background:#7aabf5}
+  .title-logo{display:flex;align-items:center;gap:14px;margin-bottom:auto}
+  .title-logo img{height:46px}
+  .title-logo .wm{color:#fff;font-weight:800;font-size:17px;letter-spacing:.02em;border-left:1px solid rgba(255,255,255,.3);padding-left:14px}
+  .title-foot{display:flex;gap:10px;flex-wrap:wrap;margin-top:30px}
+  .title-foot .pill{background:rgba(255,255,255,.1);color:#dbe6ff;border-color:rgba(255,255,255,.22)}
+  .kicker-badge{position:absolute;top:48px;right:64px;font-size:12.5px;font-weight:700;color:#9fb8f0;letter-spacing:.1em}
+  /* ---------- Section divider ---------- */
+  .section-slide{background:linear-gradient(135deg,#024ad8 0%,#0e3191 100%)}
+  .section-slide .pad{color:#fff;justify-content:center}
+  .section-slide .eyebrow{color:#bcd2ff}
+  .section-slide .eyebrow::before{background:#bcd2ff}
+  .section-slide h1{color:#fff;font-size:56px;max-width:20ch}
+  .section-slide .lead{color:#d7e2fb}
+  .section-num{font-size:120px;font-weight:900;color:rgba(255,255,255,.14);position:absolute;right:64px;bottom:30px;line-height:1}
+  /* ---------- two-col layout ---------- */
+  .cols{display:grid;grid-template-columns:1.05fr .95fr;gap:34px;flex:1;align-items:start;margin-top:6px}
+  .stack{display:flex;flex-direction:column;gap:14px}
+  .mini{background:#fff;border:1px solid var(--fog);border-radius:12px;padding:14px 16px}
+  .mini .mt{font-weight:800;font-size:16px;display:flex;align-items:center;gap:8px}
+  .mini .md{font-size:14px;color:var(--graphite);margin-top:3px;line-height:1.45}
+  .ico{width:26px;height:26px;border-radius:8px;background:#eef4ff;color:var(--primary);display:inline-flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;flex:none}
+  .scroll{overflow:auto}
+  .big-num{font-size:46px;font-weight:900;color:var(--primary);line-height:1}
+  .stat{display:flex;flex-direction:column;gap:2px}
+  .stat .sl{font-size:14px;color:var(--graphite);font-weight:600}
+  table.matrix{width:100%;border-collapse:collapse;margin-top:14px;font-size:15px}
+  table.matrix th,table.matrix td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--fog);vertical-align:top}
+  table.matrix th{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--graphite)}
+  table.matrix td b{color:var(--ink)}
+  table.matrix tr td:first-child{font-weight:800;color:var(--primary-deep);white-space:nowrap}
+  /* ---------- Controls ---------- */
+  #bar{position:fixed;left:0;right:0;bottom:0;height:4px;background:rgba(255,255,255,.12);z-index:50}
+  #barfill{height:100%;width:0;background:linear-gradient(90deg,#296ef9,#7aabf5);transition:width .25s ease}
+  .nav{position:fixed;bottom:18px;right:22px;display:flex;gap:8px;z-index:60}
+  .nav button{
+    width:42px;height:42px;border-radius:11px;border:1px solid rgba(255,255,255,.18);
+    background:rgba(255,255,255,.08);color:#fff;font-size:18px;cursor:pointer;backdrop-filter:blur(6px);
+    transition:background .15s;
+  }
+  .nav button:hover{background:rgba(255,255,255,.2)}
+  #counter{position:fixed;bottom:26px;left:24px;color:#9fb8f0;font-size:13px;font-weight:600;z-index:60;letter-spacing:.04em}
+  #hint{position:fixed;top:18px;left:50%;transform:translateX(-50%);color:#6f86c4;font-size:12px;z-index:60;opacity:.8}
+  /* ---------- Print / PDF ---------- */
+  @media print{
+    @page{size:1280px 720px;margin:0}
+    body{background:#fff;overflow:visible}
+    #stage{position:static}
+    #bar,.nav,#counter,#hint{display:none!important}
+    .slide{
+      display:block!important;position:relative!important;
+      width:1280px;height:720px;border-radius:0;box-shadow:none;
+      page-break-after:always;break-after:page;margin:0;
+    }
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+<!-- 1 · TITLE -->
+<section class="slide title-slide active">
+  <div class="kicker-badge">CURRICULUM INTELLIGENCE SYSTEM</div>
+  <div class="pad">
+    <div class="title-logo">
+      <img src="hbmsu-logo.png" alt="HBMSU" />
+      <span class="wm">Maestro</span>
+    </div>
+    <div class="eyebrow">Onboarding for Professors &amp; Administrators</div>
+    <h1>Turning your syllabus into an intelligent, adaptive curriculum</h1>
+    <p class="lead">A guided walkthrough of how Maestro works &mdash; in plain language. We will cover the full journey, why we ingest reference material, what a vector database means, and what the Admin Center offers.</p>
+    <div class="title-foot">
+      <span class="pill">High-level overview</span>
+      <span class="pill">Every stage, explained</span>
+      <span class="pill">The value at each step</span>
+      <span class="pill">Admin Center tour</span>
+    </div>
+  </div>
+</section>
+
+<!-- 2 · AGENDA -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">What we'll cover today</div>
+    <h2>Your roadmap for this session</h2>
+    <div class="grid g3" style="margin-top:26px">
+      <div class="card"><div class="num">PART 01</div><h3>The big picture</h3><p>What Maestro is, who it serves, and how a course flows from syllabus to finished curriculum.</p></div>
+      <div class="card"><div class="num">PART 02</div><h3>Why ingestion &amp; references</h3><p>Why we feed your textbooks in, and what a "vector database" really means &mdash; no jargon.</p></div>
+      <div class="card"><div class="num">PART 03</div><h3>Stage by stage</h3><p>Every step of ingestion and authoring, what each one does, and the value it adds.</p></div>
+      <div class="card"><div class="num">PART 04</div><h3>The Course Architect</h3><p>The six review layers that refine your outcomes, assessments and structure.</p></div>
+      <div class="card"><div class="num">PART 05</div><h3>The Node Engine</h3><p>How approved structure becomes grounded, ready-to-teach learning content.</p></div>
+      <div class="card"><div class="num">PART 06</div><h3>The Admin Center</h3><p>What administrators control: people, access, AI configuration, and oversight.</p></div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Professor &amp; Administrator Onboarding</span></div>
+  </div>
+</section>
+
+<!-- 3 · WHAT IS MAESTRO -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">The big picture</div>
+    <h2>What is Maestro?</h2>
+    <p class="lead">Maestro is an AI co-pilot for course design. You bring your syllabus and your trusted reference materials; Maestro helps you build a rigorous, adaptive curriculum &mdash; <b>and you approve every step</b>.</p>
+    <div class="grid g3" style="margin-top:30px">
+      <div class="card"><h3>You stay in charge</h3><p>Nothing moves forward without your review and approval. The AI proposes; the professor decides.</p></div>
+      <div class="card"><h3>Grounded in your sources</h3><p>Content is built from the textbooks and papers <i>you</i> trust &mdash; not from the open internet or AI guesswork.</p></div>
+      <div class="card"><h3>Adaptive by design</h3><p>Learning is broken into connected "mastery nodes" so students can follow a personalised path.</p></div>
+    </div>
+    <div class="callout"><div class="k">In one sentence</div><p>Maestro transforms a syllabus plus trusted references into a governed, evidence-based, adaptive curriculum &mdash; with the professor approving each layer along the way.</p></div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>The big picture</span></div>
+  </div>
+</section>
+
+<!-- 4 · WHO IT'S FOR -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">The big picture</div>
+    <h2>Who uses Maestro &mdash; and how</h2>
+    <div class="grid g3" style="margin-top:26px">
+      <div class="card" style="border-top:4px solid var(--primary)"><span class="pill">Professor / SME</span><h3 style="margin-top:12px">The author &amp; approver</h3><p>Uploads the syllabus and references, reviews each AI layer, refines outcomes and assessments, and approves the final curriculum.</p></div>
+      <div class="card" style="border-top:4px solid var(--green)"><span class="pill tag-green">Administrator</span><h3 style="margin-top:12px">The enabler</h3><p>Sets up people and access, configures the AI models and database, manages reference policy, and monitors activity.</p></div>
+      <div class="card" style="border-top:4px solid var(--amber)"><span class="pill tag-amber">Reviewer (peer)</span><h3 style="margin-top:12px">The second opinion</h3><p>Another professor invited to peer-review a colleague's course before it is finalised.</p></div>
+    </div>
+    <div class="callout analogy"><div class="k">Think of it like</div><p>An orchestra: the <b>professor is the conductor</b>, Maestro is the skilled ensemble that plays what's written, and the <b>administrator</b> makes sure the hall, instruments, and musicians are all ready.</p></div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Roles &amp; responsibilities</span></div>
+  </div>
+</section>
+
+<!-- 5 · PROBLEM -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">The big picture</div>
+    <h2>Why Maestro exists</h2>
+    <div class="cols" style="margin-top:18px">
+      <div>
+        <h3 style="color:var(--rose)">Designing a great course today is hard</h3>
+        <ul class="clean" style="margin-top:14px">
+          <li>Outcomes, assessments and content are scattered across documents.</li>
+          <li>Aligning everything to learning outcomes is slow, manual work.</li>
+          <li>It's difficult to prove that content is grounded in approved sources.</li>
+          <li>Building an <i>adaptive</i> path for diverse students is rarely feasible by hand.</li>
+        </ul>
+      </div>
+      <div>
+        <h3 style="color:var(--green)">What Maestro changes</h3>
+        <ul class="clean check" style="margin-top:14px">
+          <li>One guided workspace from syllabus to finished curriculum.</li>
+          <li>AI does the heavy lifting; you review and approve.</li>
+          <li>Every claim traces back to a reference you uploaded.</li>
+          <li>Outcomes automatically broken into an adaptive map of mastery nodes.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>The problem we solve</span></div>
+  </div>
+</section>
+
+<!-- 6 · THE JOURNEY AT A GLANCE -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">The big picture</div>
+    <h2>The Maestro journey at a glance</h2>
+    <p class="lead">From document to delivery, everything happens in one continuous, gated flow.</p>
+    <div class="flow" style="margin-top:34px">
+      <div class="step"><div class="si">START</div><div class="st">Upload</div><div class="sd">Syllabus + your reference materials</div></div>
+      <div class="step"><div class="si">INGEST</div><div class="st">Prepare references</div><div class="sd">Read, split &amp; index your sources</div></div>
+      <div class="step"><div class="si">PHASE 1</div><div class="st">Course Architect</div><div class="sd">6 layers refine outcomes &amp; assessment</div></div>
+      <div class="step"><div class="si">ALIGN</div><div class="st">Reference Alignment</div><div class="sd">Connect sources to outcomes</div></div>
+      <div class="step"><div class="si">PHASE 2</div><div class="st">Node Engine</div><div class="sd">Generate grounded learning content</div></div>
+      <div class="step"><div class="si">FINISH</div><div class="st">Approve &amp; export</div><div class="sd">Ready-to-teach curriculum</div></div>
+    </div>
+    <div class="callout"><div class="k">The golden rule</div><p>Each box must be <b>approved</b> before the next one unlocks. Maestro never races ahead of you &mdash; progress is deliberate, reviewable, and reversible.</p></div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>End-to-end overview</span></div>
+  </div>
+</section>
+
+<!-- 7 · TWO PHASES -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">The big picture</div>
+    <h2>Two phases, one continuous workspace</h2>
+    <div class="grid g2" style="margin-top:24px">
+      <div class="card" style="border-left:5px solid var(--primary)">
+        <span class="pill">Phase 1</span>
+        <h3 style="margin-top:12px">Course Architect &mdash; "Get the foundations right"</h3>
+        <p>Maestro reads your syllabus and helps you sharpen learning outcomes, redesign assessments, set fair weighting and rubrics, safeguard integrity, and define a self-paced subtopic structure. <b>Six review layers.</b></p>
+      </div>
+      <div class="card" style="border-left:5px solid var(--primary-bright)">
+        <span class="pill">Phase 2</span>
+        <h3 style="margin-top:12px">Node Engine &mdash; "Build the learning"</h3>
+        <p>Once the foundation is approved, Maestro turns each subtopic into connected mastery nodes and produces grounded learning content &mdash; readings, visuals, and video &mdash; for you to validate. <b>Five build layers.</b></p>
+      </div>
+    </div>
+    <div class="callout analogy"><div class="k">Think of it like building a house</div><p><b>Phase 1</b> is the architectural blueprint &mdash; rooms, structure, safety approved before anything is built. <b>Phase 2</b> is construction &mdash; turning the approved blueprint into rooms you can actually walk into.</p></div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>The two phases</span></div>
+  </div>
+</section>
+
+<!-- 8 · SECTION 02 -->
+<section class="slide section-slide">
+  <div class="pad">
+    <div class="eyebrow">Part 02</div>
+    <h1>Why we ingest references &mdash; and what a "vector database" means</h1>
+    <p class="lead">The two ideas that make Maestro trustworthy, explained without the jargon.</p>
+    <div class="section-num">02</div>
+  </div>
+</section>
+
+<!-- 9 · WHY INGESTION -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Grounding</div>
+    <h2>Why do we "ingest" your reference materials?</h2>
+    <p class="lead">Because we want every piece of generated content to come from <b>sources you approve</b> &mdash; your textbooks, papers and notes &mdash; not from whatever an AI happened to memorise.</p>
+    <div class="grid g3" style="margin-top:28px">
+      <div class="card"><h3>Accuracy</h3><p>Answers are drawn from real passages in your materials, dramatically reducing AI "hallucinations".</p></div>
+      <div class="card"><h3>Traceability</h3><p>Generated content can cite exactly which source and section it came from &mdash; defensible and auditable.</p></div>
+      <div class="card"><h3>Academic ownership</h3><p>The curriculum reflects <i>your</i> chosen body of knowledge, keeping the institution's standards intact.</p></div>
+    </div>
+    <div class="callout analogy"><div class="k">Think of it like</div><p>Briefing a brilliant teaching assistant. Before they help, you hand them <b>your</b> reading list and say "only use these." Ingestion is how Maestro reads and remembers that reading list.</p></div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Why ingestion</span></div>
+  </div>
+</section>
+
+<!-- 10 · WHAT INGESTION IS -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Grounding</div>
+    <h2>What "ingestion" actually means</h2>
+    <p class="lead">Ingestion is simply the process of <b>reading your documents and organising them so Maestro can find the right passage instantly</b> whenever it's needed.</p>
+    <div class="cols" style="margin-top:18px">
+      <div class="stack">
+        <div class="mini"><div class="mt"><span class="ico">1</span>It reads</div><div class="md">Maestro opens your PDF or Word file and pulls out the text.</div></div>
+        <div class="mini"><div class="mt"><span class="ico">2</span>It tidies</div><div class="md">It removes noise like page numbers and table-of-contents clutter.</div></div>
+        <div class="mini"><div class="mt"><span class="ico">3</span>It splits</div><div class="md">It breaks the text into small, meaningful passages.</div></div>
+        <div class="mini"><div class="mt"><span class="ico">4</span>It remembers</div><div class="md">It stores each passage so it can be searched by <i>meaning</i>, not just keywords.</div></div>
+      </div>
+      <div>
+        <div class="callout"><div class="k">The payoff</div><p>After ingestion, Maestro can answer "what does my course material say about X?" in a fraction of a second &mdash; and point to the exact paragraph.</p></div>
+        <div class="callout analogy"><div class="k">Think of it like</div><p>A librarian who reads every book you donate, then files every paragraph by topic &mdash; so any idea can be retrieved on demand.</p></div>
+      </div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>What ingestion is</span></div>
+  </div>
+</section>
+
+<!-- 11 · WHAT IS A VECTOR DB -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Grounding</div>
+    <h2>What is a "vector database"?</h2>
+    <p class="lead">It's a special kind of memory that stores text <b>by meaning</b>, so Maestro can find related ideas even when the exact words don't match.</p>
+    <div class="grid g2" style="margin-top:24px">
+      <div class="card" style="border-left:5px solid var(--graphite)">
+        <h3>Ordinary search</h3>
+        <p>Matches <b>exact words</b>. Search "car" and it misses a page that only says "automobile" or "vehicle".</p>
+      </div>
+      <div class="card" style="border-left:5px solid var(--primary)">
+        <h3>Vector (meaning-based) search</h3>
+        <p>Understands <b>concepts</b>. Search "car" and it also finds "automobile", "vehicle", and "motoring" &mdash; because they mean the same thing.</p>
+      </div>
+    </div>
+    <div class="callout analogy"><div class="k">Think of it like</div><p>A map of ideas. Every passage gets a "location" based on what it <i>means</i>. Passages about similar topics sit close together &mdash; so Maestro can walk to the right neighbourhood and grab the most relevant ones.</p></div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Vector database, explained</span></div>
+  </div>
+</section>
+
+<!-- 12 · WHY MEANING SEARCH MATTERS -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Grounding</div>
+    <h2>Why meaning-based memory matters for your course</h2>
+    <div class="grid g3" style="margin-top:24px">
+      <div class="card"><div class="num">FOR YOU</div><h3>Better matches</h3><p>When Maestro drafts content for an outcome, it pulls the passages that are genuinely <i>about</i> that outcome &mdash; even if phrased differently.</p></div>
+      <div class="card"><div class="num">FOR STUDENTS</div><h3>Coherent content</h3><p>Material reads as one connected body of knowledge, drawn from across all your sources, not a keyword jumble.</p></div>
+      <div class="card"><div class="num">FOR THE INSTITUTION</div><h3>Confident grounding</h3><p>Combined with normal keyword search, you get the best of both: precise terms <i>and</i> conceptual coverage.</p></div>
+    </div>
+    <div class="callout"><div class="k">Under the hood (optional detail)</div><p>Maestro stores these "meaning maps" in PostgreSQL using an extension called <b>pgvector</b>, and blends meaning-based search with classic keyword search for the most reliable results. You never have to touch any of this &mdash; it just works.</p></div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Why it matters</span></div>
+  </div>
+</section>
+
+<!-- 13 · SECTION 03 -->
+<section class="slide section-slide">
+  <div class="pad">
+    <div class="eyebrow">Part 03</div>
+    <h1>The ingestion pipeline, stage by stage</h1>
+    <p class="lead">What happens to a reference document from the moment you upload it &mdash; and the value each step adds.</p>
+    <div class="section-num">03</div>
+  </div>
+</section>
+
+<!-- 14 · INGESTION OVERVIEW -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Ingestion pipeline</div>
+    <h2>The seven steps of ingestion</h2>
+    <p class="lead">It runs automatically in the background when you add a reference. Here's the whole journey.</p>
+    <div class="flow" style="margin-top:30px">
+      <div class="step"><div class="si">STEP 1</div><div class="st">Upload</div><div class="sd">Add a file or link</div></div>
+      <div class="step"><div class="si">STEP 2</div><div class="st">Extract</div><div class="sd">Read the text</div></div>
+      <div class="step"><div class="si">STEP 3</div><div class="st">Chunk</div><div class="sd">Split into passages</div></div>
+      <div class="step"><div class="si">STEP 4</div><div class="st">Context</div><div class="sd">Add a smart label</div></div>
+      <div class="step"><div class="si">STEP 5</div><div class="st">Embed</div><div class="sd">Capture meaning</div></div>
+      <div class="step"><div class="si">STEP 6</div><div class="st">Index</div><div class="sd">Store for search</div></div>
+      <div class="step"><div class="si">STEP 7</div><div class="st">Retrieve</div><div class="sd">Use when needed</div></div>
+    </div>
+    <div class="callout"><div class="k">Good to know</div><p>You don't run these steps manually. You upload a document, and Maestro handles steps 2&ndash;6 for you, showing progress as it goes. Step 7 happens later, every time content is generated.</p></div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Ingestion overview</span></div>
+  </div>
+</section>
+
+<!-- 15 · STAGE 1 UPLOAD -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Ingestion &middot; Step 1 of 7</div>
+    <h2>Step 1 &mdash; Upload &amp; link your sources</h2>
+    <div class="cols" style="margin-top:18px">
+      <div>
+        <h3>What happens</h3>
+        <ul class="clean" style="margin-top:12px">
+          <li>You add reference materials to a course &mdash; PDF or Word files, or a direct link to a PDF.</li>
+          <li>Maestro records each document's details and keeps the original safe.</li>
+          <li>You can add textbooks, lecture notes, papers &mdash; as many as the course needs.</li>
+        </ul>
+      </div>
+      <div class="stack">
+        <div class="callout"><div class="k">Why it matters</div><p>This is where <b>you define the boundaries of trust</b>. Only what you upload becomes part of the course's knowledge base.</p></div>
+        <div class="callout analogy"><div class="k">In plain terms</div><p>You're handing Maestro the official reading list for the course.</p></div>
+        <div class="mini"><div class="mt"><span class="ico">!</span>Gate</div><div class="md">At least one reference must be uploaded before Phase 1 can proceed &mdash; grounding is mandatory.</div></div>
+      </div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Step 1 · Upload</span></div>
+  </div>
+</section>
+
+<!-- 16 · STAGE 2 EXTRACT -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Ingestion &middot; Step 2 of 7</div>
+    <h2>Step 2 &mdash; Extract the text</h2>
+    <div class="cols" style="margin-top:18px">
+      <div>
+        <h3>What happens</h3>
+        <ul class="clean" style="margin-top:12px">
+          <li>Maestro opens each document and reads out the words &mdash; turning a PDF or Word file into plain, workable text.</li>
+          <li>The full text is stored so later steps can re-process it without re-uploading.</li>
+        </ul>
+        <h3 style="margin-top:22px">The value</h3>
+        <p>A PDF is just a picture of words to a computer until it's "read". This step makes your content <b>understandable and searchable</b>.</p>
+      </div>
+      <div class="stack">
+        <div class="callout analogy"><div class="k">In plain terms</div><p>Like transcribing a printed book into a document you can search, highlight, and copy from.</p></div>
+        <div class="callout"><div class="k">Behind the scenes</div><p>Specialised readers handle PDF and Word formats so layout quirks don't corrupt the text.</p></div>
+      </div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Step 2 · Extract</span></div>
+  </div>
+</section>
+
+<!-- 17 · STAGE 3 CHUNK -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Ingestion &middot; Step 3 of 7</div>
+    <h2>Step 3 &mdash; Clean &amp; split into passages</h2>
+    <div class="cols" style="margin-top:18px">
+      <div>
+        <h3>What happens</h3>
+        <ul class="clean" style="margin-top:12px">
+          <li>The text is split into small, self-contained passages of roughly a few paragraphs each.</li>
+          <li>Passages slightly overlap, so an idea spanning a page break isn't cut in half.</li>
+          <li>A clean-up filter discards junk &mdash; page numbers, headers, table-of-contents noise.</li>
+        </ul>
+      </div>
+      <div class="stack">
+        <div class="callout"><div class="k">Why split at all?</div><p>Searching a whole 400-page book for one idea is wasteful. Small passages let Maestro return <b>precisely</b> the relevant paragraph.</p></div>
+        <div class="callout analogy"><div class="k">In plain terms</div><p>Like cutting a long book into well-labelled index cards &mdash; each card holds one coherent idea.</p></div>
+      </div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Step 3 · Chunk</span></div>
+  </div>
+</section>
+
+<!-- 18 · STAGE 4 CONTEXT -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Ingestion &middot; Step 4 of 7</div>
+    <h2>Step 4 &mdash; Add context to each passage</h2>
+    <div class="cols" style="margin-top:18px">
+      <div>
+        <h3>What happens</h3>
+        <ul class="clean" style="margin-top:12px">
+          <li>Maestro writes a short "context header" for each passage &mdash; which source it's from, the section, and what role it plays.</li>
+          <li>This header travels with the passage so its meaning is never ambiguous.</li>
+        </ul>
+        <h3 style="margin-top:20px">The value</h3>
+        <p>A lone paragraph saying "this increases by 8%" is useless without context. The header restores the "<i>increases in what, from which chapter</i>".</p>
+      </div>
+      <div class="stack">
+        <div class="callout analogy"><div class="k">In plain terms</div><p>Adding a sticky note to each index card: "From <i>Intro to Economics</i>, Ch. 4, on inflation."</p></div>
+        <div class="callout"><div class="k">Smart &amp; efficient</div><p>These context labels are reused (cached), so re-processing is fast and inexpensive.</p></div>
+      </div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Step 4 · Context</span></div>
+  </div>
+</section>
+
+<!-- 19 · STAGE 5 EMBED -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Ingestion &middot; Step 5 of 7</div>
+    <h2>Step 5 &mdash; Capture the meaning (embedding)</h2>
+    <div class="cols" style="margin-top:18px">
+      <div>
+        <h3>What happens</h3>
+        <ul class="clean" style="margin-top:12px">
+          <li>Each passage (with its context header) is converted into a "meaning fingerprint" &mdash; a numerical signature of what it's about.</li>
+          <li>Passages about similar topics get similar fingerprints.</li>
+        </ul>
+        <h3 style="margin-top:20px">The value</h3>
+        <p>This is what enables <b>meaning-based search</b> &mdash; the magic from the vector-database section, now applied to your sources.</p>
+      </div>
+      <div class="stack">
+        <div class="callout analogy"><div class="k">In plain terms</div><p>Giving every index card a precise "coordinate" on the map of ideas, so similar cards naturally cluster together.</p></div>
+        <div class="mini"><div class="mt"><span class="ico">i</span>You stay in control</div><div class="md">Administrators choose the embedding engine (e.g. OpenAI or a local model) in the Admin Center.</div></div>
+      </div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Step 5 · Embed</span></div>
+  </div>
+</section>
+
+<!-- 20 · STAGE 6 INDEX -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Ingestion &middot; Step 6 of 7</div>
+    <h2>Step 6 &mdash; Store &amp; index for instant search</h2>
+    <div class="cols" style="margin-top:18px">
+      <div>
+        <h3>What happens</h3>
+        <ul class="clean" style="margin-top:12px">
+          <li>Every passage, its context, its original text, and its meaning fingerprint are stored together in the database.</li>
+          <li>An "index" is built &mdash; like the index at the back of a book &mdash; so the right passages can be found in milliseconds.</li>
+        </ul>
+        <h3 style="margin-top:20px">The value</h3>
+        <p>No matter how many documents you add, retrieval stays <b>fast</b> and the original wording is preserved for accurate citation.</p>
+      </div>
+      <div class="stack">
+        <div class="callout analogy"><div class="k">In plain terms</div><p>Filing every labelled, coordinated index card into a smart cabinet that can find any card the instant you describe what you need.</p></div>
+        <div class="mini"><div class="mt"><span class="ico">&#10003;</span>Done once</div><div class="md">After this, the document is fully "ingested" and ready to power your whole course.</div></div>
+      </div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Step 6 · Index</span></div>
+  </div>
+</section>
+
+<!-- 21 · STAGE 7 RETRIEVE -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Ingestion &middot; Step 7 of 7</div>
+    <h2>Step 7 &mdash; Retrieve &amp; ground (used every time content is made)</h2>
+    <p class="lead">Whenever Maestro drafts something, it first <b>fetches the most relevant passages</b> and writes <i>from those</i>.</p>
+    <div class="grid g2" style="margin-top:18px">
+      <div class="card"><h3>How it finds the best passages</h3><p>It blends two searches &mdash; <b>meaning-based</b> (concepts) and <b>keyword</b> (exact terms) &mdash; then keeps only the strongest, most relevant results.</p></div>
+      <div class="card"><h3>A safety ladder</h3>
+        <p style="margin-bottom:6px"><span class="pill tag-green">Best</span> Passages tied to this exact outcome</p>
+        <p style="margin-bottom:6px"><span class="pill tag-amber">Next</span> Any relevant passage from the course</p>
+        <p><span class="pill tag-rose">Last resort</span> AI's own knowledge &mdash; clearly flagged as not yet grounded</p>
+      </div>
+    </div>
+    <div class="callout"><div class="k">Why this matters to you</div><p>You always know <b>where content came from</b>. If a section relied on ungrounded AI knowledge, Maestro flags it so you can add a source or review it carefully.</p></div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Step 7 · Retrieve</span></div>
+  </div>
+</section>
+
+<!-- 22 · INGESTION RECAP -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Ingestion pipeline</div>
+    <h2>From a document to a grounded curriculum</h2>
+    <div class="grid g4" style="margin-top:24px">
+      <div class="stat"><div class="big-num">1</div><div class="sl"><b>Upload</b><br>You choose the sources</div></div>
+      <div class="stat"><div class="big-num">2&ndash;3</div><div class="sl"><b>Read &amp; split</b><br>Text becomes passages</div></div>
+      <div class="stat"><div class="big-num">4&ndash;5</div><div class="sl"><b>Label &amp; map</b><br>Meaning is captured</div></div>
+      <div class="stat"><div class="big-num">6&ndash;7</div><div class="sl"><b>Store &amp; use</b><br>Instant, cited retrieval</div></div>
+    </div>
+    <div class="callout"><div class="k">The bottom line</div><p>Ingestion is the quiet engine that makes everything else trustworthy. It is the difference between an AI that <i>guesses</i> and one that <b>quotes your approved materials</b>.</p></div>
+    <div class="callout analogy"><div class="k">One-line summary</div><p>Upload your reading list &rarr; Maestro reads, organises and memorises it by meaning &rarr; every later step writes from <b>your</b> sources, with receipts.</p></div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Ingestion recap</span></div>
+  </div>
+</section>
+
+<!-- 23 · SECTION 04 -->
+<section class="slide section-slide">
+  <div class="pad">
+    <div class="eyebrow">Part 04 &middot; Phase 1</div>
+    <h1>The Course Architect &mdash; getting the foundations right</h1>
+    <p class="lead">Six guided review layers that sharpen your outcomes, assessments, and structure &mdash; with you approving each one.</p>
+    <div class="section-num">04</div>
+  </div>
+</section>
+
+<!-- 24 · ARCHITECT OVERVIEW -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Course Architect</div>
+    <h2>The six layers at a glance</h2>
+    <div class="grid g3" style="margin-top:22px">
+      <div class="card"><div class="num">LAYER 1</div><h3>Course Intake</h3><p>Reads your syllabus; extracts outcomes, assessments and structure into a clear summary.</p></div>
+      <div class="card"><div class="num">LAYER 2</div><h3>Outcome Review</h3><p>Reviews and refines learning outcomes for clarity, rigour and measurability.</p></div>
+      <div class="card"><div class="num">LAYER 3</div><h3>Assessment Redesign</h3><p>Reshapes assessments so each one truly evidences an outcome.</p></div>
+      <div class="card"><div class="num">LAYER 4</div><h3>Weighting &amp; Rubrics</h3><p>Sets fair weightings and clear marking rubrics across assessments.</p></div>
+      <div class="card"><div class="num">LAYER 5</div><h3>Integrity &amp; AI Use</h3><p>Safeguards academic integrity and defines responsible, active AI use.</p></div>
+      <div class="card"><div class="num">LAYER 6</div><h3>Subtopic Architecture</h3><p>Designs the self-paced subtopic structure that Phase 2 will build on.</p></div>
+    </div>
+    <div class="callout"><div class="k">The pattern</div><p>Every layer follows the same rhythm: <b>Maestro proposes &rarr; you review &amp; edit &rarr; you approve</b>. The next layer stays locked until you do.</p></div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Course Architect · Overview</span></div>
+  </div>
+</section>
+
+<!-- 25 · HOW A LAYER WORKS / COUNCIL -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Course Architect</div>
+    <h2>How each review layer works</h2>
+    <div class="flow" style="margin-top:24px">
+      <div class="step"><div class="si">A</div><div class="st">Run</div><div class="sd">Maestro analyses using your references</div></div>
+      <div class="step"><div class="si">B</div><div class="st">Read</div><div class="sd">You read its recommendations &amp; rationale</div></div>
+      <div class="step"><div class="si">C</div><div class="st">Refine</div><div class="sd">Edit, accept, or ask it to redo</div></div>
+      <div class="step"><div class="si">D</div><div class="st">Approve</div><div class="sd">Lock it in &amp; unlock the next layer</div></div>
+    </div>
+    <div class="grid g2" style="margin-top:26px">
+      <div class="card" style="border-left:5px solid var(--primary)"><h3>Single-expert layers</h3><p>One AI pass for straightforward steps (e.g. intake, integrity). Fast and focused.</p></div>
+      <div class="card" style="border-left:5px solid var(--primary-bright)"><h3>"LLM Council" layers</h3><p>For high-stakes decisions, <b>several AI models deliberate in parallel</b> and a "chairman" synthesises the best answer &mdash; like a panel review instead of a single opinion.</p></div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>How a layer works</span></div>
+  </div>
+</section>
+
+<!-- 26 · LAYER 1 -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Course Architect &middot; Layer 1</div>
+    <h2>Layer 1 &mdash; Course Intake &amp; Syllabus Extraction</h2>
+    <div class="cols" style="margin-top:18px">
+      <div>
+        <h3>What it does</h3>
+        <ul class="clean" style="margin-top:12px">
+          <li>Reads your uploaded syllabus and pulls out the essentials: course details, learning outcomes, assessments, and the weekly plan.</li>
+          <li>Organises them into one clean, structured "Course Intake Summary".</li>
+        </ul>
+      </div>
+      <div class="callout"><div class="k">The value</div><p>Replaces an hour of copying-and-pasting with a single, accurate snapshot of your course &mdash; the trustworthy starting point everything else builds on.</p></div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Layer 1 · Intake</span></div>
+  </div>
+</section>
+
+<!-- 27 · LAYER 2 -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Course Architect &middot; Layer 2 &middot; Council</div>
+    <h2>Layer 2 &mdash; Learning Outcome Review &amp; Refinement</h2>
+    <div class="cols" style="margin-top:18px">
+      <div>
+        <h3>What it does</h3>
+        <ul class="clean" style="margin-top:12px">
+          <li>Examines each learning outcome for clarity, measurability and appropriate rigour.</li>
+          <li>Suggests sharper wording and flags outcomes that are vague or hard to assess.</li>
+          <li>A panel of AI models deliberates to give a well-rounded recommendation.</li>
+        </ul>
+      </div>
+      <div class="callout"><div class="k">The value</div><p>Strong, measurable outcomes are the backbone of a good course. This layer raises quality <i>before</i> assessments and content are built on top of them.</p></div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Layer 2 · Outcomes</span></div>
+  </div>
+</section>
+
+<!-- 28 · LAYER 3 -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Course Architect &middot; Layer 3 &middot; Council</div>
+    <h2>Layer 3 &mdash; Assessment Redesign for Contribution</h2>
+    <div class="cols" style="margin-top:18px">
+      <div>
+        <h3>What it does</h3>
+        <ul class="clean" style="margin-top:12px">
+          <li>Checks that every assessment actually measures the outcomes it claims to.</li>
+          <li>Proposes redesigns so each assessment makes a clear contribution to the course's goals.</li>
+          <li>Removes redundant or misaligned tasks.</li>
+        </ul>
+      </div>
+      <div class="callout"><div class="k">The value</div><p>Ensures students are graded on what truly matters &mdash; tightening the link between "what we teach" and "what we test".</p></div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Layer 3 · Assessment redesign</span></div>
+  </div>
+</section>
+
+<!-- 29 · LAYER 4 -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Course Architect &middot; Layer 4 &middot; Council</div>
+    <h2>Layer 4 &mdash; Assessment Structure, Weighting &amp; Rubrics</h2>
+    <div class="cols" style="margin-top:18px">
+      <div>
+        <h3>What it does</h3>
+        <ul class="clean" style="margin-top:12px">
+          <li>Recommends a fair weighting across all assessments.</li>
+          <li>Drafts clear marking rubrics so grading is consistent and transparent.</li>
+          <li>Balances the assessment load across the term.</li>
+        </ul>
+      </div>
+      <div class="callout"><div class="k">The value</div><p>Transparent rubrics and balanced weighting mean fairer grading for students and far less guesswork for you and your markers.</p></div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Layer 4 · Weighting &amp; rubrics</span></div>
+  </div>
+</section>
+
+<!-- 30 · LAYER 5 -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Course Architect &middot; Layer 5</div>
+    <h2>Layer 5 &mdash; Academic Integrity &amp; Active AI Use</h2>
+    <div class="cols" style="margin-top:18px">
+      <div>
+        <h3>What it does</h3>
+        <ul class="clean" style="margin-top:12px">
+          <li>Reviews assessments for integrity risks in an AI-enabled world.</li>
+          <li>Suggests where and how students can use AI <i>actively and responsibly</i> as part of learning.</li>
+          <li>Recommends safeguards for higher-stakes tasks.</li>
+        </ul>
+      </div>
+      <div class="callout"><div class="k">The value</div><p>Turns the "AI cheating" worry into a deliberate policy &mdash; protecting integrity while teaching students to use AI well.</p></div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Layer 5 · Integrity</span></div>
+  </div>
+</section>
+
+<!-- 31 · LAYER 6 -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Course Architect &middot; Layer 6 &middot; Council</div>
+    <h2>Layer 6 &mdash; Self-Paced Subtopic Architecture</h2>
+    <div class="cols" style="margin-top:18px">
+      <div>
+        <h3>What it does</h3>
+        <ul class="clean" style="margin-top:12px">
+          <li>Breaks each outcome into a logical sequence of self-paced subtopics.</li>
+          <li>Defines what a learner must master, and in what order.</li>
+          <li>Produces the structural map that Phase 2 (the Node Engine) will build content for.</li>
+        </ul>
+      </div>
+      <div class="callout"><div class="k">The value</div><p>This is the bridge to adaptive learning &mdash; the skeleton on which personalised, mastery-based content will hang.</p></div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Layer 6 · Subtopics</span></div>
+  </div>
+</section>
+
+<!-- 32 · COVERAGE CHECK -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Bridge step &middot; after Layer 2</div>
+    <h2>Reference Coverage Check &mdash; "Do my sources cover everything?"</h2>
+    <div class="cols" style="margin-top:18px">
+      <div>
+        <h3>What it does</h3>
+        <ul class="clean" style="margin-top:12px">
+          <li>For each learning outcome, Maestro checks how well your uploaded references actually cover it.</li>
+          <li>Each outcome gets a simple rating.</li>
+        </ul>
+        <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+          <span class="pill tag-green">Well covered</span>
+          <span class="pill tag-amber">Partly covered</span>
+          <span class="pill tag-rose">Not covered</span>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="callout"><div class="k">The value</div><p>You discover gaps <b>early</b> &mdash; before building content &mdash; so you can add a missing reading rather than generate weak material.</p></div>
+        <div class="mini"><div class="mt"><span class="ico">i</span>Read-only</div><div class="md">This step only measures and informs &mdash; it changes nothing on its own.</div></div>
+      </div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Reference coverage</span></div>
+  </div>
+</section>
+
+<!-- 33 · ALIGNMENT -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Bridge step &middot; after Layer 6 &middot; unlocks Phase 2</div>
+    <h2>Reference Alignment &mdash; connecting sources to outcomes</h2>
+    <div class="cols" style="margin-top:18px">
+      <div>
+        <h3>What it does</h3>
+        <ul class="clean" style="margin-top:12px">
+          <li>Maestro proposes which passages belong to which outcome and subtopic.</li>
+          <li>You review the suggestions &mdash; confirm, reassign, or remove them.</li>
+          <li>Your approval "tags" each passage so future content pulls <i>precisely</i> the right sources.</li>
+        </ul>
+      </div>
+      <div class="stack">
+        <div class="callout"><div class="k">Why it's a gate</div><p>Approving alignment unlocks the Node Engine. It guarantees content generation is grounded in the <b>exact</b> material for each topic.</p></div>
+        <div class="callout analogy"><div class="k">In plain terms</div><p>Sorting your index cards into labelled folders &mdash; one per topic &mdash; so the right cards are at hand when building each lesson.</p></div>
+      </div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Reference alignment</span></div>
+  </div>
+</section>
+
+<!-- 34 · SECTION 05 -->
+<section class="slide section-slide">
+  <div class="pad">
+    <div class="eyebrow">Part 05 &middot; Phase 2</div>
+    <h1>The Node Engine &mdash; building the learning</h1>
+    <p class="lead">Turning your approved structure into connected mastery nodes and grounded, ready-to-teach content.</p>
+    <div class="section-num">05</div>
+  </div>
+</section>
+
+<!-- 35 · NODE ENGINE OVERVIEW -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Node Engine</div>
+    <h2>The five build layers</h2>
+    <div class="flow" style="margin-top:30px">
+      <div class="step"><div class="si">LAYER 1</div><div class="st">Node Generation</div><div class="sd">Create the mastery nodes</div></div>
+      <div class="step"><div class="si">LAYER 2</div><div class="st">Experience Blueprint</div><div class="sd">Plan how each node is learned</div></div>
+      <div class="step"><div class="si">LAYER 3</div><div class="st">Content Spec</div><div class="sd">Specify exactly what to build</div></div>
+      <div class="step"><div class="si">LAYER 4</div><div class="st">Production</div><div class="sd">Generate text, visuals, video</div></div>
+      <div class="step"><div class="si">LAYER 5</div><div class="st">Validation</div><div class="sd">Final quality review</div></div>
+    </div>
+    <div class="callout"><div class="k">Same trusted rhythm</div><p>As in Phase 1, each layer is grounded in your aligned references and must be <b>approved before the next unlocks</b>. You're always the final checkpoint.</p></div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Node Engine · Overview</span></div>
+  </div>
+</section>
+
+<!-- 36 · WHAT IS A NODE -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Node Engine</div>
+    <h2>What is a "mastery node"?</h2>
+    <p class="lead">A mastery node is a single, learnable idea &mdash; the smallest meaningful unit a student should master before moving on.</p>
+    <div class="grid g3" style="margin-top:26px">
+      <div class="card"><h3>Connected</h3><p>Nodes link by prerequisite &mdash; "learn this before that" &mdash; forming a map of the whole course.</p></div>
+      <div class="card"><h3>Adaptive</h3><p>Some nodes are essential; others can be skipped if a student already shows mastery, enabling personalised paths.</p></div>
+      <div class="card"><h3>Grounded</h3><p>Each node's content is generated from the references you aligned to its topic &mdash; with citations.</p></div>
+    </div>
+    <div class="callout analogy"><div class="k">Think of it like</div><p>A subway map of your course. Each station is one idea; the lines show the order. Students travel the route that fits where they're starting from.</p></div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Mastery nodes</span></div>
+  </div>
+</section>
+
+<!-- 37 · NODE LAYERS 1-2 -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Node Engine &middot; Layers 1&ndash;2</div>
+    <h2>Layer 1 &amp; 2 &mdash; Generate nodes, then plan the experience</h2>
+    <div class="grid g2" style="margin-top:22px">
+      <div class="card" style="border-left:5px solid var(--primary)">
+        <span class="pill">Layer 1</span><h3 style="margin-top:10px">Node Generation</h3>
+        <p>For each approved subtopic, Maestro creates the set of mastery nodes and their prerequisite links &mdash; grounded in your aligned references.</p>
+        <p class="muted" style="margin-top:8px"><b>Value:</b> the adaptive backbone of the course, built in minutes.</p>
+      </div>
+      <div class="card" style="border-left:5px solid var(--primary-bright)">
+        <span class="pill">Layer 2</span><h3 style="margin-top:10px">Experience Blueprint</h3>
+        <p>Plans <i>how</i> each node should be learned &mdash; the teaching approach, activities, and the kinds of materials that fit best.</p>
+        <p class="muted" style="margin-top:8px"><b>Value:</b> pedagogy decided deliberately, before any content is produced.</p>
+      </div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Node Engine · Layers 1&ndash;2</span></div>
+  </div>
+</section>
+
+<!-- 38 · NODE LAYERS 3-4 -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Node Engine &middot; Layers 3&ndash;4</div>
+    <h2>Layer 3 &amp; 4 &mdash; Specify, then produce the content</h2>
+    <div class="grid g2" style="margin-top:22px">
+      <div class="card" style="border-left:5px solid var(--primary)">
+        <span class="pill">Layer 3</span><h3 style="margin-top:10px">Content Specification</h3>
+        <p>Defines exactly what each node's materials must contain &mdash; key points, examples, and which references to draw from.</p>
+        <p class="muted" style="margin-top:8px"><b>Value:</b> a precise brief, so production is accurate and on-target.</p>
+      </div>
+      <div class="card" style="border-left:5px solid var(--primary-bright)">
+        <span class="pill">Layer 4</span><h3 style="margin-top:10px">Modality Production</h3>
+        <p>Generates the actual learning objects in multiple formats &mdash; written explanations, structured visuals, and even video &mdash; each grounded and cited.</p>
+        <p class="muted" style="margin-top:8px"><b>Value:</b> ready-to-teach materials in the formats students learn from best.</p>
+      </div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Node Engine · Layers 3&ndash;4</span></div>
+  </div>
+</section>
+
+<!-- 39 · NODE LAYER 5 -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Node Engine &middot; Layer 5</div>
+    <h2>Layer 5 &mdash; Validation &amp; Review</h2>
+    <div class="cols" style="margin-top:18px">
+      <div>
+        <h3>What it does</h3>
+        <ul class="clean" style="margin-top:12px">
+          <li>Performs final quality checks across the produced content and node structure.</li>
+          <li>Surfaces anything that needs your attention before the curriculum is finalised.</li>
+          <li>Confirms every node is grounded, complete, and correctly sequenced.</li>
+        </ul>
+      </div>
+      <div class="callout"><div class="k">The value</div><p>A final safety net. You sign off with confidence that the whole curriculum is consistent, complete, and traceable to your sources.</p></div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Node Engine · Layer 5</span></div>
+  </div>
+</section>
+
+<!-- 40 · WHAT YOU GET -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">The outcome</div>
+    <h2>What you have at the end</h2>
+    <div class="grid g4" style="margin-top:24px">
+      <div class="card"><h3>A refined syllabus</h3><p>Sharper outcomes, fairer assessments, clear rubrics, and an integrity policy.</p></div>
+      <div class="card"><h3>An adaptive map</h3><p>Connected mastery nodes that support personalised learning paths.</p></div>
+      <div class="card"><h3>Grounded content</h3><p>Readings, visuals and video for each node &mdash; built from your sources, with citations.</p></div>
+      <div class="card"><h3>A full audit trail</h3><p>Every approval recorded &mdash; defensible for quality assurance and accreditation.</p></div>
+    </div>
+    <div class="callout"><div class="k">And it's portable</div><p>Finished curricula can be exported to standard documents (PDF / Word) for sharing, review, or archiving.</p></div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>The finished curriculum</span></div>
+  </div>
+</section>
+
+<!-- 41 · SECTION 06 -->
+<section class="slide section-slide">
+  <div class="pad">
+    <div class="eyebrow">Part 06 &middot; For administrators</div>
+    <h1>The Admin Center &mdash; what the platform offers</h1>
+    <p class="lead">The control room: people, access, AI configuration, and oversight &mdash; all in one place.</p>
+    <div class="section-num">06</div>
+  </div>
+</section>
+
+<!-- 42 · ADMIN OVERVIEW -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Admin Center</div>
+    <h2>Three areas of control</h2>
+    <div class="grid g3" style="margin-top:24px">
+      <div class="card" style="border-top:4px solid var(--primary)"><h3>Identity &amp; Access</h3><p>Who can use the platform, and what they can see &mdash; users, roles, and course assignments.</p></div>
+      <div class="card" style="border-top:4px solid var(--primary-bright)"><h3>Configuration</h3><p>The engine room &mdash; AI providers, models, the database, reference policy, and prompt templates.</p></div>
+      <div class="card" style="border-top:4px solid var(--green)"><h3>Monitoring</h3><p>Full visibility &mdash; a searchable audit log of every meaningful action across the platform.</p></div>
+    </div>
+    <div class="callout"><div class="k">Access is protected</div><p>The Admin Center is available to administrators only. Professors author courses; admins enable and oversee the whole environment.</p></div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Admin Center · Overview</span></div>
+  </div>
+</section>
+
+<!-- 43 · IDENTITY & ACCESS -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Admin Center &middot; Identity &amp; Access</div>
+    <h2>Manage people &amp; permissions</h2>
+    <div class="grid g2" style="margin-top:22px">
+      <div class="card" style="border-left:5px solid var(--primary)">
+        <h3>Users</h3>
+        <ul class="clean" style="margin-top:10px;gap:8px">
+          <li>Create accounts for professors, students and admins.</li>
+          <li>Activate or deactivate access at any time.</li>
+          <li>Reset passwords when needed.</li>
+        </ul>
+      </div>
+      <div class="card" style="border-left:5px solid var(--primary-bright)">
+        <h3>Course Access</h3>
+        <ul class="clean" style="margin-top:10px;gap:8px">
+          <li>Assign a course owner (the lead professor).</li>
+          <li>Invite peer reviewers to a course.</li>
+          <li>Assign students to the courses they should see.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout"><div class="k">The value</div><p>The right people get exactly the right access &mdash; clean separation of duties, no oversharing.</p></div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Identity &amp; access</span></div>
+  </div>
+</section>
+
+<!-- 44 · CONFIGURATION -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Admin Center &middot; Configuration</div>
+    <h2>The engine room</h2>
+    <div class="grid g3" style="margin-top:22px">
+      <div class="card"><div class="num">API KEYS</div><h3>Providers &amp; keys</h3><p>Connect AI providers (OpenRouter, OpenAI, local models, video). Test each connection in one click.</p></div>
+      <div class="card"><div class="num">DATABASE</div><h3>Data &amp; storage</h3><p>Configure and test the database connections that store your courses and reference memory.</p></div>
+      <div class="card"><div class="num">AI MODELS</div><h3>Models &amp; Council</h3><p>Pick default models, the embedding engine, and who sits on the "AI Council" for high-stakes layers.</p></div>
+      <div class="card"><div class="num">PROMPTS</div><h3>Prompt templates</h3><p>Tune the instructions Maestro uses for each layer &mdash; institutional standards, centrally managed.</p></div>
+      <div class="card"><div class="num">REFERENCE &amp; RAG</div><h3>Grounding policy</h3><p>Check embedding health, set coverage thresholds, and adjust how strictly content must be grounded.</p></div>
+      <div class="card" style="background:#eef4ff;border-color:#d6e4ff"><div class="num">WHY IT MATTERS</div><h3>One control point</h3><p>Cost, quality, and compliance are tuned centrally &mdash; professors never touch infrastructure.</p></div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Configuration</span></div>
+  </div>
+</section>
+
+<!-- 45 · MONITORING -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Admin Center &middot; Monitoring</div>
+    <h2>Oversight &amp; the audit trail</h2>
+    <div class="cols" style="margin-top:18px">
+      <div>
+        <h3>What administrators can see</h3>
+        <ul class="clean" style="margin-top:12px">
+          <li>A searchable, filterable log of meaningful actions: sign-ins, user changes, access changes, approvals, reviews and settings updates.</li>
+          <li>A live health check on the reference/grounding system, so issues are caught early.</li>
+        </ul>
+      </div>
+      <div class="stack">
+        <div class="callout"><div class="k">The value</div><p>Accountability and peace of mind &mdash; you can always answer "who did what, and when". Essential for quality assurance and accreditation.</p></div>
+        <div class="callout analogy"><div class="k">In plain terms</div><p>A flight recorder for the platform: nothing important happens without a trace.</p></div>
+      </div>
+    </div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Monitoring &amp; audit</span></div>
+  </div>
+</section>
+
+<!-- 46 · ROLES MATRIX -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Governance</div>
+    <h2>Who can do what</h2>
+    <table class="matrix">
+      <tr><th>Capability</th><th>Administrator</th><th>Professor</th><th>Reviewer</th><th>Student</th></tr>
+      <tr><td>Manage users &amp; access</td><td><b>Yes</b></td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td></tr>
+      <tr><td>Configure AI, DB, prompts</td><td><b>Yes</b></td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td></tr>
+      <tr><td>Create &amp; author courses</td><td>Yes</td><td><b>Yes</b> (own)</td><td>&mdash;</td><td>&mdash;</td></tr>
+      <tr><td>Upload references &amp; approve layers</td><td>Yes</td><td><b>Yes</b></td><td>&mdash;</td><td>&mdash;</td></tr>
+      <tr><td>Peer-review a course</td><td>Yes</td><td>Yes</td><td><b>Yes</b></td><td>&mdash;</td></tr>
+      <tr><td>View assigned course content</td><td>Yes</td><td>Yes</td><td>Yes</td><td><b>Yes</b></td></tr>
+      <tr><td>View the audit log</td><td><b>Yes</b></td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td></tr>
+    </table>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Roles &amp; governance</span></div>
+  </div>
+</section>
+
+<!-- 47 · GETTING STARTED -->
+<section class="slide">
+  <div class="pad">
+    <div class="eyebrow">Getting started</div>
+    <h2>Your first course in six moves</h2>
+    <div class="grid g3" style="margin-top:24px">
+      <div class="card"><div class="num">01</div><h3>Create the course</h3><p>Sign in and start a new course from your dashboard.</p></div>
+      <div class="card"><div class="num">02</div><h3>Upload your syllabus</h3><p>Drop in the PDF or Word file &mdash; or fill the quick form.</p></div>
+      <div class="card"><div class="num">03</div><h3>Add references</h3><p>Upload the textbooks and papers that ground the course.</p></div>
+      <div class="card"><div class="num">04</div><h3>Work the layers</h3><p>Run, review and approve each Course Architect layer.</p></div>
+      <div class="card"><div class="num">05</div><h3>Align references</h3><p>Confirm which sources map to which outcomes.</p></div>
+      <div class="card"><div class="num">06</div><h3>Build &amp; export</h3><p>Generate grounded content with the Node Engine, then export.</p></div>
+    </div>
+    <div class="callout"><div class="k">Remember</div><p>You're never on a clock and never locked out of a decision &mdash; <b>review, refine, approve</b>, at your pace.</p></div>
+    <div class="footer"><span class="brand"><img src="hbmsu-logo.png" alt=""/>Maestro</span><span class="dot"></span><span>Getting started</span></div>
+  </div>
+</section>
+
+<!-- 48 · CLOSING -->
+<section class="slide title-slide">
+  <div class="kicker-badge">CURRICULUM INTELLIGENCE SYSTEM</div>
+  <div class="pad">
+    <div class="title-logo">
+      <img src="hbmsu-logo.png" alt="HBMSU" />
+      <span class="wm">Maestro</span>
+    </div>
+    <div class="eyebrow">Key takeaways</div>
+    <h1>You stay the expert. Maestro does the heavy lifting.</h1>
+    <ul class="clean check" style="margin-top:22px;max-width:60ch">
+      <li style="color:#dbe6ff">Every step is grounded in <b>your</b> trusted sources &mdash; with citations.</li>
+      <li style="color:#dbe6ff">Nothing advances without <b>your approval</b>.</li>
+      <li style="color:#dbe6ff">Outcomes, assessments and content become one <b>aligned, adaptive</b> whole.</li>
+      <li style="color:#dbe6ff">Administrators keep the platform <b>secure, configured and auditable</b>.</li>
+    </ul>
+    <div class="title-foot"><span class="pill">Questions? We're here to help you build your first course.</span></div>
+  </div>
+</section>
+
+</div>
+<div id="bar"><div id="barfill"></div></div>
+<div id="counter"></div>
+<div id="hint">Use &larr; &rarr; or Space to navigate &middot; press F for fullscreen &middot; Ctrl/Cmd+P to export PDF</div>
+<div class="nav">
+  <button id="prev" title="Previous (Left arrow)">&#8249;</button>
+  <button id="next" title="Next (Right arrow)">&#8250;</button>
+</div>
+<script>
+  const slides=[...document.querySelectorAll('.slide')];
+  let i=0;
+  const counter=document.getElementById('counter');
+  const fill=document.getElementById('barfill');
+  function show(n){
+    i=Math.max(0,Math.min(slides.length-1,n));
+    slides.forEach((s,k)=>s.classList.toggle('active',k===i));
+    counter.textContent=String(i+1).padStart(2,'0')+' / '+String(slides.length).padStart(2,'0');
+    fill.style.width=((i+1)/slides.length*100)+'%';
+    location.hash=i+1;
+  }
+  function nextS(){show(i+1)} function prevS(){show(i-1)}
+  document.getElementById('next').onclick=nextS;
+  document.getElementById('prev').onclick=prevS;
+  document.addEventListener('keydown',e=>{
+    if(['ArrowRight','PageDown',' '].includes(e.key)){e.preventDefault();nextS()}
+    else if(['ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();prevS()}
+    else if(e.key==='Home'){show(0)} else if(e.key==='End'){show(slides.length-1)}
+    else if(e.key.toLowerCase()==='f'){if(!document.fullscreenElement)document.documentElement.requestFullscreen();else document.exitFullscreen()}
+  });
+  let sx=null;
+  document.addEventListener('touchstart',e=>sx=e.touches[0].clientX,{passive:true});
+  document.addEventListener('touchend',e=>{if(sx===null)return;const dx=e.changedTouches[0].clientX-sx;if(Math.abs(dx)>50){dx<0?nextS():prevS()}sx=null});
+  // scale slide to viewport
+  function fit(){
+    const pad=40;const w=window.innerWidth-pad,h=window.innerHeight-pad;
+    const s=Math.min(w/1280,h/720);
+    document.querySelectorAll('.slide').forEach(el=>el.style.transform='scale('+s+')');
+  }
+  window.addEventListener('resize',fit);
+  const start=parseInt(location.hash.replace('#',''))||1;
+  fit();show(start-1);
+</script>
+</body>
+</html>
