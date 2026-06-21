@@ -34,6 +34,9 @@ export default function CourseCard({ course, onDelete, onRequestReview, canDelet
           <h3 className="mt-2 text-base font-bold text-black dark:text-foreground line-clamp-2 leading-snug">
             {course.title}
           </h3>
+          <p className="mt-1 text-xs text-black/55 dark:text-muted-foreground">
+            Owner: {course.owner_name || course.owner_email || 'Unassigned'}
+          </p>
         </div>
         {canDelete && (
           <Button

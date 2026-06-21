@@ -25,6 +25,7 @@ export default function CourseAccessPage() {
   const [access, setAccess] = useState<CourseAccess | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [ownerDraftId, setOwnerDraftId] = useState('')
 
   const professors = useMemo(() => users.filter((u) => u.role === 'professor' || u.role === 'admin'), [users])
   const students = useMemo(() => users.filter((u) => u.role === 'student'), [users])
@@ -59,11 +60,18 @@ export default function CourseAccessPage() {
     if (selectedCourse) loadAccess(selectedCourse)
   }, [selectedCourse])
 
-  async function run(fn: () => Promise<void>) {
+  useEffect(() => {
+    setOwnerDraftId(access?.owner_user_id ?? '')
+  }, [access?.owner_user_id])
+
+  async function run(fn: () => Promise<void>, successMessage?: string) {
     try {
       setBusy(true)
       await fn()
       await loadAccess(selectedCourse)
+      if (successMessage) {
+        showToast({ title: 'Saved', description: successMessage, variant: 'success' })
+      }
     } catch (e) {
       showToast({ title: 'Error', description: e instanceof Error ? e.message : 'Action failed', variant: 'destructive' })
     } finally {
@@ -75,6 +83,7 @@ export default function CourseAccessPage() {
     const u = usersById.get(id)
     return u ? `${u.name || u.email} (${u.email})` : id
   }
+  const ownerChanged = (access?.owner_user_id ?? '') !== ownerDraftId
 
   return (
     <div className="space-y-6">
@@ -110,9 +119,9 @@ export default function CourseAccessPage() {
                 <h3 className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">Owner</h3>
                 <select
                   className={inputClass}
-                  value={access.owner_user_id || ''}
+                  value={ownerDraftId}
                   disabled={busy}
-                  onChange={(e) => run(() => setCourseOwner(selectedCourse, e.target.value || null))}
+                  onChange={(e) => setOwnerDraftId(e.target.value)}
                 >
                   <option value="">— No owner —</option>
                   {professors.map((p) => (
@@ -121,6 +130,21 @@ export default function CourseAccessPage() {
                     </option>
                   ))}
                 </select>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    className="rounded-md bg-primary px-3 py-1.5 text-fine-print font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={busy || !ownerChanged}
+                    onClick={() =>
+                      run(
+                        () => setCourseOwner(selectedCourse, ownerDraftId || null),
+                        'Course owner updated'
+                      )
+                    }
+                  >
+                    Save owner
+                  </button>
+                </div>
               </div>
 
               {/* Reviewers */}
@@ -133,7 +157,7 @@ export default function CourseAccessPage() {
                       <button
                         className="text-fine-print text-red-400 hover:underline"
                         disabled={busy}
-                        onClick={() => run(() => removeReviewer(selectedCourse, id))}
+                        onClick={() => run(() => removeReviewer(selectedCourse, id), 'Reviewer removed')}
                       >
                         Remove
                       </button>
@@ -147,11 +171,14 @@ export default function CourseAccessPage() {
                   className={inputClass}
                   value=""
                   disabled={busy}
-                  onChange={(e) => e.target.value && run(() => assignReviewer(selectedCourse, e.target.value))}
+                  onChange={(e) =>
+                    e.target.value &&
+                    run(() => assignReviewer(selectedCourse, e.target.value), 'Reviewer assigned')
+                  }
                 >
                   <option value="">+ Add reviewer…</option>
                   {professors
-                    .filter((p) => !access.reviewer_ids.includes(p.id))
+                    .filter((p) => !access.reviewer_ids.includes(p.id) && p.id !== ownerDraftId)
                     .map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name || p.email}
@@ -170,7 +197,7 @@ export default function CourseAccessPage() {
                       <button
                         className="text-fine-print text-red-400 hover:underline"
                         disabled={busy}
-                        onClick={() => run(() => removeStudent(selectedCourse, id))}
+                        onClick={() => run(() => removeStudent(selectedCourse, id), 'Student removed')}
                       >
                         Remove
                       </button>
@@ -184,7 +211,9 @@ export default function CourseAccessPage() {
                   className={inputClass}
                   value=""
                   disabled={busy}
-                  onChange={(e) => e.target.value && run(() => assignStudent(selectedCourse, e.target.value))}
+                  onChange={(e) =>
+                    e.target.value && run(() => assignStudent(selectedCourse, e.target.value), 'Student assigned')
+                  }
                 >
                   <option value="">+ Add student…</option>
                   {students

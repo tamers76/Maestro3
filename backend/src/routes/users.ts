@@ -165,6 +165,10 @@ router.put('/courses/:code/owner', async (req: Request, res: Response) => {
       }
     }
     await userRepo.setCourseOwner(code, ownerUserId ?? null);
+    // Owner cannot also be a reviewer on the same course.
+    if (ownerUserId) {
+      await userRepo.removeReviewer(code, ownerUserId);
+    }
     void recordAudit(req, {
       action: ownerUserId ? 'course.owner_set' : 'course.owner_cleared',
       category: 'access',
@@ -194,6 +198,10 @@ router.post('/courses/:code/reviewers', async (req: Request, res: Response) => {
     if (!prof) return res.status(404).json({ error: 'Professor not found' });
     if (prof.role !== 'professor' && prof.role !== 'admin') {
       return res.status(400).json({ error: 'Only professors can be assigned as reviewers' });
+    }
+    const ownerId = await userRepo.getCourseOwner(code);
+    if (ownerId && ownerId === professorId) {
+      return res.status(400).json({ error: 'The course owner cannot be assigned as a reviewer' });
     }
     await userRepo.assignReviewer(code, professorId, req.user?.id ?? '');
     void recordAudit(req, {

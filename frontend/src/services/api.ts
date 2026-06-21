@@ -281,6 +281,9 @@ export interface CourseListItem {
   created_at: string;
   updated_at: string;
   access?: 'owner' | 'reviewer' | 'admin';
+  owner_user_id?: string | null;
+  owner_name?: string | null;
+  owner_email?: string | null;
 }
 
 export interface CLO {

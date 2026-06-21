@@ -142,6 +142,26 @@ router.get('/', async (req: Request, res: Response) => {
       const allowed = new Set<string>([...reviewingCodes, ...ownedCodes]);
       visible = courses.filter((c) => allowed.has(c.course_code));
     }
+    const ownerByCourse = new Map<string, { owner_user_id: string | null; owner_name: string | null; owner_email: string | null }>();
+    const ownerEntries = await Promise.all(
+      visible.map(async (course) => {
+        const ownerUserId = await userRepo.getCourseOwner(course.course_code);
+        if (!ownerUserId) {
+          return [course.course_code, { owner_user_id: null, owner_name: null, owner_email: null }] as const;
+        }
+        const owner = await userRepo.getUserById(ownerUserId);
+        return [
+          course.course_code,
+          {
+            owner_user_id: ownerUserId,
+            owner_name: owner?.name ?? null,
+            owner_email: owner?.email ?? null,
+          },
+        ] as const;
+      })
+    );
+    for (const [courseCode, owner] of ownerEntries) ownerByCourse.set(courseCode, owner);
+
     const courseList: CourseListItem[] = visible.map(c => ({
       course_code: c.course_code,
       title: c.title,
@@ -155,6 +175,9 @@ router.get('/', async (req: Request, res: Response) => {
         : reviewingCodes.has(c.course_code)
         ? 'reviewer'
         : undefined,
+      owner_user_id: ownerByCourse.get(c.course_code)?.owner_user_id ?? null,
+      owner_name: ownerByCourse.get(c.course_code)?.owner_name ?? null,
+      owner_email: ownerByCourse.get(c.course_code)?.owner_email ?? null,
     }));
     res.json(courseList);
   } catch (error) {
@@ -425,7 +448,7 @@ router.post('/form', async (req: Request, res: Response) => {
 router.delete('/:code', async (req: Request, res: Response) => {
   try {
     const { code } = req.params;
-    if (req.user?.role !== 'admin' && req.courseAccess !== 'owner' && req.courseAccess !== 'admin') {
+    if (req.user?.role !== 'admin' && req.courseAccess !== 'owner') {
       return res.status(403).json({ error: 'Only the course owner or an admin can delete this course' });
     }
     

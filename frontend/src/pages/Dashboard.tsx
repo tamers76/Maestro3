@@ -472,8 +472,7 @@ export default function Dashboard() {
                     course={course}
                     canDelete={
                       user?.role === 'admin' ||
-                      course.access === 'owner' ||
-                      course.access === 'admin'
+                      course.access === 'owner'
                     }
                     onDelete={code => setDeleteDialog({ open: true, code })}
                     onRequestReview={

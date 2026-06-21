@@ -884,6 +884,9 @@ export interface CourseListItem {
   updated_at: string;
   /** Caller's relationship to this course (set by GET /api/courses). */
   access?: 'owner' | 'reviewer' | 'admin';
+  owner_user_id?: string | null;
+  owner_name?: string | null;
+  owner_email?: string | null;
 }
 
 export interface CourseDetail extends Course {
