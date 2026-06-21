@@ -18,7 +18,6 @@ import {
   Network,
   ScrollText,
   ShieldAlert,
-  Library,
 } from 'lucide-react'
 
 interface NavItem {
@@ -49,17 +48,6 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/admin/models', label: 'AI Models', icon: Cpu, description: 'Provider and default models' },
       { to: '/admin/prompts', label: 'Prompts', icon: Sparkles, description: 'Architect and node-engine prompts' },
       { to: '/admin/rag', label: 'Reference & RAG', icon: Network, description: 'Grounding health and thresholds' },
-    ],
-  },
-  {
-    title: 'Content',
-    items: [
-      {
-        to: '/admin/library',
-        label: 'Digital Library',
-        icon: Library,
-        description: 'Review and curate the book catalog',
-      },
     ],
   },
   {

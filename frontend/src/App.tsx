@@ -62,8 +62,18 @@ function App() {
               </ProtectedRoute>
             }
           />
+          {/* Digital Library — admin-only, lives in the main app shell (not the Admin Center) */}
+          <Route
+            path="/library"
+            element={
+              <ProtectedRoute roles={['admin']}>
+                <Layout><LibraryPage /></Layout>
+              </ProtectedRoute>
+            }
+          />
           {/* Compatibility redirects for the previous routes */}
           <Route path="/settings" element={<Navigate to="/admin/api-keys" replace />} />
+          <Route path="/admin/library" element={<Navigate to="/library" replace />} />
 
           {/* Admin Center — admin-only routed shell with browsable sub-pages */}
           <Route
@@ -82,7 +92,6 @@ function App() {
             <Route path="models" element={<ModelsPage />} />
             <Route path="prompts" element={<PromptsPage />} />
             <Route path="rag" element={<RagPage />} />
-            <Route path="library" element={<LibraryPage />} />
             <Route path="audit" element={<AuditPage />} />
           </Route>
           <Route
