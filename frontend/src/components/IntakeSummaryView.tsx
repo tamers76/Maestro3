@@ -66,26 +66,50 @@ function CollapsibleCard({
   title,
   count,
   defaultOpen = false,
+  highlightWarning = false,
   children,
 }: {
   icon: typeof Target
   title: string
   count?: number
   defaultOpen?: boolean
+  highlightWarning?: boolean
   children: React.ReactNode
 }) {
   return (
-    <Card className="overflow-hidden p-0">
+    <Card
+      className={cn(
+        'overflow-hidden p-0',
+        highlightWarning &&
+          'border-2 border-red-500 ring-2 ring-red-500/70 ring-offset-2 ring-offset-background bg-red-50/40 dark:bg-red-950/10'
+      )}
+    >
       <details className="group" open={defaultOpen}>
         <summary className="flex cursor-pointer select-none list-none items-center gap-2 p-5 [&::-webkit-details-marker]:hidden">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <span
+            className={cn(
+              'flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary',
+              highlightWarning && 'bg-red-500/10 text-red-600 dark:text-red-400'
+            )}
+          >
             <Icon className="h-4 w-4" />
           </span>
-          <h3 className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+          <h3
+            className={cn(
+              'text-xs font-bold uppercase tracking-wide text-muted-foreground',
+              highlightWarning && 'text-red-700 dark:text-red-400'
+            )}
+          >
+            {highlightWarning && <span className="mr-1 text-red-600 dark:text-red-400">*</span>}
             {title}
           </h3>
           {typeof count === 'number' && (
-            <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+            <span
+              className={cn(
+                'rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground',
+                highlightWarning && 'bg-red-500/15 text-red-700 dark:text-red-400'
+              )}
+            >
               {count}
             </span>
           )}
@@ -151,6 +175,9 @@ function ReferencesSection({
   const [input, setInput] = useState('')
   const [saving, setSaving] = useState(false)
   const [ingestedCount, setIngestedCount] = useState(0)
+  // "References required" is driven by grounded docs (uploaded/linked materials),
+  // not by optional free-text citations captured in the intake summary.
+  const hasAtLeastOneReference = ingestedCount > 0
 
   useEffect(() => {
     setItems(references)
@@ -191,7 +218,12 @@ function ReferencesSection({
   }
 
   return (
-    <CollapsibleCard icon={BookMarked} title="References" count={ingestedCount}>
+    <CollapsibleCard
+      icon={BookMarked}
+      title="References"
+      count={ingestedCount}
+      highlightWarning={!hasAtLeastOneReference}
+    >
       {items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No references yet. Add references below — Maestro will use them as source material when
