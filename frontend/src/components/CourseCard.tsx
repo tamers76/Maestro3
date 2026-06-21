@@ -40,7 +40,7 @@ export default function CourseCard({ course, onDelete, onRequestReview, canDelet
             variant="ghost"
             size="icon"
             title="Delete course"
-            className="opacity-100 text-black/40 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 h-9 w-9 -mt-1 -mr-1"
+            className="opacity-0 group-hover:opacity-100 transition-opacity text-black/40 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 h-9 w-9 -mt-1 -mr-1"
             onClick={(e) => {
               e.preventDefault()
               onDelete(course.course_code)

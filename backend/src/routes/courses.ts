@@ -421,10 +421,13 @@ router.post('/form', async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /api/courses/:code - Delete a course (admin only)
-router.delete('/:code', requireRole('admin'), async (req: Request, res: Response) => {
+// DELETE /api/courses/:code - Delete a course (course owner or admin)
+router.delete('/:code', async (req: Request, res: Response) => {
   try {
     const { code } = req.params;
+    if (req.user?.role !== 'admin' && req.courseAccess !== 'owner' && req.courseAccess !== 'admin') {
+      return res.status(403).json({ error: 'Only the course owner or an admin can delete this course' });
+    }
     
     const exists = await neo4j.courseExists(code);
     if (!exists) {

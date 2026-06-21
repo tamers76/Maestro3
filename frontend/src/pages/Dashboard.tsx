@@ -180,7 +180,7 @@ export default function Dashboard() {
     } catch (error) {
       showToast({
         title: 'Error',
-        description: 'Failed to delete course',
+        description: error instanceof Error ? error.message : 'Failed to delete course',
         variant: 'destructive',
       })
     } finally {
