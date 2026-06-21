@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { showToast } from '@/components/ui/Toaster'
 import { cn } from '@/lib/utils'
-import { useRole } from '@/contexts/RoleContext'
+import { useAuth } from '@/contexts/AuthContext'
 import {
   fetchAlignment,
   proposeAlignment,
@@ -184,7 +184,8 @@ export default function ReferenceAlignmentPanel({
   /** When true, render inside Layer 6 without an outer Card wrapper. */
   embedded?: boolean
 }) {
-  const { role } = useRole()
+  const { user } = useAuth()
+  const approverLabel = user ? user.name || user.email : 'unknown'
   const [state, setState] = useState<AlignmentStateSummary | null>(null)
   const [proposal, setProposal] = useState<ReferenceAlignmentArtifact | null>(null)
   const [loading, setLoading] = useState(true)
@@ -315,7 +316,7 @@ export default function ReferenceAlignmentPanel({
   async function handleApprove() {
     try {
       setApproving(true)
-      const result = await approveAlignment(courseCode, role)
+      const result = await approveAlignment(courseCode, approverLabel)
       setProposal(result)
       showToast({
         title: 'Alignment tags activated',

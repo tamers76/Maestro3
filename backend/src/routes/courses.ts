@@ -75,6 +75,9 @@ import type {
   SubtopicCloSection,
 } from '../models/schemas.js';
 import { assertAIConfigured } from '../services/council.service.js';
+import { requireRole, courseAccessParamHandler } from '../auth/middleware.js';
+import * as userRepo from '../db/repos/userRepo.js';
+import { listAccessibleCourseCodes } from '../auth/courseAccess.js';
 import { LEGACY_STAGES_ENABLED, isLegacyStage } from '../config/featureFlags.js';
 import { startStageProgress, completeStageProgress, errorStageProgress } from '../services/progress.service.js';
 import type { 
@@ -108,16 +111,49 @@ const upload = multer({
   }
 });
 
-// GET /api/courses - List all courses
-router.get('/', async (_req: Request, res: Response) => {
+// Curriculum authoring/review is restricted to admins and professors. Students are
+// modeled + assignable but have no authoring access yet (consumption lands later).
+router.use(requireRole('admin', 'professor'));
+
+// Enforce course-scoped access for every route that carries a :code param. Because
+// it is keyed to the param, it never runs for sibling routes like POST /form.
+router.param('code', courseAccessParamHandler);
+
+// GET /api/courses - List courses the caller may access
+router.get('/', async (req: Request, res: Response) => {
   try {
     const courses = await neo4j.getAllCourses();
-    const courseList: CourseListItem[] = courses.map(c => ({
+    let visible = courses;
+    // Per-course relationship for the caller (owner/reviewer/admin).
+    const ownedCodes = new Set<string>();
+    const reviewingCodes = new Set<string>();
+    const isAdmin = req.user?.role === 'admin';
+    // Admins see everything; professors see only owned or review-assigned courses.
+    if (req.user && !isAdmin) {
+      const reviewing = new Set(await listAccessibleCourseCodes(req.user));
+      for (const code of reviewing) reviewingCodes.add(code);
+      const ownerCodes = await Promise.all(
+        courses.map(async (c) =>
+          (await userRepo.getCourseOwner(c.course_code)) === req.user!.id ? c.course_code : null
+        )
+      );
+      for (const code of ownerCodes) if (code) ownedCodes.add(code);
+      const allowed = new Set<string>([...reviewingCodes, ...ownedCodes]);
+      visible = courses.filter((c) => allowed.has(c.course_code));
+    }
+    const courseList: CourseListItem[] = visible.map(c => ({
       course_code: c.course_code,
       title: c.title,
       current_stage: c.current_stage,
       created_at: c.created_at,
-      updated_at: c.updated_at
+      updated_at: c.updated_at,
+      access: isAdmin
+        ? 'admin'
+        : ownedCodes.has(c.course_code)
+        ? 'owner'
+        : reviewingCodes.has(c.course_code)
+        ? 'reviewer'
+        : undefined,
     }));
     res.json(courseList);
   } catch (error) {
@@ -295,7 +331,14 @@ router.post('/', upload.single('file'), async (req: Request, res: Response) => {
     if (!result.success) {
       return res.status(500).json({ error: result.error || result.message });
     }
-    
+
+    // Record course ownership for the creating user (admins create unowned-by-default
+    // courses they always see; professors must own to retain access).
+    const createdCode = (result as { data?: { course_code?: string } }).data?.course_code;
+    if (createdCode && req.user) {
+      await userRepo.setCourseOwner(createdCode, req.user.id);
+    }
+
     res.status(201).json(result);
   } catch (error) {
     console.error('Error creating course:', error);
@@ -343,7 +386,11 @@ router.post('/form', async (req: Request, res: Response) => {
     if (!result.success) {
       return res.status(500).json({ error: result.error || result.message });
     }
-    
+
+    if (req.user) {
+      await userRepo.setCourseOwner(course_code, req.user.id);
+    }
+
     res.status(201).json(result);
   } catch (error) {
     console.error('Error creating course from form:', error);
@@ -353,8 +400,8 @@ router.post('/form', async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /api/courses/:code - Delete a course
-router.delete('/:code', async (req: Request, res: Response) => {
+// DELETE /api/courses/:code - Delete a course (admin only)
+router.delete('/:code', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { code } = req.params;
     

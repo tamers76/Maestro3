@@ -882,6 +882,8 @@ export interface CourseListItem {
   current_stage: StageNumber;
   created_at: string;
   updated_at: string;
+  /** Caller's relationship to this course (set by GET /api/courses). */
+  access?: 'owner' | 'reviewer' | 'admin';
 }
 
 export interface CourseDetail extends Course {

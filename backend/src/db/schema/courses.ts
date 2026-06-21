@@ -9,13 +9,18 @@
 import { pgTable, text, integer, serial, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
 import type { Course, CLO, Topic, LearningNode } from '../../models/schemas.js';
 
-export const courses = pgTable('courses', {
-  courseCode: text('course_code').primaryKey(),
-  currentStage: integer('current_stage').notNull().default(1),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  data: jsonb('data').$type<Course>().notNull(),
-});
+export const courses = pgTable(
+  'courses',
+  {
+    courseCode: text('course_code').primaryKey(),
+    currentStage: integer('current_stage').notNull().default(1),
+    ownerUserId: text('owner_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    data: jsonb('data').$type<Course>().notNull(),
+  },
+  (t) => ({ byOwner: index('courses_owner_idx').on(t.ownerUserId) })
+);
 
 export const clos = pgTable(
   'clos',

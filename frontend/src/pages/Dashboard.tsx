@@ -1,10 +1,23 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import CourseCard from '@/components/CourseCard'
 import { showToast } from '@/components/ui/Toaster'
-import { fetchCourses, deleteCourse, type CourseListItem } from '@/services/api'
-import { Plus, BookOpen, Loader2, Sparkles, TrendingUp, CheckCircle2, Clock, Target, PenTool, Video, Wand2, ClipboardCheck, ChevronRight } from 'lucide-react'
+import {
+  fetchCourses,
+  deleteCourse,
+  listReviewRequests,
+  respondReviewRequest,
+  fetchReviewCandidates,
+  createReviewRequest,
+  avatarSrc,
+  type CourseListItem,
+  type ReviewRequest,
+  type ReviewParty,
+} from '@/services/api'
+import { useAuth } from '@/contexts/AuthContext'
+import { Plus, BookOpen, Loader2, Sparkles, TrendingUp, CheckCircle2, Clock, Target, PenTool, Video, Wand2, ClipboardCheck, ChevronRight, Eye, Inbox, UserPlus, Check, X } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -15,6 +28,8 @@ import {
 } from '@/components/ui/Dialog'
 
 export default function Dashboard() {
+  const { user } = useAuth()
+  const isProfessorOrAdmin = user?.role === 'admin' || user?.role === 'professor'
   const [courses, setCourses] = useState<CourseListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; code: string | null }>({
@@ -26,10 +41,34 @@ export default function Dashboard() {
     open: false,
     capability: null,
   })
-  
+
+  // Incoming peer review requests (professors/admins)
+  const [reviewRequests, setReviewRequests] = useState<ReviewRequest[]>([])
+  const [respondingId, setRespondingId] = useState<string | null>(null)
+
+  // Request-review dialog
+  const [requestDialog, setRequestDialog] = useState<{
+    open: boolean
+    courseCode: string | null
+    candidates: ReviewParty[]
+    loadingCandidates: boolean
+    reviewerId: string
+    message: string
+    submitting: boolean
+  }>({
+    open: false,
+    courseCode: null,
+    candidates: [],
+    loadingCandidates: false,
+    reviewerId: '',
+    message: '',
+    submitting: false,
+  })
+
   useEffect(() => {
     loadCourses()
-  }, [])
+    if (isProfessorOrAdmin) loadReviewRequests()
+  }, [isProfessorOrAdmin])
   
   async function loadCourses() {
     try {
@@ -44,6 +83,85 @@ export default function Dashboard() {
       })
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function loadReviewRequests() {
+    try {
+      const data = await listReviewRequests('incoming')
+      setReviewRequests(data.filter((r) => r.status === 'pending'))
+    } catch {
+      /* non-fatal; panel just stays empty */
+    }
+  }
+
+  async function handleRespond(id: string, action: 'accept' | 'decline') {
+    try {
+      setRespondingId(id)
+      await respondReviewRequest(id, action)
+      setReviewRequests((prev) => prev.filter((r) => r.id !== id))
+      showToast({
+        title: action === 'accept' ? 'Review accepted' : 'Review declined',
+        description:
+          action === 'accept'
+            ? 'The course now appears under "Reviewing".'
+            : 'The request has been declined.',
+      })
+      if (action === 'accept') loadCourses()
+    } catch (error) {
+      showToast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to respond',
+        variant: 'destructive',
+      })
+    } finally {
+      setRespondingId(null)
+    }
+  }
+
+  async function openRequestDialog(courseCode: string) {
+    setRequestDialog({
+      open: true,
+      courseCode,
+      candidates: [],
+      loadingCandidates: true,
+      reviewerId: '',
+      message: '',
+      submitting: false,
+    })
+    try {
+      const candidates = await fetchReviewCandidates(courseCode)
+      setRequestDialog((prev) =>
+        prev.courseCode === courseCode ? { ...prev, candidates, loadingCandidates: false } : prev
+      )
+    } catch (error) {
+      setRequestDialog((prev) => ({ ...prev, loadingCandidates: false }))
+      showToast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to load candidates',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  async function submitReviewRequest() {
+    if (!requestDialog.courseCode || !requestDialog.reviewerId) return
+    try {
+      setRequestDialog((prev) => ({ ...prev, submitting: true }))
+      await createReviewRequest({
+        course_code: requestDialog.courseCode,
+        reviewer_id: requestDialog.reviewerId,
+        message: requestDialog.message.trim() || undefined,
+      })
+      showToast({ title: 'Review requested', description: 'The professor will see your request.' })
+      setRequestDialog((prev) => ({ ...prev, open: false, submitting: false }))
+    } catch (error) {
+      setRequestDialog((prev) => ({ ...prev, submitting: false }))
+      showToast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to send request',
+        variant: 'destructive',
+      })
     }
   }
   
@@ -75,6 +193,9 @@ export default function Dashboard() {
   const completedCourses = courses.filter(c => c.current_stage === 5).length
   const inProgressCourses = courses.filter(c => c.current_stage > 0 && c.current_stage < 5).length
   const notStartedCourses = courses.filter(c => c.current_stage === 0).length
+
+  const reviewingCourses = courses.filter(c => c.access === 'reviewer')
+  const myCourses = courses.filter(c => c.access !== 'reviewer')
   
   const capabilities = [
     {
@@ -188,7 +309,7 @@ export default function Dashboard() {
       <div className="flex items-center justify-between">
         <div>
           <p className="text-base font-medium text-violet-600 dark:text-violet-400">
-            Welcome back, Prof. Ahmed
+            Welcome back{user ? `, ${user.name || user.email}` : ''}
           </p>
           <h1 className="text-3xl font-bold text-black dark:text-foreground mt-1">
             Course Dashboard
@@ -232,48 +353,157 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Course Grid */}
-      <div>
-        <h3 className="text-lg font-bold text-black dark:text-foreground mb-5 flex items-center gap-2.5">
-          <Sparkles className="h-5 w-5 text-violet-500" />
-          Your Courses
-        </h3>
-        
-        {loading ? (
-          <div className="flex h-56 items-center justify-center rounded-2xl bg-white dark:bg-card border border-slate-100 dark:border-border">
-            <div className="flex flex-col items-center gap-4">
-              <Loader2 className="h-9 w-9 animate-spin text-violet-500" />
-              <p className="text-base text-black/50 dark:text-muted-foreground">Loading courses...</p>
-            </div>
-          </div>
-        ) : courses.length === 0 ? (
-          <div className="flex h-56 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 dark:border-border bg-white/50 dark:bg-card/50">
-            <div className="rounded-full bg-violet-100 dark:bg-violet-500/20 p-4">
-              <BookOpen className="h-10 w-10 text-violet-500" />
-            </div>
-            <h3 className="mt-4 text-lg font-bold text-black dark:text-foreground">No courses yet</h3>
-            <p className="mt-1 text-sm text-black/50 dark:text-muted-foreground">
-              Upload a syllabus to get started
-            </p>
-            <Link to="/courses/new" className="mt-4">
-              <Button className="bg-violet-600 hover:bg-violet-700 text-white shadow-md shadow-violet-600/20 rounded-xl text-sm font-semibold px-5 py-2.5 h-auto">
-                <Plus className="mr-2 h-4 w-4" />
-                Create Your First Course
-              </Button>
-            </Link>
-          </div>
-        ) : (
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {courses.map(course => (
-              <CourseCard
-                key={course.course_code}
-                course={course}
-                onDelete={code => setDeleteDialog({ open: true, code })}
-              />
+      {/* Review Requests panel (incoming, pending) */}
+      {isProfessorOrAdmin && reviewRequests.length > 0 && (
+        <div>
+          <h3 className="text-lg font-bold text-black dark:text-foreground mb-5 flex items-center gap-2.5">
+            <Inbox className="h-5 w-5 text-amber-500" />
+            Review Requests
+            <span className="inline-flex items-center justify-center rounded-full bg-amber-100 dark:bg-amber-500/20 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
+              {reviewRequests.length}
+            </span>
+          </h3>
+          <div className="space-y-3">
+            {reviewRequests.map((req) => (
+              <div
+                key={req.id}
+                className="flex flex-col gap-3 rounded-2xl bg-white dark:bg-card border border-slate-100 dark:border-border p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex items-start gap-3 min-w-0">
+                  {avatarSrc(req.requester?.avatar_url) ? (
+                    <img
+                      src={avatarSrc(req.requester?.avatar_url)!}
+                      alt={req.requester?.name || ''}
+                      className="h-10 w-10 flex-shrink-0 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-400">
+                      <UserPlus className="h-5 w-5" />
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-sm text-black dark:text-foreground">
+                      <span className="font-semibold">
+                        {req.requester?.name || req.requester?.email || 'A professor'}
+                      </span>{' '}
+                      asked you to review{' '}
+                      <span className="font-semibold">{req.course_title}</span>
+                      <span className="text-black/50 dark:text-muted-foreground"> ({req.course_code})</span>
+                    </p>
+                    {req.message && (
+                      <p className="mt-1 text-sm text-black/60 dark:text-muted-foreground italic">
+                        "{req.message}"
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-2">
+                  <Button
+                    size="sm"
+                    className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                    disabled={respondingId === req.id}
+                    onClick={() => handleRespond(req.id, 'accept')}
+                  >
+                    {respondingId === req.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Check className="h-4 w-4" />
+                    )}
+                    Accept
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    disabled={respondingId === req.id}
+                    onClick={() => handleRespond(req.id, 'decline')}
+                  >
+                    <X className="h-4 w-4" />
+                    Decline
+                  </Button>
+                </div>
+              </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Course Grid */}
+      {loading ? (
+        <div className="flex h-56 items-center justify-center rounded-2xl bg-white dark:bg-card border border-slate-100 dark:border-border">
+          <div className="flex flex-col items-center gap-4">
+            <Loader2 className="h-9 w-9 animate-spin text-violet-500" />
+            <p className="text-base text-black/50 dark:text-muted-foreground">Loading courses...</p>
+          </div>
+        </div>
+      ) : courses.length === 0 ? (
+        <div className="flex h-56 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 dark:border-border bg-white/50 dark:bg-card/50">
+          <div className="rounded-full bg-violet-100 dark:bg-violet-500/20 p-4">
+            <BookOpen className="h-10 w-10 text-violet-500" />
+          </div>
+          <h3 className="mt-4 text-lg font-bold text-black dark:text-foreground">No courses yet</h3>
+          <p className="mt-1 text-sm text-black/50 dark:text-muted-foreground">
+            Upload a syllabus to get started
+          </p>
+          <Link to="/courses/new" className="mt-4">
+            <Button className="bg-violet-600 hover:bg-violet-700 text-white shadow-md shadow-violet-600/20 rounded-xl text-sm font-semibold px-5 py-2.5 h-auto">
+              <Plus className="mr-2 h-4 w-4" />
+              Create Your First Course
+            </Button>
+          </Link>
+        </div>
+      ) : (
+        <>
+          {/* My Courses (owner/admin/assigned) */}
+          <div>
+            <h3 className="text-lg font-bold text-black dark:text-foreground mb-5 flex items-center gap-2.5">
+              <Sparkles className="h-5 w-5 text-violet-500" />
+              My Courses
+            </h3>
+            {myCourses.length === 0 ? (
+              <p className="text-sm text-black/50 dark:text-muted-foreground">
+                You don't own any courses yet.
+              </p>
+            ) : (
+              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                {myCourses.map(course => (
+                  <CourseCard
+                    key={course.course_code}
+                    course={course}
+                    canDelete={user?.role === 'admin'}
+                    onDelete={code => setDeleteDialog({ open: true, code })}
+                    onRequestReview={
+                      course.access === 'owner' || course.access === 'admin'
+                        ? openRequestDialog
+                        : undefined
+                    }
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Reviewing (review-assigned courses) */}
+          {reviewingCourses.length > 0 && (
+            <div>
+              <h3 className="text-lg font-bold text-black dark:text-foreground mb-5 flex items-center gap-2.5">
+                <Eye className="h-5 w-5 text-amber-500" />
+                Reviewing
+              </h3>
+              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                {reviewingCourses.map(course => (
+                  <CourseCard
+                    key={course.course_code}
+                    course={course}
+                    canDelete={false}
+                    onDelete={code => setDeleteDialog({ open: true, code })}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Platform Capabilities */}
       <div>
@@ -354,6 +584,84 @@ export default function Dashboard() {
         </DialogContent>
       </Dialog>
       
+      {/* Request Review Dialog */}
+      <Dialog
+        open={requestDialog.open}
+        onOpenChange={(open) => setRequestDialog((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-xl">Request a review</DialogTitle>
+            <DialogDescription className="text-base">
+              Ask another professor to review{' '}
+              <strong className="text-foreground">{requestDialog.courseCode}</strong>. They'll be able
+              to accept or decline.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label className="text-caption font-medium text-foreground">Reviewer</label>
+              {requestDialog.loadingCandidates ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading professors...
+                </div>
+              ) : requestDialog.candidates.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No eligible professors available to request.
+                </p>
+              ) : (
+                <select
+                  value={requestDialog.reviewerId}
+                  onChange={(e) => setRequestDialog((prev) => ({ ...prev, reviewerId: e.target.value }))}
+                  className="flex h-11 w-full rounded-md border border-input bg-white/55 dark:bg-white/5 backdrop-blur-md px-4 py-2 text-body text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <option value="">Select a professor…</option>
+                  {requestDialog.candidates.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name ? `${c.name} (${c.email})` : c.email}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-caption font-medium text-foreground">Message (optional)</label>
+              <Input
+                value={requestDialog.message}
+                placeholder="Add a short note…"
+                onChange={(e) => setRequestDialog((prev) => ({ ...prev, message: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRequestDialog((prev) => ({ ...prev, open: false }))}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={submitReviewRequest}
+              disabled={
+                requestDialog.submitting ||
+                !requestDialog.reviewerId ||
+                requestDialog.loadingCandidates
+              }
+            >
+              {requestDialog.submitting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <UserPlus className="mr-2 h-4 w-4" />
+              )}
+              Send request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialog.open} onOpenChange={open => setDeleteDialog({ open, code: deleteDialog.code })}>
         <DialogContent>

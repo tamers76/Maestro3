@@ -18,10 +18,13 @@ export async function ensureSchema(pool: pg.Pool): Promise<void> {
     CREATE TABLE IF NOT EXISTS courses (
       course_code   text PRIMARY KEY,
       current_stage integer NOT NULL DEFAULT 1,
+      owner_user_id text,
       created_at    timestamptz NOT NULL DEFAULT now(),
       updated_at    timestamptz NOT NULL DEFAULT now(),
       data          jsonb NOT NULL
     );
+    ALTER TABLE courses ADD COLUMN IF NOT EXISTS owner_user_id text;
+    CREATE INDEX IF NOT EXISTS courses_owner_idx ON courses (owner_user_id);
 
     CREATE TABLE IF NOT EXISTS clos (
       clo_id      text PRIMARY KEY,
@@ -198,6 +201,61 @@ export async function ensureSchema(pool: pg.Pool): Promise<void> {
       created_at  timestamptz NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS projection_outbox_status_idx ON projection_outbox (status);
+
+    -- ===== Auth: users + course access grants =====
+    CREATE TABLE IF NOT EXISTS users (
+      id            text PRIMARY KEY,
+      email         text NOT NULL,
+      name          text NOT NULL DEFAULT '',
+      role          text NOT NULL DEFAULT 'professor',
+      password_hash text NOT NULL,
+      is_active     boolean NOT NULL DEFAULT true,
+      avatar_path   text,
+      title         text NOT NULL DEFAULT '',
+      department    text NOT NULL DEFAULT '',
+      bio           text NOT NULL DEFAULT '',
+      phone         text NOT NULL DEFAULT '',
+      created_at    timestamptz NOT NULL DEFAULT now(),
+      updated_at    timestamptz NOT NULL DEFAULT now()
+    );
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_path text;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS title      text NOT NULL DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS department text NOT NULL DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS bio        text NOT NULL DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS phone      text NOT NULL DEFAULT '';
+    CREATE UNIQUE INDEX IF NOT EXISTS users_email_uniq ON users (lower(email));
+
+    CREATE TABLE IF NOT EXISTS course_review_assignments (
+      course_code text NOT NULL,
+      professor_id text NOT NULL,
+      assigned_by  text NOT NULL DEFAULT '',
+      assigned_at  timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS course_review_assignment_pk ON course_review_assignments (course_code, professor_id);
+    CREATE INDEX IF NOT EXISTS course_review_assignment_professor_idx ON course_review_assignments (professor_id);
+
+    CREATE TABLE IF NOT EXISTS course_student_assignments (
+      course_code text NOT NULL,
+      student_id  text NOT NULL,
+      assigned_by text NOT NULL DEFAULT '',
+      assigned_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS course_student_assignment_pk ON course_student_assignments (course_code, student_id);
+    CREATE INDEX IF NOT EXISTS course_student_assignment_student_idx ON course_student_assignments (student_id);
+
+    CREATE TABLE IF NOT EXISTS course_review_requests (
+      id           text PRIMARY KEY,
+      course_code  text NOT NULL,
+      requester_id text NOT NULL,
+      reviewer_id  text NOT NULL,
+      status       text NOT NULL DEFAULT 'pending',
+      message      text NOT NULL DEFAULT '',
+      created_at   timestamptz NOT NULL DEFAULT now(),
+      responded_at timestamptz
+    );
+    CREATE INDEX IF NOT EXISTS course_review_request_reviewer_idx ON course_review_requests (reviewer_id);
+    CREATE INDEX IF NOT EXISTS course_review_request_course_idx ON course_review_requests (course_code);
+    CREATE INDEX IF NOT EXISTS course_review_request_requester_idx ON course_review_requests (requester_id);
   `);
 }
 

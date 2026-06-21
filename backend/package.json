@@ -11,15 +11,17 @@
     "db:build-vector-index": "tsx src/db/migrate.ts --vector",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "test": "node --import tsx --test src/node-engine/__tests__/phase0.test.ts src/node-engine/__tests__/stage1Adapter.test.ts src/node-engine/__tests__/nodeGeneration.test.ts src/node-engine/__tests__/nodeEditing.test.ts src/node-engine/__tests__/nodeBlueprint.test.ts src/node-engine/__tests__/contentSpec.test.ts src/node-engine/__tests__/modalityProduction.test.ts src/node-engine/__tests__/videoBriefProduction.test.ts src/node-engine/__tests__/videoRender.test.ts src/node-engine/__tests__/structuredVisual.test.ts src/node-engine/__tests__/referenceGrounding.test.ts src/node-engine/__tests__/referenceQuality.test.ts src/node-engine/__tests__/nodeReviewTriage.test.ts src/node-engine/__tests__/referenceAnchoringV1.test.ts src/node-engine/__tests__/referenceCoverage.test.ts src/node-engine/__tests__/referenceSourceSuggestion.test.ts src/node-engine/__tests__/referenceRepo.pgvector.test.ts src/node-engine/__tests__/outboxRepo.poison.test.ts src/services/__tests__/referenceJudgment.test.ts"
+    "test": "node --import tsx --test src/node-engine/__tests__/phase0.test.ts src/node-engine/__tests__/stage1Adapter.test.ts src/node-engine/__tests__/nodeGeneration.test.ts src/node-engine/__tests__/nodeEditing.test.ts src/node-engine/__tests__/nodeBlueprint.test.ts src/node-engine/__tests__/contentSpec.test.ts src/node-engine/__tests__/modalityProduction.test.ts src/node-engine/__tests__/videoBriefProduction.test.ts src/node-engine/__tests__/videoRender.test.ts src/node-engine/__tests__/structuredVisual.test.ts src/node-engine/__tests__/referenceGrounding.test.ts src/node-engine/__tests__/referenceQuality.test.ts src/node-engine/__tests__/nodeReviewTriage.test.ts src/node-engine/__tests__/referenceAnchoringV1.test.ts src/node-engine/__tests__/referenceCoverage.test.ts src/node-engine/__tests__/referenceSourceSuggestion.test.ts src/node-engine/__tests__/referenceRepo.pgvector.test.ts src/node-engine/__tests__/outboxRepo.poison.test.ts src/services/__tests__/referenceJudgment.test.ts src/auth/__tests__/authToken.test.ts src/auth/__tests__/courseAccess.test.ts src/auth/__tests__/reviewRequests.test.ts"
   },
   "dependencies": {
     "archiver": "^7.0.0",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.45.2",
     "express": "^4.18.2",
     "html-to-docx": "^1.8.0",
+    "jsonwebtoken": "^9.0.3",
     "mammoth": "^1.6.0",
     "marked": "^12.0.0",
     "multer": "^1.4.5-lts.1",
@@ -31,8 +33,10 @@
   },
   "devDependencies": {
     "@types/archiver": "^6.0.2",
+    "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^1.4.11",
     "@types/node": "^20.11.0",
     "@types/pg": "^8.20.0",

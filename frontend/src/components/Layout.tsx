@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import {
   Settings,
@@ -10,26 +10,51 @@ import {
   ChevronRight,
   Moon,
   Sun,
+  Users,
+  LogOut,
+  User as UserIcon,
 } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
+import { useAuth } from '@/contexts/AuthContext'
+import { avatarSrc } from '@/services/api'
 
 interface LayoutProps {
   children: React.ReactNode
 }
 
+const ROLE_LABELS: Record<string, string> = {
+  admin: 'Administrator',
+  professor: 'Professor',
+  student: 'Student',
+}
+
 export default function Layout({ children }: LayoutProps) {
   const location = useLocation()
+  const navigate = useNavigate()
   const { theme, toggleTheme } = useTheme()
+  const { user, logout } = useAuth()
   const [collapsed, setCollapsed] = useState(false)
+
+  const canAuthor = user?.role === 'admin' || user?.role === 'professor'
 
   const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    { path: '/courses/new', icon: Plus, label: 'New Course' },
+    ...(canAuthor ? [{ path: '/courses/new', icon: Plus, label: 'New Course' }] : []),
   ]
 
   const secondaryNavItems = [
-    { path: '/settings', icon: Settings, label: 'Settings' },
+    ...(user?.role === 'admin'
+      ? [
+          { path: '/admin/users', icon: Users, label: 'Users' },
+          { path: '/settings', icon: Settings, label: 'Settings' },
+        ]
+      : []),
   ]
+
+  function handleLogout() {
+    logout()
+    navigate('/login', { replace: true })
+  }
 
   return (
     <div className="flex min-h-screen">
@@ -105,6 +130,8 @@ export default function Layout({ children }: LayoutProps) {
             })}
           </nav>
 
+          {secondaryNavItems.length > 0 && (
+          <>
           <div className="my-4 border-t border-white/10" />
 
           {!collapsed && (
@@ -134,9 +161,52 @@ export default function Layout({ children }: LayoutProps) {
               )
             })}
           </nav>
+          </>
+          )}
         </div>
 
         <div className="border-t border-white/10 p-2 space-y-0.5">
+          {user && (
+            <Link
+              to="/profile"
+              className={cn(
+                'flex items-center gap-2.5 rounded-sm px-3 py-2.5 text-caption transition-colors w-full active:scale-[0.98]',
+                location.pathname === '/profile'
+                  ? 'bg-white/15 text-white'
+                  : 'text-white/70 hover:bg-white/10 hover:text-white',
+                collapsed && 'justify-center px-2'
+              )}
+              title={collapsed ? 'Profile' : undefined}
+            >
+              {avatarSrc(user.avatar_url) ? (
+                <img
+                  src={avatarSrc(user.avatar_url)!}
+                  alt={user.name || user.email}
+                  className="h-5 w-5 flex-shrink-0 rounded-full object-cover"
+                />
+              ) : (
+                <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-white/15">
+                  <UserIcon className="h-3 w-3" />
+                </span>
+              )}
+              {!collapsed && (
+                <span className="truncate">{user.name || user.email}</span>
+              )}
+            </Link>
+          )}
+          {user && (
+            <button
+              onClick={handleLogout}
+              className={cn(
+                'flex items-center gap-2.5 rounded-sm px-3 py-2.5 text-caption text-white/70 hover:bg-white/10 hover:text-white transition-colors w-full active:scale-[0.98]',
+                collapsed && 'justify-center px-2'
+              )}
+              title={collapsed ? 'Sign out' : undefined}
+            >
+              <LogOut className="h-4 w-4 flex-shrink-0" />
+              {!collapsed && <span>Sign out</span>}
+            </button>
+          )}
           <button
             onClick={toggleTheme}
             className={cn(
@@ -191,9 +261,30 @@ export default function Layout({ children }: LayoutProps) {
               className="h-8 object-contain"
             />
           </div>
-          <p className="text-caption text-muted-foreground hidden sm:block">
-            Adaptive Curriculum Intelligence v3.1.1
-          </p>
+          <div className="flex items-center gap-4">
+            <p className="text-caption text-muted-foreground hidden sm:block">
+              Adaptive Curriculum Intelligence v3.1.1
+            </p>
+            {user && (
+              <div className="flex items-center gap-3">
+                <div className="hidden text-right sm:block">
+                  <p className="text-caption font-medium text-foreground leading-tight">
+                    {user.name || user.email}
+                  </p>
+                  <p className="text-fine-print text-muted-foreground leading-tight">
+                    {ROLE_LABELS[user.role] || user.role}
+                  </p>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  title="Sign out"
+                  className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          </div>
         </header>
 
         <main className="flex-1 p-6 md:p-8 relative z-10 max-w-content mx-auto w-full">

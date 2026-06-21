@@ -17,6 +17,7 @@ import {
     type TargetAndTransition,
     type Variants,
 } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
 
 function cn(...classes: (string | undefined | null | boolean)[]): string {
   return classes.filter(Boolean).join(" ");
@@ -274,6 +275,7 @@ interface Dot {
 }
 
 const InteractiveHero: React.FC = () => {
+   const { user } = useAuth();
    const canvasRef = useRef<HTMLCanvasElement>(null);
    const animationFrameId = useRef<number | null>(null);
 
@@ -552,22 +554,13 @@ const InteractiveHero: React.FC = () => {
                 className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full max-w-md mx-auto mb-10"
             >
                 <motion.a
-                    href="/courses/new"
+                    href={user ? '/dashboard' : '/login'}
                     className="w-full sm:w-auto bg-[#024ad8] text-white px-6 py-3 rounded-md text-sm font-semibold uppercase tracking-wide hover:bg-[#0e3191] transition-colors duration-200 whitespace-nowrap text-center min-h-[44px] inline-flex items-center justify-center"
                     whileHover={{ scale: 1.03, y: -1 }}
                     whileTap={{ scale: 0.97 }}
                     transition={{ type: "spring", stiffness: 400, damping: 15 }}
                 >
-                    Create a new course
-                </motion.a>
-                <motion.a
-                    href="/dashboard"
-                    className="w-full sm:w-auto bg-white text-[#024ad8] border border-[#024ad8] px-6 py-3 rounded-md text-sm font-semibold uppercase tracking-wide hover:bg-[#eef4ff] transition-colors duration-200 whitespace-nowrap text-center min-h-[44px] inline-flex items-center justify-center"
-                    whileHover={{ scale: 1.03, y: -1 }}
-                    whileTap={{ scale: 0.97 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 15 }}
-                >
-                    Go to dashboard
+                    {user ? 'Go to dashboard' : 'Sign in'}
                 </motion.a>
             </motion.div>
 

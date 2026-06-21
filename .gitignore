@@ -29,6 +29,7 @@ tools/
 
 # Runtime data
 data/courses/
+data/avatars/
 
 # Local dev infrastructure (PostgreSQL install, pgdata, pgvector binaries)
 .local/

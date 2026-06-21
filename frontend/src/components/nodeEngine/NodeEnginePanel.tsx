@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import { showToast } from '@/components/ui/Toaster'
 import { cn } from '@/lib/utils'
-import { useRole } from '@/contexts/RoleContext'
+import { useAuth } from '@/contexts/AuthContext'
 import {
   approveNodeSet,
   fetchAlignment,
@@ -142,7 +142,7 @@ export default function NodeEnginePanel({
   /** Wizard mode: forward navigation routes instead of expanding in-place. */
   onNavigateLayer?: (layer: number) => void
 }) {
-  const { role } = useRole()
+  const { user } = useAuth()
 
   const [arch, setArch] = useState<SubtopicArchitectureResponse | null>(null)
   const [archLoading, setArchLoading] = useState(true)
@@ -190,7 +190,7 @@ export default function NodeEnginePanel({
   const [producedHydrating, setProducedHydrating] = useState(false)
   const [producingTextCloId, setProducingTextCloId] = useState<string | null>(null)
 
-  const approverLabel = role === 'sme' ? 'SME' : role === 'admin' ? 'Admin' : 'Author'
+  const approverLabel = user ? user.name || user.email : 'unknown'
 
   const cloGroups = useMemo(() => buildCloGroups(arch), [arch])
 
@@ -807,7 +807,7 @@ export default function NodeEnginePanel({
         const ns = nodeSetsBySubtopicId[st.subtopic_id]
         if (!ns || ns.status === 'approved') continue
         try {
-          const result = await approveNodeSet(courseCode, st.subtopic_id, { approver: role })
+          const result = await approveNodeSet(courseCode, st.subtopic_id, { approver: approverLabel })
           latestSets[st.subtopic_id] = result
           setNodeSetsBySubtopicId((prev) => ({ ...prev, [st.subtopic_id]: result }))
         } catch (error) {
@@ -829,7 +829,7 @@ export default function NodeEnginePanel({
           for (const id of needOverride) {
             try {
               const result = await approveNodeSet(courseCode, id, {
-                approver: role,
+                approver: approverLabel,
                 overrideReason: reason.trim(),
               })
               latestSets[id] = result

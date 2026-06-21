@@ -1,4 +1,277 @@
+import { withAccessToken } from './authToken';
+
 const API_BASE = '/api';
+
+// ============================================================================
+// Auth + Users (RBAC)
+// ============================================================================
+
+export type UserRole = 'admin' | 'professor' | 'student';
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  title?: string;
+  department?: string;
+  bio?: string;
+  phone?: string;
+  avatar_url?: string | null;
+}
+
+export interface ManagedUser extends AuthUser {
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LoginResult {
+  token: string;
+  user: AuthUser;
+}
+
+export async function login(email: string, password: string): Promise<LoginResult> {
+  const response = await fetch(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Login failed');
+  return data as LoginResult;
+}
+
+export async function fetchMe(): Promise<AuthUser> {
+  const response = await fetch(`${API_BASE}/auth/me`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to load profile');
+  return data.user as AuthUser;
+}
+
+// ============================================================================
+// Self-service profile
+// ============================================================================
+
+export interface ProfileUpdate {
+  name?: string;
+  email?: string;
+  title?: string;
+  department?: string;
+  bio?: string;
+  phone?: string;
+}
+
+export async function updateProfile(patch: ProfileUpdate): Promise<AuthUser> {
+  const response = await fetch(`${API_BASE}/auth/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to update profile');
+  return data.user as AuthUser;
+}
+
+export async function uploadAvatar(file: File): Promise<AuthUser> {
+  const form = new FormData();
+  form.append('avatar', file);
+  const response = await fetch(`${API_BASE}/auth/avatar`, { method: 'POST', body: form });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to upload avatar');
+  return data.user as AuthUser;
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/auth/password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to change password');
+}
+
+/** Resolve a user's avatar URL into an authenticated, loadable <img> src. */
+export function avatarSrc(avatarUrl?: string | null): string | null {
+  if (!avatarUrl) return null;
+  return withAccessToken(avatarUrl);
+}
+
+// ============================================================================
+// Peer-to-peer review requests
+// ============================================================================
+
+export interface ReviewParty {
+  id: string;
+  name: string;
+  email: string;
+  avatar_url: string | null;
+}
+
+export interface ReviewRequest {
+  id: string;
+  course_code: string;
+  course_title: string;
+  requester_id: string;
+  reviewer_id: string;
+  status: 'pending' | 'accepted' | 'declined';
+  message: string;
+  created_at: string;
+  responded_at: string | null;
+  requester?: ReviewParty | null;
+  reviewer?: ReviewParty | null;
+}
+
+export async function listReviewRequests(
+  direction: 'incoming' | 'outgoing'
+): Promise<ReviewRequest[]> {
+  const response = await fetch(`${API_BASE}/review-requests?direction=${direction}`);
+  const data = await response.json().catch(() => ([]));
+  if (!response.ok) throw new Error((data as any).error || 'Failed to load review requests');
+  return data as ReviewRequest[];
+}
+
+export async function createReviewRequest(input: {
+  course_code: string;
+  reviewer_id: string;
+  message?: string;
+}): Promise<ReviewRequest> {
+  const response = await fetch(`${API_BASE}/review-requests`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to create review request');
+  return data as ReviewRequest;
+}
+
+export async function respondReviewRequest(
+  id: string,
+  action: 'accept' | 'decline'
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/review-requests/${encodeURIComponent(id)}/respond`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to respond to review request');
+}
+
+export async function fetchReviewCandidates(courseCode: string): Promise<ReviewParty[]> {
+  const response = await fetch(
+    `${API_BASE}/review-requests/candidates?course_code=${encodeURIComponent(courseCode)}`
+  );
+  const data = await response.json().catch(() => ([]));
+  if (!response.ok) throw new Error((data as any).error || 'Failed to load candidates');
+  return data as ReviewParty[];
+}
+
+export async function listUsers(): Promise<ManagedUser[]> {
+  const response = await fetch(`${API_BASE}/users`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to list users');
+  return data.users as ManagedUser[];
+}
+
+export async function createUser(input: {
+  email: string;
+  name: string;
+  password: string;
+  role: UserRole;
+}): Promise<ManagedUser> {
+  const response = await fetch(`${API_BASE}/users`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to create user');
+  return data.user as ManagedUser;
+}
+
+export async function setUserActive(id: string, isActive: boolean): Promise<void> {
+  const response = await fetch(`${API_BASE}/users/${encodeURIComponent(id)}/active`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_active: isActive }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to update user');
+}
+
+export async function resetUserPassword(id: string, password: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/users/${encodeURIComponent(id)}/password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to reset password');
+}
+
+export interface CourseAccess {
+  owner_user_id: string | null;
+  reviewer_ids: string[];
+  student_ids: string[];
+}
+
+export async function fetchCourseAccess(code: string): Promise<CourseAccess> {
+  const response = await fetch(`${API_BASE}/users/courses/${encodeURIComponent(code)}/access`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to load course access');
+  return data as CourseAccess;
+}
+
+export async function setCourseOwner(code: string, ownerUserId: string | null): Promise<void> {
+  const response = await fetch(`${API_BASE}/users/courses/${encodeURIComponent(code)}/owner`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ owner_user_id: ownerUserId }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to set course owner');
+}
+
+export async function assignReviewer(code: string, professorId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/users/courses/${encodeURIComponent(code)}/reviewers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ professor_id: professorId }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to assign reviewer');
+}
+
+export async function removeReviewer(code: string, professorId: string): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/users/courses/${encodeURIComponent(code)}/reviewers/${encodeURIComponent(professorId)}`,
+    { method: 'DELETE' }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to remove reviewer');
+}
+
+export async function assignStudent(code: string, studentId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/users/courses/${encodeURIComponent(code)}/students`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ student_id: studentId }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to assign student');
+}
+
+export async function removeStudent(code: string, studentId: string): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/users/courses/${encodeURIComponent(code)}/students/${encodeURIComponent(studentId)}`,
+    { method: 'DELETE' }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to remove student');
+}
 
 // Types
 export interface CourseListItem {
@@ -7,6 +280,7 @@ export interface CourseListItem {
   current_stage: number;
   created_at: string;
   updated_at: string;
+  access?: 'owner' | 'reviewer' | 'admin';
 }
 
 export interface CLO {
@@ -1787,7 +2061,9 @@ export function subscribeToProgress(
   onError?: (error: Event) => void
 ): Promise<() => void> {
   return new Promise((resolve) => {
-    const eventSource = new EventSource(`${API_BASE}/courses/${encodeURIComponent(code)}/progress/stream`);
+    const eventSource = new EventSource(
+      withAccessToken(`${API_BASE}/courses/${encodeURIComponent(code)}/progress/stream`)
+    );
     
     eventSource.onopen = () => {
       console.log('SSE connection established for course:', code);
@@ -4088,7 +4364,9 @@ export async function refreshVideoRender(
 
 /** In-app stream URL for a Maestro-ingested produced video (SME review). */
 export function producedVideoStreamUrl(courseCode: string, objectId: string): string {
-  return `${API_BASE}/node-engine/courses/${encodeURIComponent(courseCode)}/objects/${encodeURIComponent(objectId)}/video`;
+  return withAccessToken(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(courseCode)}/objects/${encodeURIComponent(objectId)}/video`
+  );
 }
 
 export async function hydrateProducedObjects(

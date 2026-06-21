@@ -37,6 +37,11 @@ import coursesRouter from './routes/courses.js';
 import settingsRouter from './routes/settings.js';
 import referencesRouter from './routes/references.js';
 import nodeEngineRouter from './routes/nodeEngine.js';
+import authRouter from './routes/auth.js';
+import usersRouter from './routes/users.js';
+import reviewRequestsRouter from './routes/reviewRequests.js';
+import { requireAuth, requireRole } from './auth/middleware.js';
+import { seedAdminUser, seedDevUsers } from './auth/seed.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -47,10 +52,16 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Routes
-app.use('/api/courses', coursesRouter);
-app.use('/api/courses', referencesRouter);
-app.use('/api/settings', settingsRouter);
-app.use('/api/node-engine', nodeEngineRouter);
+// Auth endpoints (login is public; /me self-guards). User management self-guards admin.
+app.use('/api/auth', authRouter);
+app.use('/api/users', usersRouter);
+app.use('/api/review-requests', requireAuth, requireRole('admin', 'professor'), reviewRequestsRouter);
+// All curriculum APIs require an authenticated user; finer-grained role and
+// course-scoped checks are enforced inside each router.
+app.use('/api/courses', requireAuth, coursesRouter);
+app.use('/api/courses', requireAuth, referencesRouter);
+app.use('/api/settings', requireAuth, requireRole('admin'), settingsRouter);
+app.use('/api/node-engine', requireAuth, nodeEngineRouter);
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -96,6 +107,8 @@ async function start() {
     await pool.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
     await ensureSchema(pool);
     console.log('[Startup] Postgres connected and schema ensured.');
+    await seedAdminUser();
+    await seedDevUsers();
   } catch (error) {
     console.error(
       '[Startup] FATAL: Postgres is required but could not be initialized.',

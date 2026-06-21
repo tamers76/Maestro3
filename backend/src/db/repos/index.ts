@@ -10,5 +10,7 @@ export * as artifactRepo from './artifactRepo.js';
 export * as blobRepo from './blobRepo.js';
 export * as configRepo from './configRepo.js';
 export * as outboxRepo from './outboxRepo.js';
+export * as userRepo from './userRepo.js';
+export * as reviewRequestRepo from './reviewRequestRepo.js';
 export { withTx, exec } from './_exec.js';
 export type { Executor, Tx } from './_exec.js';

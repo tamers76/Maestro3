@@ -31,8 +31,14 @@ import {
   recomputeCoverageWithDelta,
 } from '../services/referenceCoverage.service.js';
 import { suggestSourcesForClo } from '../services/referenceSourceSuggestion.service.js';
+import { requireRole, courseAccessParamHandler } from '../auth/middleware.js';
 
 const router = Router();
+
+// Reference ingestion/RAG is authoring work: admins + professors only, scoped to
+// courses the caller can access.
+router.use(requireRole('admin', 'professor'));
+router.param('code', courseAccessParamHandler);
 
 const upload = multer({
   storage: multer.memoryStorage(),

@@ -112,8 +112,15 @@ import {
   getActiveNodeGenerationPrompt,
   updateNodeGenerationPrompt,
 } from '../node-engine/nodeGenerationPrompt.service.js';
+import { requireRole, courseAccessParamHandler } from '../auth/middleware.js';
 
 const router = Router();
+
+// Node engine is authoring work: admins + professors only. Global config editing is
+// further restricted to admins per-route; course-scoped routes are access-checked
+// via the :courseCode param handler below.
+router.use(requireRole('admin', 'professor'));
+router.param('courseCode', courseAccessParamHandler);
 
 // GET /api/node-engine/status
 router.get('/status', (_req: Request, res: Response) => {
@@ -160,7 +167,7 @@ router.get('/prompt-templates/:id', (req: Request, res: Response) => {
 });
 
 // PUT /api/node-engine/prompt-templates/:id — edit appends a new version
-router.put('/prompt-templates/:id', async (req: Request, res: Response) => {
+router.put('/prompt-templates/:id', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { task_prompt, output_schema_ref, member_system_prompt, chairman_system_prompt, status, last_updated_by, change_note } =
       req.body as Record<string, unknown>;
@@ -243,7 +250,7 @@ router.get('/modality-config/:vehicle', (req: Request, res: Response) => {
 });
 
 // PUT /api/node-engine/modality-config/:vehicle — update model/generation settings only
-router.put('/modality-config/:vehicle', async (req: Request, res: Response) => {
+router.put('/modality-config/:vehicle', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const vehicle: Vehicle = assertEnum(VEHICLES, req.params.vehicle, 'vehicle');
     const body = req.body as Record<string, unknown>;
@@ -493,7 +500,7 @@ router.get('/reference-coverage-config', (_req: Request, res: Response) => {
 });
 
 // PUT /api/node-engine/reference-coverage-config — update the numeric thresholds
-router.put('/reference-coverage-config', async (req: Request, res: Response) => {
+router.put('/reference-coverage-config', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const body = (req.body ?? {}) as Record<string, unknown>;
     // Accept either { thresholds: {...} } or the four fields at the top level.
@@ -534,7 +541,7 @@ router.get('/node-generation-prompt', (_req: Request, res: Response) => {
 });
 
 // PUT /api/node-engine/node-generation-prompt — edit appends a new version (D3)
-router.put('/node-generation-prompt', async (req: Request, res: Response) => {
+router.put('/node-generation-prompt', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { system_prompt, task_prompt, output_schema_ref, last_updated_by, change_note } =
       req.body as Record<string, unknown>;
