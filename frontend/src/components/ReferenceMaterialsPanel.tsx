@@ -171,13 +171,39 @@ export default function ReferenceMaterialsPanel({
       )
       unsubscribe = await subscribeToCourseIngestion(courseCode, upsertJob)
 
-      const results = await runSettledWithConcurrency(jobs, UPLOAD_CONCURRENCY, ({ file, jobId }) =>
-        uploadReference(courseCode, file, {
-          title: singleFileTitle,
-          source_type: sourceType,
-          job_id: jobId,
-        })
-      )
+      // Drive the Waiting -> Ingesting -> Ingested flow from the sequential queue
+      // itself so the activity indicator is reliable even if the live SSE stream
+      // isn't available; SSE updates (passage counts, phases) just enrich it.
+      const results = await runSettledWithConcurrency(jobs, UPLOAD_CONCURRENCY, async ({ file, jobId }) => {
+        upsertJob({ jobId, phase: 'extracting', status: 'running', percent: 0, filename: file.name })
+        try {
+          const doc = await uploadReference(courseCode, file, {
+            title: singleFileTitle,
+            source_type: sourceType,
+            job_id: jobId,
+          })
+          upsertJob({
+            jobId,
+            phase: 'done',
+            status: 'completed',
+            percent: 100,
+            filename: file.name,
+            docTitle: doc.title,
+            chunkCount: doc.chunk_count,
+          })
+          return doc
+        } catch (err) {
+          upsertJob({
+            jobId,
+            phase: 'error',
+            status: 'error',
+            percent: 0,
+            filename: file.name,
+            error: err instanceof Error ? err.message : 'Failed to ingest',
+          })
+          throw err
+        }
+      })
       const successes = results.filter(
         (r): r is PromiseFulfilledResult<ReferenceDocument> => r.status === 'fulfilled'
       )
@@ -241,9 +267,19 @@ export default function ReferenceMaterialsPanel({
       ])
       unsubscribe = await subscribeToCourseIngestion(courseCode, upsertJob)
 
+      upsertJob({ jobId, phase: 'fetching', status: 'running', percent: 0, filename: url })
       const doc = await uploadReferenceFromLink(courseCode, url, {
         source_type: sourceType,
         job_id: jobId,
+      })
+      upsertJob({
+        jobId,
+        phase: 'done',
+        status: 'completed',
+        percent: 100,
+        filename: url,
+        docTitle: doc.title,
+        chunkCount: doc.chunk_count,
       })
       showToast({
         title: 'Reference ingested',
@@ -254,6 +290,14 @@ export default function ReferenceMaterialsPanel({
       await load()
       onReferenceUploaded?.()
     } catch (error) {
+      upsertJob({
+        jobId,
+        phase: 'error',
+        status: 'error',
+        percent: 0,
+        filename: url,
+        error: error instanceof Error ? error.message : 'Failed to ingest reference link',
+      })
       showToast({
         title: 'Link ingest failed',
         description: error instanceof Error ? error.message : 'Failed to ingest reference link',
