@@ -1,0 +1,5 @@
+* text=auto
+
+# Shell scripts must always use LF so they run on the Linux VM regardless of the
+# committer's OS (Windows checkouts would otherwise introduce CRLF and break bash).
+*.sh text eol=lf
