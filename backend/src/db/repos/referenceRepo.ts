@@ -26,6 +26,45 @@ function toVectorLiteral(vec: number[]): string {
   return `[${vec.join(',')}]`;
 }
 
+/**
+ * `hnsw.iterative_scan` was introduced in pgvector 0.8.0. Older installs (e.g.
+ * some managed Azure Postgres images) reject `SET LOCAL hnsw.iterative_scan`,
+ * which aborts the whole search transaction. We probe the installed extension
+ * version once and cache it, then only enable iterative scans when supported.
+ */
+let iterativeScanSupported: boolean | null = null;
+
+function compareSemver(a: string, b: string): number {
+  const pa = a.split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = b.split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+async function supportsIterativeScan(): Promise<boolean> {
+  if (iterativeScanSupported !== null) return iterativeScanSupported;
+  try {
+    const res = await getDb().execute(
+      sql`SELECT extversion FROM pg_extension WHERE extname = 'vector'`
+    );
+    const rows = (res as unknown as { rows: Array<{ extversion?: string }> }).rows ?? [];
+    const version = rows[0]?.extversion;
+    iterativeScanSupported = !!version && compareSemver(version, '0.8.0') >= 0;
+    if (!iterativeScanSupported) {
+      console.warn(
+        `[referenceRepo] pgvector ${version ?? 'unknown'} does not support hnsw.iterative_scan (needs >= 0.8.0); scoped retrieval may under-return for highly selective filters.`
+      );
+    }
+  } catch (err) {
+    console.warn('[referenceRepo] could not detect pgvector version; assuming no iterative_scan support:', err);
+    iterativeScanSupported = false;
+  }
+  return iterativeScanSupported;
+}
+
 // ---- Documents ----
 
 export async function saveDocument(doc: ReferenceDocument, docText?: string, tx?: Executor): Promise<void> {
@@ -179,8 +218,11 @@ export async function searchByVector(
 ): Promise<{ chunk_id: string; score: number }[]> {
   if (queryVector.length === 0) return [];
   const vec = toVectorLiteral(queryVector);
+  const iterativeScan = await supportsIterativeScan();
   return getDb().transaction(async (tx) => {
-    await tx.execute(sql`SET LOCAL hnsw.iterative_scan = strict_order`);
+    if (iterativeScan) {
+      await tx.execute(sql`SET LOCAL hnsw.iterative_scan = strict_order`);
+    }
     await tx.execute(sql.raw(`SET LOCAL hnsw.ef_search = ${Math.max(1, Math.floor(EF_SEARCH))}`));
 
     const conds = [sql`course_code = ${courseCode}`, sql`embedding IS NOT NULL`];
