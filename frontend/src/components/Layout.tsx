@@ -261,7 +261,7 @@ export default function Layout({ children }: LayoutProps) {
           </div>
           <div className="flex items-center gap-4">
             <p className="text-caption text-muted-foreground hidden sm:block">
-              Adaptive Curriculum Intelligence v3.5.8
+              Adaptive Curriculum Intelligence v2.5.8
             </p>
             {user && (
               <div className="flex items-center gap-3">

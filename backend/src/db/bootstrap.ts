@@ -283,6 +283,10 @@ export async function ensureSchema(pool: pg.Pool): Promise<void> {
       created_at    timestamptz NOT NULL DEFAULT now(),
       updated_at    timestamptz NOT NULL DEFAULT now()
     );
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS name          text NOT NULL DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS role          text NOT NULL DEFAULT 'professor';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash text NOT NULL DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active     boolean NOT NULL DEFAULT true;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_path text;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS title      text NOT NULL DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS department text NOT NULL DEFAULT '';

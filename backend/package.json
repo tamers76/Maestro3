@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "db:migrate": "tsx src/db/migrate.ts --verify",
+    "db:seed": "tsx src/db/seed.ts",
     "db:build-vector-index": "tsx src/db/migrate.ts --vector",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",

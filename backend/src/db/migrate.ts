@@ -11,9 +11,9 @@ import { join } from 'path';
 import { existsSync } from 'fs';
 import pg from 'pg';
 import { getPostgresConfig } from '../config.js';
+import { initPostgres, closePostgres, getPool } from './client.js';
 import { ensureSchema, buildVectorIndex, hasVectorIndex } from './bootstrap.js';
-
-const { Pool } = pg;
+import { seedUsers } from './seedUsers.js';
 
 async function verify(pool: pg.Pool, schema: string): Promise<void> {
   const ext = await pool.query(`SELECT extversion FROM pg_extension WHERE extname = 'vector'`);
@@ -35,14 +35,19 @@ async function main(): Promise<void> {
   const envPath = join(process.cwd(), '..', '.env');
   if (existsSync(envPath)) dotenvConfig({ path: envPath });
 
-  const { connectionString, max, schema, options } = getPostgresConfig();
-  const pool = new Pool({ connectionString, max, options });
+  const { schema } = getPostgresConfig();
+  await initPostgres();
+  const pool = getPool()!;
   try {
     console.log(`[migrate] target schema: ${schema}`);
     await pool.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
     console.log('[migrate] ensuring schema...');
     await ensureSchema(pool);
     console.log('[migrate] schema ensured.');
+
+    console.log('[migrate] seeding users...');
+    await seedUsers();
+    console.log('[migrate] user seeding complete.');
 
     if (process.argv.includes('--vector')) {
       console.log('[migrate] building HNSW vector index (post-load)...');
@@ -53,7 +58,7 @@ async function main(): Promise<void> {
       await verify(pool, schema);
     }
   } finally {
-    await pool.end();
+    await closePostgres();
   }
 }
 
