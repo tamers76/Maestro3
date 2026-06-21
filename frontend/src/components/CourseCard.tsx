@@ -14,6 +14,13 @@ interface CourseCardProps {
 
 export default function CourseCard({ course, onDelete, onRequestReview, canDelete = true }: CourseCardProps) {
   const isReviewing = course.access === 'reviewer'
+  const ownerDisplay =
+    course.owner_name ||
+    course.owner_email ||
+    (course.access === 'owner' ? 'You' : course.owner_user_id || 'Unassigned')
+  const reviewerNames = (course.reviewers ?? [])
+    .map((r) => r.name || r.email || r.user_id)
+    .filter(Boolean) as string[]
   return (
     <div className="group relative rounded-2xl bg-white dark:bg-card border border-slate-100 dark:border-border p-6 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden">
       {/* Top accent bar */}
@@ -35,7 +42,19 @@ export default function CourseCard({ course, onDelete, onRequestReview, canDelet
             {course.title}
           </h3>
           <p className="mt-1 text-xs text-black/55 dark:text-muted-foreground">
-            Owner: {course.owner_name || course.owner_email || 'Unassigned'}
+            Owner: <span className="font-semibold text-black/75 dark:text-foreground/90">{ownerDisplay}</span>
+          </p>
+          <p className="mt-0.5 text-xs text-black/55 dark:text-muted-foreground">
+            {reviewerNames.length > 0 ? (
+              <>
+                Reviewers:{' '}
+                <span className="font-semibold text-black/75 dark:text-foreground/90">
+                  {reviewerNames.join(', ')}
+                </span>
+              </>
+            ) : (
+              <>Reviewers: <span className="text-black/45 dark:text-muted-foreground/80">None</span></>
+            )}
           </p>
         </div>
         {canDelete && (

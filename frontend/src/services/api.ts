@@ -284,6 +284,13 @@ export interface CourseListItem {
   owner_user_id?: string | null;
   owner_name?: string | null;
   owner_email?: string | null;
+  reviewers?: CourseParticipant[];
+}
+
+export interface CourseParticipant {
+  user_id: string;
+  name: string | null;
+  email: string | null;
 }
 
 export interface CLO {

@@ -82,7 +82,7 @@ import { listAccessibleCourseCodes } from '../auth/courseAccess.js';
 import { LEGACY_STAGES_ENABLED, isLegacyStage } from '../config/featureFlags.js';
 import { startStageProgress, completeStageProgress, errorStageProgress } from '../services/progress.service.js';
 import type { 
-  CourseListItem, StageNumber, StageExecutionMode, Stage4Options,
+  CourseListItem, CourseParticipant, StageNumber, StageExecutionMode, Stage4Options,
   CloTopics, CloTopicGroup, TopicItem, CloTopicCoverage, CloTopicCoverageStat,
 } from '../models/schemas.js';
 import type { CompiledDocType, CompiledDocFormat } from '../services/file.service.js';
@@ -143,24 +143,34 @@ router.get('/', async (req: Request, res: Response) => {
       visible = courses.filter((c) => allowed.has(c.course_code));
     }
     const ownerByCourse = new Map<string, { owner_user_id: string | null; owner_name: string | null; owner_email: string | null }>();
-    const ownerEntries = await Promise.all(
+    const reviewersByCourse = new Map<string, CourseParticipant[]>();
+    await Promise.all(
       visible.map(async (course) => {
-        const ownerUserId = await userRepo.getCourseOwner(course.course_code);
-        if (!ownerUserId) {
-          return [course.course_code, { owner_user_id: null, owner_name: null, owner_email: null }] as const;
-        }
-        const owner = await userRepo.getUserById(ownerUserId);
-        return [
-          course.course_code,
-          {
+        const [ownerUserId, reviewerIds] = await Promise.all([
+          userRepo.getCourseOwner(course.course_code),
+          userRepo.listReviewerIdsForCourse(course.course_code),
+        ]);
+
+        if (ownerUserId) {
+          const owner = await userRepo.getUserById(ownerUserId);
+          ownerByCourse.set(course.course_code, {
             owner_user_id: ownerUserId,
             owner_name: owner?.name ?? null,
             owner_email: owner?.email ?? null,
-          },
-        ] as const;
+          });
+        } else {
+          ownerByCourse.set(course.course_code, { owner_user_id: null, owner_name: null, owner_email: null });
+        }
+
+        const reviewers = await Promise.all(
+          reviewerIds.map(async (id): Promise<CourseParticipant> => {
+            const u = await userRepo.getUserById(id);
+            return { user_id: id, name: u?.name ?? null, email: u?.email ?? null };
+          })
+        );
+        reviewersByCourse.set(course.course_code, reviewers);
       })
     );
-    for (const [courseCode, owner] of ownerEntries) ownerByCourse.set(courseCode, owner);
 
     const courseList: CourseListItem[] = visible.map(c => ({
       course_code: c.course_code,
@@ -178,6 +188,7 @@ router.get('/', async (req: Request, res: Response) => {
       owner_user_id: ownerByCourse.get(c.course_code)?.owner_user_id ?? null,
       owner_name: ownerByCourse.get(c.course_code)?.owner_name ?? null,
       owner_email: ownerByCourse.get(c.course_code)?.owner_email ?? null,
+      reviewers: reviewersByCourse.get(c.course_code) ?? [],
     }));
     res.json(courseList);
   } catch (error) {

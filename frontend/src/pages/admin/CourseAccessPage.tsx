@@ -83,8 +83,6 @@ export default function CourseAccessPage() {
     const u = usersById.get(id)
     return u ? `${u.name || u.email} (${u.email})` : id
   }
-  const ownerChanged = (access?.owner_user_id ?? '') !== ownerDraftId
-
   return (
     <div className="space-y-6">
       <div>
@@ -121,7 +119,11 @@ export default function CourseAccessPage() {
                   className={inputClass}
                   value={ownerDraftId}
                   disabled={busy}
-                  onChange={(e) => setOwnerDraftId(e.target.value)}
+                  onChange={(e) => {
+                    const next = e.target.value
+                    setOwnerDraftId(next)
+                    run(() => setCourseOwner(selectedCourse, next || null), 'Course owner updated')
+                  }}
                 >
                   <option value="">— No owner —</option>
                   {professors.map((p) => (
@@ -130,21 +132,6 @@ export default function CourseAccessPage() {
                     </option>
                   ))}
                 </select>
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    className="rounded-md bg-primary px-3 py-1.5 text-fine-print font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={busy || !ownerChanged}
-                    onClick={() =>
-                      run(
-                        () => setCourseOwner(selectedCourse, ownerDraftId || null),
-                        'Course owner updated'
-                      )
-                    }
-                  >
-                    Save owner
-                  </button>
-                </div>
               </div>
 
               {/* Reviewers */}
