@@ -5,6 +5,9 @@ node_modules/
 dist/
 build/
 
+# Vite cache
+.vite/
+
 # Environment files (contain API keys, passwords)
 .env
 .env.local
