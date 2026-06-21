@@ -947,6 +947,71 @@ export interface ReferenceScope {
 
 export type ReferenceSourceType = 'textbook_chapter' | 'paper' | 'other';
 
+// ============================================================================
+// DIGITAL LIBRARY (institution-wide book catalog)
+// ============================================================================
+
+/** Lifecycle of a catalog entry: a professor-uploaded candidate the admin can promote. */
+export type LibraryBookStatus = 'candidate' | 'approved' | 'rejected';
+
+/**
+ * An institution-level catalog book. Created as a `candidate` whenever a professor
+ * uploads a reference; once an admin approves it (running AI cover + description
+ * enrichment) it becomes `approved` and reusable across courses. The original file
+ * is kept on disk (`file_path`) so it can be re-ingested into any course.
+ */
+export interface LibraryBook {
+  book_id: string;
+  status: LibraryBookStatus;
+  title: string;
+  authors: string[];
+  description: string;
+  isbn: string | null;
+  publisher: string | null;
+  published_year: number | null;
+  /** Bare filename of the cover image on disk (served via authenticated route). */
+  cover_path: string | null;
+  /** Bare filename of the stored original source file on disk. */
+  file_path: string | null;
+  mime_type: string | null;
+  original_filename: string | null;
+  /** SHA-256 of the original file bytes; dedups the same book across courses. */
+  content_hash: string | null;
+  source_type: ReferenceSourceType;
+  created_by: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Extra AI/external metadata (subjects, page count, cover source, etc.). */
+  metadata?: Record<string, unknown>;
+  /**
+   * Canonical (course-independent) RAG index summary, set once the book's stored
+   * file has been chunked + embedded into `library_book_chunks`. Presence means a
+   * professor can add this book to a course as a fast clone (no re-ingest).
+   */
+  canonical?: LibraryCanonicalIndex | null;
+}
+
+/** Summary of a catalog book's canonical chunk index (see library_book_chunks). */
+export interface LibraryCanonicalIndex {
+  chunk_count: number;
+  char_count: number;
+  embedding_model: string;
+  embedding_dimensions: number;
+  contextual_embeddings: boolean;
+  indexed_at: string;
+}
+
+/** A course that uses a catalog book (one row per book+course). */
+export interface LibraryBookUsage {
+  book_id: string;
+  course_code: string;
+  doc_id: string;
+  added_by: string | null;
+  added_at: string;
+}
+
 /** An SME-uploaded, institutionally-licensed reference document tied to a course */
 export interface ReferenceDocument {
   doc_id: string;

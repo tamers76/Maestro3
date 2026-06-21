@@ -2591,6 +2591,18 @@ export interface ReferenceDocument {
   chunk_count: number;
   embedding_model: string;
   embedding_dimensions: number;
+  /** Catalog cover/description when this reference is linked to a library book. */
+  library?: ReferenceLibraryInfo | null;
+}
+
+/** Library catalog display info attached to a course reference document. */
+export interface ReferenceLibraryInfo {
+  book_id: string;
+  cover_path: string | null;
+  description: string;
+  authors: string[];
+  title: string;
+  status: LibraryBookStatus;
 }
 
 export interface RetrievedChunk {
@@ -2690,6 +2702,18 @@ export function subscribeToCourseIngestion(
   });
 }
 
+/**
+ * A successful upload's document, plus flags describing how it was handled:
+ * `from_library` when the file already existed in the catalog, `reused` when its
+ * prepared passages were cloned (no re-ingest), and `already_present` when the book
+ * was already a reference in this course.
+ */
+export type UploadReferenceResult = ReferenceDocument & {
+  reused?: boolean;
+  already_present?: boolean;
+  from_library?: boolean;
+};
+
 export async function uploadReference(
   code: string,
   file: File,
@@ -2701,7 +2725,7 @@ export async function uploadReference(
     subtopic_ids?: string[];
     job_id?: string;
   } = {}
-): Promise<ReferenceDocument> {
+): Promise<UploadReferenceResult> {
   const formData = new FormData();
   formData.append('file', file);
   if (meta.title) formData.append('title', meta.title);
@@ -2720,7 +2744,12 @@ export async function uploadReference(
     throw new Error(error.error || 'Failed to upload reference material');
   }
   const data = await response.json();
-  return data.document;
+  return {
+    ...data.document,
+    reused: data.reused,
+    already_present: data.already_present,
+    from_library: data.from_library,
+  };
 }
 
 export async function uploadReferenceFromLink(
@@ -2771,6 +2800,242 @@ export async function retrieveReferences(
   }
   const data = await response.json();
   return data.results ?? [];
+}
+
+// ============================================================================
+// Digital Library (institution-wide book catalog)
+// ============================================================================
+
+export type LibraryBookStatus = 'candidate' | 'approved' | 'rejected'
+
+export interface LibraryBook {
+  book_id: string
+  status: LibraryBookStatus
+  title: string
+  authors: string[]
+  description: string
+  isbn: string | null
+  publisher: string | null
+  published_year: number | null
+  cover_path: string | null
+  file_path: string | null
+  mime_type: string | null
+  original_filename: string | null
+  content_hash: string | null
+  source_type: ReferenceSourceType
+  created_by: string | null
+  approved_by: string | null
+  approved_at: string | null
+  created_at: string
+  updated_at: string
+  metadata?: Record<string, unknown>
+  /** Present on admin list endpoints. */
+  usage_count?: number
+  /** Present on professor search when a course is supplied: already a reference there. */
+  already_in_course?: boolean
+  /** Course-independent RAG index summary once the book's file has been ingested. */
+  canonical?: LibraryCanonicalIndex | null
+}
+
+/** Canonical (course-independent) chunk-index summary for a library book. */
+export interface LibraryCanonicalIndex {
+  chunk_count: number
+  char_count: number
+  embedding_model: string
+  embedding_dimensions: number
+  contextual_embeddings: boolean
+  indexed_at: string
+}
+
+export interface LibraryBookUsage {
+  book_id: string
+  course_code: string
+  doc_id: string
+  added_by: string | null
+  added_at: string
+}
+
+/** Authenticated cover image URL for a library book (or null when no cover). */
+export function libraryCoverUrl(book: Pick<LibraryBook, 'book_id' | 'cover_path'>): string | null {
+  if (!book.cover_path) return null
+  return withAccessToken(`${API_BASE}/library/books/${encodeURIComponent(book.book_id)}/cover`)
+}
+
+/**
+ * Professor-facing: search the APPROVED catalog by name/topic. Pass `courseCode` to
+ * have each result flagged with `already_in_course`.
+ */
+export async function searchLibraryBooks(query = '', courseCode?: string): Promise<LibraryBook[]> {
+  const params = new URLSearchParams({ search: query })
+  if (courseCode) params.set('course', courseCode)
+  const response = await fetch(`${API_BASE}/library/books?${params.toString()}`)
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.error || 'Failed to search the library')
+  }
+  const data = await response.json()
+  return data.books ?? []
+}
+
+/** Add an approved library book to a course as grounding material. */
+export async function addLibraryBookToCourse(
+  bookId: string,
+  courseCode: string,
+  meta: { job_id?: string } = {}
+): Promise<{ docId: string; reused?: boolean; alreadyPresent?: boolean }> {
+  const response = await fetch(`${API_BASE}/library/books/${encodeURIComponent(bookId)}/use-in-course`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ course_code: courseCode, ...meta }),
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.error || 'Failed to add the book to this course')
+  }
+  return response.json()
+}
+
+// ---- Admin curation ----
+
+export async function fetchLibraryCandidates(): Promise<LibraryBook[]> {
+  const response = await fetch(`${API_BASE}/library/candidates`)
+  if (!response.ok) throw new Error('Failed to load library candidates')
+  const data = await response.json()
+  return data.books ?? []
+}
+
+export async function fetchLibraryApproved(): Promise<LibraryBook[]> {
+  const response = await fetch(`${API_BASE}/library/approved`)
+  if (!response.ok) throw new Error('Failed to load the library catalog')
+  const data = await response.json()
+  return data.books ?? []
+}
+
+/**
+ * Admin: upload a book directly into the library (no course). The server enriches
+ * it and builds the canonical chunk index so later course-adds are instant clones.
+ * This request can take ~30-60s while the book is ingested.
+ */
+export async function uploadLibraryBook(
+  file: File,
+  meta: { title?: string; source_type?: ReferenceSourceType; job_id?: string } = {}
+): Promise<LibraryBook> {
+  const formData = new FormData()
+  formData.append('file', file)
+  if (meta.title) formData.append('title', meta.title)
+  if (meta.source_type) formData.append('source_type', meta.source_type)
+  if (meta.job_id) formData.append('job_id', meta.job_id)
+  const response = await fetch(`${API_BASE}/library/books`, { method: 'POST', body: formData })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.error || 'Failed to add book to the library')
+  }
+  const data = await response.json()
+  return data.book
+}
+
+/**
+ * Subscribe to live progress for ALL in-flight admin library uploads over a SINGLE
+ * SSE connection (events are demuxed by `jobId`), mirroring the course reference
+ * stream. Resolves with an unsubscribe function once the connection is open.
+ */
+export function subscribeToLibraryIngestion(
+  onProgress: (update: IngestionProgress) => void,
+  onError?: (error: Event) => void
+): Promise<() => void> {
+  return new Promise((resolve) => {
+    const eventSource = new EventSource(withAccessToken(`${API_BASE}/library/books/ingest/stream`))
+    eventSource.onopen = () => resolve(() => eventSource.close())
+    eventSource.onmessage = (event) => {
+      try {
+        onProgress(JSON.parse(event.data) as IngestionProgress)
+      } catch (e) {
+        console.error('Failed to parse library ingestion progress update:', e)
+      }
+    }
+    eventSource.onerror = (error) => {
+      if (onError) onError(error)
+      resolve(() => eventSource.close())
+    }
+  })
+}
+
+export async function fetchLibraryBookUsages(bookId: string): Promise<LibraryBookUsage[]> {
+  const response = await fetch(`${API_BASE}/library/books/${encodeURIComponent(bookId)}/usages`)
+  if (!response.ok) throw new Error('Failed to load book usages')
+  const data = await response.json()
+  return data.usages ?? []
+}
+
+export async function approveLibraryBook(bookId: string): Promise<LibraryBook> {
+  const response = await fetch(`${API_BASE}/library/books/${encodeURIComponent(bookId)}/approve`, {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.error || 'Failed to approve the book')
+  }
+  const data = await response.json()
+  return data.book
+}
+
+export async function rejectLibraryBook(bookId: string): Promise<LibraryBook> {
+  const response = await fetch(`${API_BASE}/library/books/${encodeURIComponent(bookId)}/reject`, {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.error || 'Failed to reject the book')
+  }
+  const data = await response.json()
+  return data.book
+}
+
+export async function reenrichLibraryBook(bookId: string): Promise<LibraryBook> {
+  const response = await fetch(`${API_BASE}/library/books/${encodeURIComponent(bookId)}/reenrich`, {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.error || 'Failed to re-run enrichment')
+  }
+  const data = await response.json()
+  return data.book
+}
+
+export interface LibraryBookEdit {
+  title?: string
+  authors?: string[]
+  description?: string
+  isbn?: string | null
+  publisher?: string | null
+  published_year?: number | null
+  source_type?: ReferenceSourceType
+  status?: LibraryBookStatus
+}
+
+export async function updateLibraryBook(bookId: string, edit: LibraryBookEdit): Promise<LibraryBook> {
+  const response = await fetch(`${API_BASE}/library/books/${encodeURIComponent(bookId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(edit),
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.error || 'Failed to update the book')
+  }
+  const data = await response.json()
+  return data.book
+}
+
+export async function deleteLibraryBook(bookId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/library/books/${encodeURIComponent(bookId)}`, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.error || 'Failed to delete the book')
+  }
 }
 
 // ============================================================================

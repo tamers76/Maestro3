@@ -38,6 +38,7 @@ import {
   emitIngestionProgress,
   type IngestionProgress,
 } from '../services/ingestionProgress.service.js';
+import { getCourseReferenceLibraryInfo, reuseUploadedBookIfKnown } from '../services/library.service.js';
 import { requireRole, courseAccessParamHandler } from '../auth/middleware.js';
 
 const router = Router();
@@ -94,6 +95,23 @@ router.post('/:code/references', upload.single('file'), async (req: Request, res
     const onProgress = makeIngestionReporter(jobId, code);
 
     try {
+      // If this exact file is already in the library, reuse its prepared passages
+      // (clone) or short-circuit if it's already a reference here — no re-ingest.
+      const dedup = await reuseUploadedBookIfKnown({
+        buffer: file.buffer,
+        courseCode: code,
+        addedBy: req.user?.id,
+        onProgress,
+      });
+      if (dedup) {
+        return res.status(201).json({
+          document: dedup.document,
+          reused: dedup.reused,
+          already_present: dedup.alreadyPresent,
+          from_library: true,
+        });
+      }
+
       const doc = await ingestReferenceDocument({
         courseCode: code,
         buffer: file.buffer,
@@ -104,6 +122,7 @@ router.post('/:code/references', upload.single('file'), async (req: Request, res
         citationLabel: req.body.citation_label ? String(req.body.citation_label) : undefined,
         scope,
         onProgress,
+        uploadedBy: req.user?.id,
       });
       return res.status(201).json({ document: doc });
     } catch (error) {
@@ -151,6 +170,7 @@ router.post('/:code/references/link', async (req: Request, res: Response) => {
         citationLabel: citation_label ? String(citation_label) : undefined,
         scope: { clo_ids: parseList(clo_ids), subtopic_ids: parseList(subtopic_ids) },
         onProgress,
+        uploadedBy: req.user?.id,
       });
       return res.status(201).json({ document: doc });
     } catch (error) {
@@ -210,7 +230,17 @@ router.get('/:code/references/ingest/stream', async (req: Request, res: Response
 router.get('/:code/references', async (req: Request, res: Response) => {
   try {
     const { code } = req.params;
-    return res.json({ documents: await listReferenceDocuments(code) });
+    const [documents, libraryInfo] = await Promise.all([
+      listReferenceDocuments(code),
+      getCourseReferenceLibraryInfo(code),
+    ]);
+    // Attach catalog cover/description so the panel can display a picture + summary
+    // for any reference linked to a library book (approved OR still a candidate).
+    const withLibrary = documents.map((doc) => ({
+      ...doc,
+      library: libraryInfo[doc.doc_id] ?? null,
+    }));
+    return res.json({ documents: withLibrary });
   } catch (error) {
     return res
       .status(500)

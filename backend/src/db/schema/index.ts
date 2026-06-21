@@ -5,3 +5,4 @@ export * from './nodeEngine.js';
 export * from './artifacts.js';
 export * from './auth.js';
 export * from './audit.js';
+export * from './library.js';

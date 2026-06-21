@@ -21,6 +21,7 @@ import ModelsPage from './pages/admin/ModelsPage'
 import PromptsPage from './pages/admin/PromptsPage'
 import RagPage from './pages/admin/RagPage'
 import AuditPage from './pages/admin/AuditPage'
+import LibraryPage from './pages/admin/LibraryPage'
 
 function App() {
   return (
@@ -81,6 +82,7 @@ function App() {
             <Route path="models" element={<ModelsPage />} />
             <Route path="prompts" element={<PromptsPage />} />
             <Route path="rag" element={<RagPage />} />
+            <Route path="library" element={<LibraryPage />} />
             <Route path="audit" element={<AuditPage />} />
           </Route>
           <Route

@@ -5,6 +5,7 @@ import { courses, clos, topics, learningNodes, nodePrerequisites, courseAccredit
 import { referenceDocuments, referenceChunks } from '../schema/references.js';
 import { nodeSets, maestroNodes, knowledgeComponents, evidenceCheckRequirements, maestroNodePrerequisites } from '../schema/nodeEngine.js';
 import { stageArtifacts, blobFiles } from '../schema/artifacts.js';
+import { libraryBookUsages } from '../schema/library.js';
 import { exec, type Executor } from './_exec.js';
 
 export async function createCourse(course: Course, tx?: Executor): Promise<void> {
@@ -57,6 +58,9 @@ export async function deleteCourse(courseCode: string, tx?: Executor): Promise<v
   // references
   await db.delete(referenceChunks).where(eq(referenceChunks.courseCode, courseCode));
   await db.delete(referenceDocuments).where(eq(referenceDocuments.courseCode, courseCode));
+  // digital-library usages (which catalog books this course used). Must be cleared so
+  // a future course REUSING this code doesn't inherit phantom "already added" links.
+  await db.delete(libraryBookUsages).where(eq(libraryBookUsages.courseCode, courseCode));
   // curriculum
   await db.delete(nodePrerequisites).where(eq(nodePrerequisites.courseCode, courseCode));
   await db.delete(learningNodes).where(eq(learningNodes.courseCode, courseCode));

@@ -111,6 +111,71 @@ export async function ensureSchema(pool: pg.Pool): Promise<void> {
     CREATE INDEX IF NOT EXISTS reference_chunks_subtopic_ids_idx ON reference_chunks USING gin (subtopic_ids);
     CREATE INDEX IF NOT EXISTS reference_chunks_tsv_idx ON reference_chunks USING gin (tsv);
 
+    -- ===== Digital Library (institution-wide book catalog) =====
+    CREATE TABLE IF NOT EXISTS library_books (
+      book_id           text PRIMARY KEY,
+      status            text NOT NULL DEFAULT 'candidate',
+      title             text NOT NULL DEFAULT '',
+      authors           text[] NOT NULL DEFAULT '{}',
+      description       text NOT NULL DEFAULT '',
+      isbn              text,
+      publisher         text,
+      published_year    integer,
+      cover_path        text,
+      file_path         text,
+      mime_type         text,
+      original_filename text,
+      content_hash      text,
+      source_type       text NOT NULL DEFAULT 'other',
+      created_by        text,
+      approved_by       text,
+      approved_at       timestamptz,
+      created_at        timestamptz NOT NULL DEFAULT now(),
+      updated_at        timestamptz NOT NULL DEFAULT now(),
+      data              jsonb NOT NULL,
+      -- Flattened title/authors/description for full-text search (see reference_chunks).
+      search_text       text NOT NULL DEFAULT '',
+      tsv               tsvector GENERATED ALWAYS AS (
+                          to_tsvector('english', coalesce(search_text, ''))
+                        ) STORED
+    );
+    ALTER TABLE library_books ADD COLUMN IF NOT EXISTS search_text text NOT NULL DEFAULT '';
+    CREATE INDEX IF NOT EXISTS library_books_status_idx ON library_books (status);
+    CREATE INDEX IF NOT EXISTS library_books_hash_idx ON library_books (content_hash);
+    CREATE INDEX IF NOT EXISTS library_books_tsv_idx ON library_books USING gin (tsv);
+
+    CREATE TABLE IF NOT EXISTS library_book_usages (
+      book_id     text NOT NULL,
+      course_code text NOT NULL,
+      doc_id      text NOT NULL DEFAULT '',
+      added_by    text,
+      added_at    timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS library_book_usage_pk ON library_book_usages (book_id, course_code);
+    CREATE INDEX IF NOT EXISTS library_book_usage_book_idx ON library_book_usages (book_id);
+    CREATE INDEX IF NOT EXISTS library_book_usage_course_idx ON library_book_usages (course_code);
+
+    -- Canonical extracted text for a catalog book (course-independent). Lets a
+    -- cloned course reference still support re-chunking without re-extraction.
+    ALTER TABLE library_books ADD COLUMN IF NOT EXISTS doc_text text;
+
+    -- Course-INDEPENDENT canonical chunks for a catalog book. Produced once (at
+    -- admin upload / approval) so adding the book to a course is a fast clone into
+    -- reference_chunks instead of a full re-ingest (extract/chunk/embed/index).
+    CREATE TABLE IF NOT EXISTS library_book_chunks (
+      chunk_id        text PRIMARY KEY,
+      book_id         text NOT NULL,
+      seq             integer NOT NULL DEFAULT 0,
+      text            text NOT NULL,
+      citation        text NOT NULL DEFAULT '',
+      section_heading text,
+      context_header  text,
+      content_hash    text,
+      token_estimate  integer,
+      embedding       vector(1536)
+    );
+    CREATE INDEX IF NOT EXISTS library_book_chunks_book_idx ON library_book_chunks (book_id);
+
     -- ===== Node-engine (M7) =====
     CREATE TABLE IF NOT EXISTS node_sets (
       node_set_id text PRIMARY KEY,

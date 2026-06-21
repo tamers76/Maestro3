@@ -33,6 +33,7 @@ tools/
 # Runtime data
 data/courses/
 data/avatars/
+data/library/
 
 # Local dev infrastructure (PostgreSQL install, pgdata, pgvector binaries)
 .local/

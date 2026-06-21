@@ -7,14 +7,19 @@
  * This is additive and never touches the existing citation-string pipeline.
  */
 
+import { createHash } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import type {
+  LibraryBook,
   ReferenceChunk,
   ReferenceDocument,
   ReferenceScope,
   ReferenceSourceType,
 } from '../models/schemas.js';
 import * as referenceRepo from '../db/repos/referenceRepo.js';
+import * as libraryRepo from '../db/repos/libraryRepo.js';
+import { enrichBook } from './libraryEnrichment.service.js';
+import { saveSourceFile } from './libraryStorage.service.js';
 import { extractTextFromBuffer } from './extraction.service.js';
 import { chunkText, buildCitation } from './referenceChunking.service.js';
 import { embedTexts } from './embedding.service.js';
@@ -29,6 +34,27 @@ import type { IngestionReporter } from './ingestionProgress.service.js';
 
 const noopReporter: IngestionReporter = () => {};
 
+/**
+ * Enrich a freshly-created library candidate (cover + description + metadata) in the
+ * background so a professor's uploaded book shows a picture and summary even before
+ * an admin approves it. Fully non-fatal and guarded against racing an admin action:
+ * the enriched result is only saved if the book is still a `candidate`.
+ */
+function enrichCandidateInBackground(bookId: string): void {
+  void (async () => {
+    try {
+      const book = await libraryRepo.getBook(bookId);
+      if (!book || book.status !== 'candidate') return;
+      const enriched = await enrichBook(book);
+      const current = await libraryRepo.getBook(bookId);
+      if (!current || current.status !== 'candidate') return; // admin acted meanwhile
+      await libraryRepo.saveBook({ ...enriched, status: 'candidate' });
+    } catch (err) {
+      console.error('[library] background candidate enrichment failed (non-fatal):', err);
+    }
+  })();
+}
+
 export interface IngestReferenceParams {
   courseCode: string;
   buffer: Buffer;
@@ -40,38 +66,100 @@ export interface IngestReferenceParams {
   scope?: ReferenceScope;
   /** Optional live-progress reporter (no-op when omitted). */
   onProgress?: IngestionReporter;
+  /** User id of the uploader (threaded into the library candidate record). */
+  uploadedBy?: string;
+  /**
+   * When true, skip registering a digital-library candidate. Set by the library
+   * service when re-ingesting an already-cataloged book into another course (the
+   * usage is recorded separately there) to avoid a redundant candidate.
+   */
+  skipLibraryCandidate?: boolean;
 }
 
-export async function ingestReferenceDocument(
-  params: IngestReferenceParams
-): Promise<ReferenceDocument> {
-  const {
-    courseCode,
-    buffer,
-    originalFilename,
-    mimeType,
-    title,
-    sourceType = 'other',
-    citationLabel,
-    scope = {},
-    onProgress = noopReporter,
-  } = params;
-
-  const docTitle = (title || originalFilename).trim();
-  onProgress({ phase: 'extracting', docTitle, filename: originalFilename });
-  const text = (await extractTextFromBuffer(buffer, mimeType, originalFilename))?.trim();
-  if (!text) {
-    throw new Error('No extractable text found in the uploaded reference file.');
+/**
+ * Register/refresh a digital-library candidate for an uploaded reference and record
+ * that this course uses it. Best-effort and fully non-fatal: a failure here must
+ * never break the (already successful) reference ingestion. Dedups the same book
+ * across courses via the file content hash.
+ */
+async function registerLibraryCandidate(params: {
+  courseCode: string;
+  buffer: Buffer;
+  mimeType: string;
+  originalFilename: string;
+  title: string;
+  sourceType: ReferenceSourceType;
+  docId: string;
+  uploadedBy?: string;
+}): Promise<void> {
+  try {
+    const contentHash = createHash('sha256').update(params.buffer).digest('hex');
+    let book = await libraryRepo.getBookByHash(contentHash);
+    if (!book) {
+      const bookId = uuidv4();
+      const filePath = saveSourceFile(bookId, params.buffer, params.mimeType, params.originalFilename);
+      const now = new Date().toISOString();
+      book = {
+        book_id: bookId,
+        status: 'candidate',
+        title: params.title,
+        authors: [],
+        description: '',
+        isbn: null,
+        publisher: null,
+        published_year: null,
+        cover_path: null,
+        file_path: filePath,
+        mime_type: params.mimeType,
+        original_filename: params.originalFilename,
+        content_hash: contentHash,
+        source_type: params.sourceType,
+        created_by: params.uploadedBy ?? null,
+        approved_by: null,
+        approved_at: null,
+        created_at: now,
+        updated_at: now,
+      } satisfies LibraryBook;
+      await libraryRepo.saveBook(book);
+      // Newly discovered book: enrich (cover/description) in the background so it
+      // displays nicely as a course reference even before admin approval.
+      enrichCandidateInBackground(book.book_id);
+    }
+    await libraryRepo.recordUsage({
+      bookId: book.book_id,
+      courseCode: params.courseCode,
+      docId: params.docId,
+      addedBy: params.uploadedBy ?? null,
+    });
+  } catch (err) {
+    console.error('[library] candidate registration failed (non-fatal):', err);
   }
+}
 
-  const docId = uuidv4();
-  const label = (citationLabel || docTitle).trim();
-  const cloIds = scope.clo_ids ?? [];
-  const subtopicIds = scope.subtopic_ids ?? [];
+/** Result of turning raw text into embedded, context-headed passages. */
+export interface ProducedChunks {
+  /** Raw chunk metadata (seq, text, section_heading, token_estimate). */
+  rawChunks: ReturnType<typeof chunkText>;
+  /** Per-chunk context header + content hash (parallel to rawChunks). */
+  headerResults: Awaited<ReturnType<typeof generateContextHeadersForChunks>>;
+  /** Embedding vectors (parallel to rawChunks). */
+  vectors: number[][];
+  model: string;
+  dimensions: number;
+}
 
-  // chunkText() now applies the Issue 2 junk filter internally (drops page-number
-  // noise, TOC/index fragments, and thin chunks), so rawChunks are already
-  // quality-gated before embedding/indexing.
+/**
+ * Extracted-text -> chunk -> contextual header -> embed. Shared by per-course
+ * ingestion and course-independent canonical indexing so both produce identical
+ * passages/embeddings (the only difference is how the rows are keyed/stored).
+ *
+ * Throws if no usable chunks remain after the junk filter.
+ */
+export async function produceContextualChunks(
+  text: string,
+  docTitle: string,
+  onProgress: IngestionReporter = noopReporter
+): Promise<ProducedChunks> {
   onProgress({ phase: 'chunking', charCount: text.length });
   const rawChunks = chunkText(text);
   if (rawChunks.length === 0) {
@@ -86,9 +174,6 @@ export async function ingestReferenceDocument(
     message: `Found ${rawChunks.length} passages to ingest.`,
   });
 
-  // Contextual embeddings (V1.0): generate a per-chunk context header, then embed
-  // the ENRICHED text (header + sep + raw). No existing cache on a fresh upload, so
-  // every chunk generates a header. `text` itself stays raw for display/citation.
   const headerInputs: ChunkHeaderInput[] = rawChunks.map((raw) => ({
     key: String(raw.seq),
     docTitle,
@@ -112,9 +197,7 @@ export async function ingestReferenceDocument(
       }),
   });
 
-  const enrichedTexts = rawChunks.map((raw, i) =>
-    buildEnrichedText(headerResults[i].header, raw.text)
-  );
+  const enrichedTexts = rawChunks.map((raw, i) => buildEnrichedText(headerResults[i].header, raw.text));
   onProgress({
     phase: 'embedding',
     current: 0,
@@ -129,6 +212,44 @@ export async function ingestReferenceDocument(
       chunkCount: rawChunks.length,
       message: `Embedding passage ${current} of ${total}…`,
     })
+  );
+
+  return { rawChunks, headerResults, vectors, model, dimensions };
+}
+
+export async function ingestReferenceDocument(
+  params: IngestReferenceParams
+): Promise<ReferenceDocument> {
+  const {
+    courseCode,
+    buffer,
+    originalFilename,
+    mimeType,
+    title,
+    sourceType = 'other',
+    citationLabel,
+    scope = {},
+    onProgress = noopReporter,
+    uploadedBy,
+    skipLibraryCandidate = false,
+  } = params;
+
+  const docTitle = (title || originalFilename).trim();
+  onProgress({ phase: 'extracting', docTitle, filename: originalFilename });
+  const text = (await extractTextFromBuffer(buffer, mimeType, originalFilename))?.trim();
+  if (!text) {
+    throw new Error('No extractable text found in the uploaded reference file.');
+  }
+
+  const docId = uuidv4();
+  const label = (citationLabel || docTitle).trim();
+  const cloIds = scope.clo_ids ?? [];
+  const subtopicIds = scope.subtopic_ids ?? [];
+
+  const { rawChunks, headerResults, vectors, model, dimensions } = await produceContextualChunks(
+    text,
+    docTitle,
+    onProgress
   );
 
   const chunks: ReferenceChunk[] = rawChunks.map((raw, i) => ({
@@ -175,6 +296,20 @@ export async function ingestReferenceDocument(
   const store = await resolveStoreForIndexing(dimensions);
   await store.indexChunks(chunks);
 
+  // Register/refresh the institution-wide library candidate (non-fatal).
+  if (!skipLibraryCandidate) {
+    await registerLibraryCandidate({
+      courseCode,
+      buffer,
+      mimeType,
+      originalFilename,
+      title: docTitle,
+      sourceType,
+      docId,
+      uploadedBy,
+    });
+  }
+
   onProgress({
     phase: 'done',
     chunkCount: chunks.length,
@@ -195,6 +330,8 @@ export interface IngestReferenceFromUrlParams {
   scope?: ReferenceScope;
   /** Optional live-progress reporter (no-op when omitted). */
   onProgress?: IngestionReporter;
+  /** User id of the uploader (threaded into the library candidate record). */
+  uploadedBy?: string;
 }
 
 const UPLOAD_FALLBACK_MSG =
@@ -216,6 +353,7 @@ export async function ingestReferenceFromUrl(
     citationLabel,
     scope,
     onProgress = noopReporter,
+    uploadedBy,
   } = params;
 
   let parsed: URL;
@@ -259,6 +397,7 @@ export async function ingestReferenceFromUrl(
     citationLabel,
     scope,
     onProgress,
+    uploadedBy,
   });
 }
 
@@ -272,6 +411,14 @@ export async function deleteReferenceDocument(courseCode: string, docId: string)
   // Remove the vector index rows, then the document (cascades its chunks).
   await getStoreForBackend('postgres').deleteDoc(courseCode, docId);
   await referenceRepo.deleteDocument(docId);
+  // Drop the digital-library usage link so the admin catalog stops counting this
+  // course (the canonical book + chunks stay; only this course's usage is removed).
+  // Best-effort: a failure here must not block the (successful) reference removal.
+  try {
+    await libraryRepo.deleteUsageByDoc(courseCode, docId);
+  } catch (err) {
+    console.error('[library] failed to clear usage on reference delete (non-fatal):', err);
+  }
   return true;
 }
 

@@ -41,6 +41,7 @@ import authRouter from './routes/auth.js';
 import usersRouter from './routes/users.js';
 import reviewRequestsRouter from './routes/reviewRequests.js';
 import auditRouter from './routes/audit.js';
+import libraryRouter from './routes/library.js';
 import { requireAuth, requireRole } from './auth/middleware.js';
 import { seedAdminUser, seedDevUsers } from './auth/seed.js';
 
@@ -63,6 +64,9 @@ app.use('/api/courses', requireAuth, coursesRouter);
 app.use('/api/courses', requireAuth, referencesRouter);
 app.use('/api/settings', requireAuth, requireRole('admin'), settingsRouter);
 app.use('/api/audit', requireAuth, requireRole('admin'), auditRouter);
+// Digital library: professors browse/use the approved catalog; admin-only curation
+// endpoints are guarded inside the router.
+app.use('/api/library', requireAuth, requireRole('admin', 'professor'), libraryRouter);
 app.use('/api/node-engine', requireAuth, nodeEngineRouter);
 
 // Health check

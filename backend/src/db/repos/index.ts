@@ -13,5 +13,6 @@ export * as outboxRepo from './outboxRepo.js';
 export * as userRepo from './userRepo.js';
 export * as reviewRequestRepo from './reviewRequestRepo.js';
 export * as auditRepo from './auditRepo.js';
+export * as libraryRepo from './libraryRepo.js';
 export { withTx, exec } from './_exec.js';
 export type { Executor, Tx } from './_exec.js';

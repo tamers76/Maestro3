@@ -9,12 +9,57 @@ import {
   deleteReference,
   subscribeToCourseIngestion,
   newIngestionJobId,
+  libraryCoverUrl,
   type ReferenceDocument,
+  type ReferenceLibraryInfo,
   type ReferenceSourceType,
   type IngestionProgress,
+  type UploadReferenceResult,
 } from '@/services/api'
 import IngestionProgressCard from '@/components/IngestionProgressCard'
-import { Loader2, Upload, Trash2, BookOpen, FileText, Link as LinkIcon, AlertTriangle } from 'lucide-react'
+import LibraryPicker from '@/components/LibraryPicker'
+import { Loader2, Upload, Trash2, BookOpen, Library, Sparkles, Link as LinkIcon, AlertTriangle } from 'lucide-react'
+
+/** True while a professor-uploaded book is still being auto-enriched in the background. */
+function isEnriching(library?: ReferenceLibraryInfo | null): boolean {
+  return (
+    !!library &&
+    library.status === 'candidate' &&
+    !library.cover_path &&
+    !(library.description ?? '').trim()
+  )
+}
+
+/**
+ * Small badge distinguishing where a reference came from:
+ *  - approved library book  -> "Library"
+ *  - professor upload (candidate) -> "Uploaded" (or an enriching spinner while metadata loads)
+ */
+function ReferenceBadge({ library }: { library?: ReferenceLibraryInfo | null }) {
+  if (!library) return null
+  if (library.status === 'approved') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+        <Library className="h-3 w-3" />
+        Library
+      </span>
+    )
+  }
+  if (isEnriching(library)) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+        <Sparkles className="h-3 w-3 animate-pulse" />
+        Enriching…
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <BookOpen className="h-3 w-3" />
+      Uploaded
+    </span>
+  )
+}
 
 const SOURCE_TYPE_OPTIONS: { value: ReferenceSourceType; label: string }[] = [
   { value: 'textbook_chapter', label: 'Textbook chapter' },
@@ -104,26 +149,49 @@ export default function ReferenceMaterialsPanel({
     })
   }, [])
 
-  const load = useCallback(async () => {
-    try {
-      setLoading(true)
-      const result = await listReferences(courseCode)
-      setDocs(result)
-      onDocsChange?.(result.length)
-    } catch (error) {
-      showToast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to load reference materials',
-        variant: 'destructive',
-      })
-    } finally {
-      setLoading(false)
-    }
-  }, [courseCode, onDocsChange])
+  const load = useCallback(
+    async (opts: { silent?: boolean } = {}) => {
+      try {
+        if (!opts.silent) setLoading(true)
+        const result = await listReferences(courseCode)
+        setDocs(result)
+        onDocsChange?.(result.length)
+      } catch (error) {
+        if (!opts.silent) {
+          showToast({
+            title: 'Error',
+            description: error instanceof Error ? error.message : 'Failed to load reference materials',
+            variant: 'destructive',
+          })
+        }
+      } finally {
+        if (!opts.silent) setLoading(false)
+      }
+    },
+    [courseCode, onDocsChange]
+  )
 
   useEffect(() => {
     load()
   }, [load])
+
+  // Background enrichment (cover + description) for professor uploads finishes a few
+  // seconds AFTER ingest. Quietly re-poll while any candidate is still un-enriched so
+  // its picture/summary appears without a manual refresh. Capped to avoid busy-looping.
+  const enrichPollsRef = useRef(0)
+  useEffect(() => {
+    const pending = docs.some((d) => isEnriching(d.library))
+    if (!pending) {
+      enrichPollsRef.current = 0
+      return
+    }
+    if (enrichPollsRef.current >= 10) return
+    const timer = setTimeout(() => {
+      enrichPollsRef.current += 1
+      void load({ silent: true })
+    }, 4000)
+    return () => clearTimeout(timer)
+  }, [docs, load])
 
   // Auto-capture a sensible title from the file name (without extension) when
   // exactly one file is selected, unless the SME has manually edited the title.
@@ -190,6 +258,11 @@ export default function ReferenceMaterialsPanel({
             filename: file.name,
             docTitle: doc.title,
             chunkCount: doc.chunk_count,
+            message: doc.already_present
+              ? `"${doc.title}" is already a reference in this course.`
+              : doc.reused
+                ? `Already in the library — reused ${doc.chunk_count} prepared passages (no re-processing).`
+                : undefined,
           })
           return doc
         } catch (err) {
@@ -205,18 +278,27 @@ export default function ReferenceMaterialsPanel({
         }
       })
       const successes = results.filter(
-        (r): r is PromiseFulfilledResult<ReferenceDocument> => r.status === 'fulfilled'
+        (r): r is PromiseFulfilledResult<UploadReferenceResult> => r.status === 'fulfilled'
       )
       const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
 
       if (successes.length > 0) {
         const totalChunks = successes.reduce((sum, s) => sum + s.value.chunk_count, 0)
+        const reusedCount = successes.filter((s) => s.value.from_library).length
+        const reuseNote =
+          reusedCount > 0
+            ? ` (${reusedCount} already in the library — reused instantly)`
+            : ''
         showToast({
           title: successes.length === 1 ? 'Reference ingested' : `${successes.length} references ingested`,
           description:
             successes.length === 1
-              ? `${successes[0].value.title} — ${successes[0].value.chunk_count} passages indexed`
-              : `${totalChunks} passages indexed across ${successes.length} files`,
+              ? successes[0].value.already_present
+                ? `${successes[0].value.title} was already a reference in this course`
+                : successes[0].value.from_library
+                  ? `${successes[0].value.title} — reused ${successes[0].value.chunk_count} prepared passages (no re-processing)`
+                  : `${successes[0].value.title} — ${successes[0].value.chunk_count} passages indexed`
+              : `${totalChunks} passages indexed across ${successes.length} files${reuseNote}`,
           variant: 'success',
         })
         resetForm()
@@ -345,6 +427,23 @@ export default function ReferenceMaterialsPanel({
         </div>
       )}
 
+      {/* Pick from the university library (admin-approved books) */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-card p-4">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground">Reuse a library book</p>
+          <p className="text-xs text-muted-foreground">
+            Add an admin-approved book from the university library — no upload needed.
+          </p>
+        </div>
+        <LibraryPicker
+          courseCode={courseCode}
+          onAdded={() => {
+            void load()
+            onReferenceUploaded?.()
+          }}
+        />
+      </div>
+
       {/* Upload / link form */}
       <div className="rounded-xl border bg-card p-4 space-y-3">
         <input
@@ -472,35 +571,67 @@ export default function ReferenceMaterialsPanel({
         <p className="text-sm text-muted-foreground">No reference materials uploaded yet.</p>
       ) : (
         <ul className="space-y-2">
-          {docs.map((doc) => (
-            <li
-              key={doc.doc_id}
-              className="flex items-start justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2"
-            >
-              <div className="flex items-start gap-2 min-w-0">
-                <FileText className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium truncate">{doc.title}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {doc.chunk_count} passages ·{' '}
-                    {SOURCE_TYPE_OPTIONS.find((o) => o.value === doc.source_type)?.label}
-                    {doc.scope.clo_ids?.length ? ` · CLOs: ${doc.scope.clo_ids.join(', ')}` : ''}
-                    {doc.scope.subtopic_ids?.length
-                      ? ` · Subtopics: ${doc.scope.subtopic_ids.join(', ')}`
-                      : ''}
-                  </p>
-                </div>
-              </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-red-600 hover:text-red-700"
-                onClick={() => handleDelete(doc.doc_id)}
+          {docs.map((doc) => {
+            const coverUrl = doc.library ? libraryCoverUrl(doc.library) : null
+            const authors = doc.library?.authors?.length ? doc.library.authors.join(', ') : ''
+            const description = doc.library?.description?.trim()
+            const enriching = isEnriching(doc.library)
+            return (
+              <li
+                key={doc.doc_id}
+                className="flex items-start justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2"
               >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </li>
-          ))}
+                <div className="flex items-start gap-3 min-w-0">
+                  {coverUrl ? (
+                    <img
+                      src={coverUrl}
+                      alt={doc.title}
+                      className="h-16 w-11 shrink-0 rounded object-cover shadow-sm"
+                    />
+                  ) : (
+                    <div className="relative flex h-16 w-11 shrink-0 items-center justify-center rounded bg-muted text-muted-foreground">
+                      <BookOpen className="h-5 w-5" />
+                      {enriching ? (
+                        <Loader2 className="absolute bottom-1 right-1 h-3 w-3 animate-spin text-sky-500" />
+                      ) : null}
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <p className="text-sm font-medium truncate">{doc.title}</p>
+                      <ReferenceBadge library={doc.library} />
+                    </div>
+                    {authors ? (
+                      <p className="text-xs text-muted-foreground truncate">{authors}</p>
+                    ) : null}
+                    <p className="text-xs text-muted-foreground">
+                      {doc.chunk_count} passages ·{' '}
+                      {SOURCE_TYPE_OPTIONS.find((o) => o.value === doc.source_type)?.label}
+                      {doc.scope.clo_ids?.length ? ` · CLOs: ${doc.scope.clo_ids.join(', ')}` : ''}
+                      {doc.scope.subtopic_ids?.length
+                        ? ` · Subtopics: ${doc.scope.subtopic_ids.join(', ')}`
+                        : ''}
+                    </p>
+                    {description ? (
+                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{description}</p>
+                    ) : enriching ? (
+                      <p className="mt-1 text-xs italic text-sky-600 dark:text-sky-400">
+                        Fetching cover &amp; description…
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-red-600 hover:text-red-700 shrink-0"
+                  onClick={() => handleDelete(doc.doc_id)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </li>
+            )
+          })}
         </ul>
       )}
     </div>
