@@ -82,7 +82,7 @@ export default function NewCourse() {
       const msg = error instanceof Error ? error.message : 'Failed to process file'
       const friendly =
         msg.includes('401') || msg.includes('Authentication') || msg.includes('API key')
-          ? 'AI API key missing or invalid. Add OPENAI_API_KEY or OPENROUTER_API_KEY to DeepT-main/.env and restart the app (npm run dev).'
+          ? 'AI API key missing or invalid. Add OPENAI_API_KEY or OPENROUTER_API_KEY to the repo-root .env and restart the app (npm run dev).'
           : msg
       showToast({
         title: 'Upload Failed',

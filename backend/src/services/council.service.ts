@@ -318,7 +318,7 @@ async function callOllama(
 }
 
 const AI_NOT_CONFIGURED_MSG =
-  'No AI API key is configured. Add OPENAI_API_KEY or OPENROUTER_API_KEY to DeepT-main/.env (then restart the backend), or set your key in Settings and use a .env file — keys entered in the UI are not saved to disk. In Settings, set AI Provider to match the key you added.';
+  'No AI API key is configured. Add OPENAI_API_KEY or OPENROUTER_API_KEY to the repo-root .env (then restart the backend), or set your key in Settings and use a .env file — keys entered in the UI are not saved to disk. In Settings, set AI Provider to match the key you added.';
 
 function hasProviderKey(provider: 'openrouter' | 'openai' | 'ollama'): boolean {
   const settings = getSettings();

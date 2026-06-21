@@ -1,10 +1,3 @@
-# Bundled third-party tooling / binaries (not part of the project source)
-tools/
-
-# SSH private keys — never commit
-ssh/
-*.pem
-
 # Dependencies
 node_modules/
 
@@ -18,6 +11,27 @@ build/
 .env.*.local
 .env.*
 !.env.example
+
+# Settings with API keys (use settings.example.json as template)
+config/settings.json
+
+# Key and credential files
+*.key
+*.pem
+*credentials*
+*secrets*
+
+# SSH private keys — never commit
+ssh/
+
+# Bundled third-party tooling / binaries (not part of the project source)
+tools/
+
+# Runtime data
+data/courses/
+
+# Local dev infrastructure (PostgreSQL install, pgdata, pgvector binaries)
+.local/
 
 # IDE
 .vscode/

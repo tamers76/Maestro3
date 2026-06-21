@@ -359,7 +359,7 @@ export function HeyGenRenderSettingsPicker({
             <p className="text-[11px] text-muted-foreground">
               Add entries to{' '}
               <code className="font-mono">
-                DeepT-main/backend/src/config/heygenApprovedAvatars.defaults.ts
+                backend/src/config/heygenApprovedAvatars.defaults.ts
               </code>
             </p>
           </div>
