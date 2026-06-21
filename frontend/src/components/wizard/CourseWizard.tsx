@@ -3,7 +3,7 @@ import { Routes, Route, Navigate, useNavigate, useParams, useLocation } from 're
 import { ArrowLeft, Boxes, ChevronRight, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { showToast } from '@/components/ui/Toaster'
-import { fetchCourse, type CourseDetail as CourseDetailType } from '@/services/api'
+import { fetchCourse, listReferences, type CourseDetail as CourseDetailType } from '@/services/api'
 import Stage1Layers from '@/components/Stage1Layers'
 import { type IntakeSummaryProps } from '@/components/IntakeSummaryView'
 import NodeEnginePanel from '@/components/nodeEngine/NodeEnginePanel'
@@ -70,6 +70,7 @@ function ArchitectScreen({
   const next = idx >= 0 && idx < steps.length - 1 ? steps[idx + 1] : undefined
   const goLayer = (id: string) => navigate(`${base}/architect/${id}`)
   const goEngine = () => navigate(`${base}/engine/${journey.engineFrontierLayer}`)
+  const [referenceDocsCount, setReferenceDocsCount] = useState(0)
 
   // Stabilize the callbacks handed to Stage1Layers. These are invoked from
   // inside Stage1Layers' data-loading effects; an unstable identity here would
@@ -90,6 +91,19 @@ function ArchitectScreen({
     onAlignmentFetch()
     void journeyRefresh()
   }, [onAlignmentFetch, journeyRefresh])
+  const refreshReferenceDocsCount = useCallback(async () => {
+    try {
+      const docs = await listReferences(courseCode)
+      setReferenceDocsCount(docs.length)
+    } catch {
+      // Non-fatal; Stage 1 still enforces gating locally.
+    }
+  }, [courseCode])
+  useEffect(() => {
+    void refreshReferenceDocsCount()
+  }, [refreshReferenceDocsCount])
+
+  const layer1BlockedByMissingReferences = active?.id === 'layer1-intake' && referenceDocsCount === 0
 
   return (
     <>
@@ -111,6 +125,7 @@ function ArchitectScreen({
           alignmentAutoProposeSignal={alignmentAutoProposeSignal}
           onAlignmentApproved={handleAlignmentApproved}
           intake={intake}
+          onReferenceDocsCountChange={setReferenceDocsCount}
         />
       </WizardStepShell>
       <WizardActionBar
@@ -120,7 +135,7 @@ function ArchitectScreen({
             ? {
                 label: 'Next layer',
                 onClick: () => goLayer(next.id),
-                disabled: next.status === 'locked',
+                disabled: next.status === 'locked' || layer1BlockedByMissingReferences,
                 icon: <ChevronRight className="h-4 w-4" />,
               }
             : {
@@ -131,7 +146,9 @@ function ArchitectScreen({
               }
         }
         hint={
-          next && next.status === 'locked'
+          layer1BlockedByMissingReferences
+            ? 'Upload at least one grounding reference before moving to the next layer.'
+            : next && next.status === 'locked'
             ? 'Approve this layer to unlock the next step.'
             : !next && !journey.engineUnlocked
               ? 'Approve all six layers and activate reference alignment to unlock the Node Engine.'

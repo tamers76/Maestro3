@@ -9,6 +9,7 @@ import {
   approveStage1Layer,
   rejectStage1Layer,
   fetchAlignment,
+  listReferences,
   type Stage1LayerStateView,
   type StageExecutionMode,
 } from '@/services/api'
@@ -86,6 +87,8 @@ interface Stage1LayersProps {
   soloLayerId?: string
   /** Wizard mode: forward navigation routes instead of expanding in-place. */
   onNavigateLayer?: (layerId: string) => void
+  /** Fired when uploaded/linked grounding-doc count changes. */
+  onReferenceDocsCountChange?: (count: number) => void
 }
 
 export default function Stage1Layers({
@@ -99,6 +102,7 @@ export default function Stage1Layers({
   intake,
   soloLayerId,
   onNavigateLayer,
+  onReferenceDocsCountChange,
 }: Stage1LayersProps) {
   const [layers, setLayers] = useState<Stage1LayerStateView[]>([])
   const [loading, setLoading] = useState(true)
@@ -123,6 +127,17 @@ export default function Stage1Layers({
   // Bumped whenever a reference is ingested (Layer 1 intake) so the sibling
   // Reference Coverage panel auto-re-runs and surfaces before/after deltas.
   const [coverageRefreshSignal, setCoverageRefreshSignal] = useState(0)
+  const [referenceDocsCount, setReferenceDocsCount] = useState(0)
+
+  const refreshReferenceDocsCount = useCallback(async () => {
+    try {
+      const docs = await listReferences(courseCode)
+      setReferenceDocsCount(docs.length)
+      onReferenceDocsCountChange?.(docs.length)
+    } catch {
+      // Non-fatal: the intake panel itself also publishes this count when loaded.
+    }
+  }, [courseCode, onReferenceDocsCountChange])
 
   // When a layer is expanded, bring its header to the top of the viewport so the
   // newly revealed content opens in place instead of leaving the user scrolled away.
@@ -229,6 +244,9 @@ export default function Stage1Layers({
   useEffect(() => {
     void loadLayersRef.current()
   }, [courseCode])
+  useEffect(() => {
+    void refreshReferenceDocsCount()
+  }, [refreshReferenceDocsCount])
 
   // Wizard solo mode: keep the rendered layer expanded so its editor + auto-run
   // and scroll effects behave exactly as in the accordion.
@@ -273,6 +291,14 @@ export default function Stage1Layers({
   }
 
   async function handleApprove(layerId: string, options?: { skipUnsavedCheck?: boolean }) {
+    if (layerId === 'layer1-intake' && referenceDocsCount === 0) {
+      showToast({
+        title: 'Reference required',
+        description: 'Upload or link at least one grounding reference before approving Layer 1.',
+        variant: 'destructive',
+      })
+      return false
+    }
     if (layerId === 'layer2-clo-review') {
       if (layer2HasChanges && !options?.skipUnsavedCheck) {
         showToast({
@@ -490,6 +516,8 @@ export default function Stage1Layers({
           const nextLayer = layerIndex >= 0 ? layers[layerIndex + 1] : undefined
           const showContinueToNext =
             !solo && layer.status === 'approved' && !!nextLayer && nextLayer.status !== 'approved'
+          const layer1BlockedByMissingReferences =
+            layer.layerId === 'layer1-intake' && referenceDocsCount === 0
 
           const actionButtons = (
             <div className="flex flex-wrap gap-2">
@@ -497,11 +525,17 @@ export default function Stage1Layers({
                 <Button
                   size="default"
                   onClick={() => goToLayer(nextLayer.layerId)}
+                  disabled={layer1BlockedByMissingReferences}
                   className="group order-first shadow-glow ring-2 ring-primary/25 ring-offset-2 ring-offset-background"
                 >
                   Continue to Layer {nextLayer.config.order}
                   <ChevronRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
                 </Button>
+              )}
+              {layer1BlockedByMissingReferences && (
+                <p className="w-full rounded-md bg-red-500/10 p-2 text-xs text-red-600 dark:text-red-400">
+                  Add at least one grounding reference to unlock approval and continue.
+                </p>
               )}
               {staleRunning && (
                 <p className="w-full rounded-md bg-amber-500/10 p-2 text-xs text-amber-600 dark:text-amber-400">
@@ -530,7 +564,12 @@ export default function Stage1Layers({
                 layer.layerId !== 'layer4-weighting-rubric' &&
                 layer.layerId !== 'layer5-integrity-ai' &&
                 layer.layerId !== 'layer6-subtopic-architecture' && (
-                  <Button size="sm" variant="default" onClick={() => handleApprove(layer.layerId)}>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    disabled={layer1BlockedByMissingReferences}
+                    onClick={() => handleApprove(layer.layerId)}
+                  >
                     <Check className="mr-2 h-4 w-4" />
                     Approve
                   </Button>
@@ -815,8 +854,13 @@ export default function Stage1Layers({
                     <>
                       <IntakeSummaryView
                         {...intake}
+                        onReferenceDocsCountChange={(count) => {
+                          setReferenceDocsCount(count)
+                          onReferenceDocsCountChange?.(count)
+                        }}
                         onReferenceUploaded={() => {
                           setCoverageRefreshSignal((n) => n + 1)
+                          void refreshReferenceDocsCount()
                           onReferenceUploaded?.()
                         }}
                       />

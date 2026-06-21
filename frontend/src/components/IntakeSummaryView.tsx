@@ -44,6 +44,8 @@ export interface IntakeSummaryProps {
   assessmentStrategy?: string
   /** Fired after a grounding reference is ingested — drives the coverage re-check loop. */
   onReferenceUploaded?: () => void
+  /** Fired when uploaded/linked grounding-doc count changes. */
+  onReferenceDocsCountChange?: (count: number) => void
 }
 
 function bloomBadgeClass() {
@@ -166,10 +168,12 @@ function ReferencesSection({
   code,
   references,
   onReferenceUploaded,
+  onReferenceDocsCountChange,
 }: {
   code: string
   references: string[]
   onReferenceUploaded?: () => void
+  onReferenceDocsCountChange?: (count: number) => void
 }) {
   const [items, setItems] = useState<string[]>(references)
   const [input, setInput] = useState('')
@@ -274,7 +278,10 @@ function ReferencesSection({
       <ReferenceMaterialsPanel
         courseCode={code}
         embedded
-        onDocsChange={setIngestedCount}
+        onDocsChange={(count) => {
+          setIngestedCount(count)
+          onReferenceDocsCountChange?.(count)
+        }}
         onReferenceUploaded={onReferenceUploaded}
       />
     </CollapsibleCard>
@@ -294,6 +301,7 @@ export default function IntakeSummaryView({
   accreditationTags,
   assessmentStrategy,
   onReferenceUploaded,
+  onReferenceDocsCountChange,
 }: IntakeSummaryProps) {
   const totalWeight = assessments.reduce((sum, a) => sum + (Number(a.weight) || 0), 0)
   const weightIsBalanced = Math.round(totalWeight) === 100
@@ -483,7 +491,12 @@ export default function IntakeSummaryView({
       </CollapsibleCard>
 
       {/* References (includes grounding-materials upload/link subsection) */}
-      <ReferencesSection code={code} references={references} onReferenceUploaded={onReferenceUploaded} />
+      <ReferencesSection
+        code={code}
+        references={references}
+        onReferenceUploaded={onReferenceUploaded}
+        onReferenceDocsCountChange={onReferenceDocsCountChange}
+      />
 
       {/* Delivery & Accreditation */}
       <CollapsibleCard icon={Award} title="Delivery & Accreditation">

@@ -52,7 +52,7 @@ export default function ReferenceMaterialsPanel({
   const [docs, setDocs] = useState<ReferenceDocument[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
-  const [file, setFile] = useState<File | null>(null)
+  const [files, setFiles] = useState<File[]>([])
   const [title, setTitle] = useState(initialTitle ?? '')
   // A prefilled title counts as SME-provided, so a later file pick won't clobber it.
   const [titleEdited, setTitleEdited] = useState(!!initialTitle)
@@ -84,17 +84,21 @@ export default function ReferenceMaterialsPanel({
     load()
   }, [load])
 
-  // Auto-capture a sensible title from the file name (without extension),
-  // unless the SME has manually edited the title field.
-  const handleFileChange = (selected: File | null) => {
-    setFile(selected)
-    if (selected && !titleEdited) {
-      setTitle(selected.name.replace(/\.[^.]+$/, ''))
+  // Auto-capture a sensible title from the file name (without extension) when
+  // exactly one file is selected, unless the SME has manually edited the title.
+  const handleFileChange = (selected: FileList | null) => {
+    const picked = selected ? Array.from(selected) : []
+    setFiles(picked)
+    if (picked.length === 1 && !titleEdited) {
+      setTitle(picked[0].name.replace(/\.[^.]+$/, ''))
+    }
+    if (picked.length !== 1 && !titleEdited) {
+      setTitle('')
     }
   }
 
   const resetForm = () => {
-    setFile(null)
+    setFiles([])
     setTitle('')
     setTitleEdited(false)
     setSourceType('textbook_chapter')
@@ -102,24 +106,50 @@ export default function ReferenceMaterialsPanel({
   }
 
   const handleUpload = async () => {
-    if (!file) {
-      showToast({ title: 'No file', description: 'Choose a PDF or DOCX first.', variant: 'destructive' })
+    if (files.length === 0) {
+      showToast({ title: 'No files', description: 'Choose one or more PDF/DOCX files first.', variant: 'destructive' })
       return
     }
     try {
       setUploading(true)
-      const doc = await uploadReference(courseCode, file, {
-        title: title.trim() || undefined,
-        source_type: sourceType,
-      })
-      showToast({
-        title: 'Reference ingested',
-        description: `${doc.title} — ${doc.chunk_count} passages indexed`,
-        variant: 'success',
-      })
-      resetForm()
-      await load()
-      onReferenceUploaded?.()
+      const singleFileTitle = files.length === 1 ? title.trim() || undefined : undefined
+      const results = await Promise.allSettled(
+        files.map((file) =>
+          uploadReference(courseCode, file, {
+            title: singleFileTitle,
+            source_type: sourceType,
+          })
+        )
+      )
+      const successes = results.filter(
+        (r): r is PromiseFulfilledResult<ReferenceDocument> => r.status === 'fulfilled'
+      )
+      const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+
+      if (successes.length > 0) {
+        const totalChunks = successes.reduce((sum, s) => sum + s.value.chunk_count, 0)
+        showToast({
+          title: successes.length === 1 ? 'Reference ingested' : `${successes.length} references ingested`,
+          description:
+            successes.length === 1
+              ? `${successes[0].value.title} — ${successes[0].value.chunk_count} passages indexed`
+              : `${totalChunks} passages indexed across ${successes.length} files`,
+          variant: 'success',
+        })
+        resetForm()
+        await load()
+        onReferenceUploaded?.()
+      }
+
+      if (failures.length > 0) {
+        const firstError = failures[0].reason
+        const firstMessage = firstError instanceof Error ? firstError.message : 'Failed to ingest one or more files'
+        showToast({
+          title: failures.length === 1 ? '1 file failed to ingest' : `${failures.length} files failed to ingest`,
+          description: firstMessage,
+          variant: 'destructive',
+        })
+      }
     } catch (error) {
       showToast({
         title: 'Upload failed',
@@ -195,19 +225,39 @@ export default function ReferenceMaterialsPanel({
         <input
           ref={fileInputRef}
           type="file"
+          multiple
           accept=".pdf,.doc,.docx,application/pdf"
-          onChange={(e) => handleFileChange(e.target.files?.[0] ?? null)}
+          onChange={(e) => handleFileChange(e.target.files)}
           className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground hover:file:opacity-90"
         />
+        {files.length > 0 && (
+          <div className="space-y-2 rounded-md border border-border bg-muted/20 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Selected files ({files.length})
+            </p>
+            <ul className="space-y-1">
+              {files.map((selectedFile, idx) => (
+                <li key={`${selectedFile.name}-${idx}`} className="text-sm text-foreground">
+                  {idx + 1}. {selectedFile.name}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1 block">
-              Title (auto-filled from file, editable)
+              Title (used only when one file is selected)
             </label>
             <Input
               className="h-8 text-sm"
-              placeholder="Captured from the uploaded file name"
+              placeholder={
+                files.length === 1
+                  ? 'Captured from the uploaded file name'
+                  : 'Select exactly one file to set a custom title'
+              }
               value={title}
+              disabled={files.length !== 1}
               onChange={(e) => {
                 setTitle(e.target.value)
                 setTitleEdited(true)
@@ -232,9 +282,9 @@ export default function ReferenceMaterialsPanel({
           </div>
         </div>
         <div className="flex justify-end">
-          <Button size="sm" onClick={handleUpload} disabled={uploading || !file} className="gap-2">
+          <Button size="sm" onClick={handleUpload} disabled={uploading || files.length === 0} className="gap-2">
             {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-            {uploading ? 'Ingesting…' : 'Upload & ingest'}
+            {uploading ? 'Ingesting…' : files.length > 1 ? `Upload & ingest ${files.length} files` : 'Upload & ingest'}
           </Button>
         </div>
 
