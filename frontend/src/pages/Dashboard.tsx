@@ -470,7 +470,11 @@ export default function Dashboard() {
                   <CourseCard
                     key={course.course_code}
                     course={course}
-                    canDelete={user?.role === 'admin'}
+                    canDelete={
+                      user?.role === 'admin' ||
+                      course.access === 'owner' ||
+                      course.access === 'admin'
+                    }
                     onDelete={code => setDeleteDialog({ open: true, code })}
                     onRequestReview={
                       course.access === 'owner' || course.access === 'admin'
