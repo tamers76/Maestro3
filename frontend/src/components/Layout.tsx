@@ -39,10 +39,8 @@ export default function Layout({ children }: LayoutProps) {
 
   const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+    { path: '/library', icon: Library, label: 'Digital Library' },
     ...(canAuthor ? [{ path: '/courses/new', icon: Plus, label: 'New Course' }] : []),
-    ...(user?.role === 'admin'
-      ? [{ path: '/library', icon: Library, label: 'Digital Library' }]
-      : []),
   ]
 
   const secondaryNavItems = [
