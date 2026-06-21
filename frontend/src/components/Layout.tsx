@@ -273,6 +273,23 @@ export default function Layout({ children }: LayoutProps) {
                     {ROLE_LABELS[user.role] || user.role}
                   </p>
                 </div>
+                <Link
+                  to="/profile"
+                  title="Profile"
+                  className="flex-shrink-0 rounded-full transition-opacity hover:opacity-80"
+                >
+                  {avatarSrc(user.avatar_url) ? (
+                    <img
+                      src={avatarSrc(user.avatar_url)!}
+                      alt={user.name || user.email}
+                      className="h-8 w-8 rounded-full object-cover ring-1 ring-border"
+                    />
+                  ) : (
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                      <UserIcon className="h-4 w-4" />
+                    </span>
+                  )}
+                </Link>
                 <button
                   onClick={handleLogout}
                   title="Sign out"
@@ -294,7 +311,6 @@ export default function Layout({ children }: LayoutProps) {
         >
           <div className="max-w-content mx-auto flex items-center justify-between">
             <span>Developed by the-Code.ai Labs</span>
-            <span>ACIS v3.1.1</span>
           </div>
         </footer>
       </div>

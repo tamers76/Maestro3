@@ -12,6 +12,13 @@ import type { ReviewRequestRecord } from '../db/repos/reviewRequestRepo.js';
 import { resolveCourseAccess } from '../auth/courseAccess.js';
 import * as curriculumStore from '../services/curriculumStore.service.js';
 import { recordAudit } from '../services/audit.service.js';
+import { avatarVersion } from '../services/avatar.service.js';
+
+/** Build a cache-busting avatar URL for a user, or null if they have none. */
+function avatarUrlFor(id: string, avatarPath: string | null | undefined): string | null {
+  if (!avatarPath) return null;
+  return `/api/auth/users/${id}/avatar?v=${avatarVersion(avatarPath) ?? 0}`;
+}
 
 const router = Router();
 
@@ -22,7 +29,7 @@ function partyView(user: Awaited<ReturnType<typeof userRepo.getUserById>>) {
     id: user.id,
     name: user.name,
     email: user.email,
-    avatar_url: user.avatar_path ? `/api/auth/users/${user.id}/avatar` : null,
+    avatar_url: avatarUrlFor(user.id, user.avatar_path),
   };
 }
 
@@ -197,7 +204,7 @@ router.get('/candidates', async (req: Request, res: Response) => {
         id: u.id,
         name: u.name,
         email: u.email,
-        avatar_url: u.avatar_path ? `/api/auth/users/${u.id}/avatar` : null,
+        avatar_url: avatarUrlFor(u.id, u.avatar_path),
       }));
     res.json(candidates);
   } catch (error) {

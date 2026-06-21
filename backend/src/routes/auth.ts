@@ -20,6 +20,7 @@ import {
   saveAvatar,
   resolveAvatarFile,
   streamAvatar,
+  avatarVersion,
 } from '../services/avatar.service.js';
 
 const router = Router();
@@ -44,7 +45,9 @@ function toMePayload(user: UserRecord) {
     department: user.department,
     bio: user.bio,
     phone: user.phone,
-    avatar_url: user.avatar_path ? `/api/auth/users/${user.id}/avatar` : null,
+    avatar_url: user.avatar_path
+      ? `/api/auth/users/${user.id}/avatar?v=${avatarVersion(user.avatar_path) ?? 0}`
+      : null,
   };
 }
 

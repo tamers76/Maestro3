@@ -34,6 +34,22 @@ export function saveAvatar(userId: string, buffer: Buffer, mimeType: string): st
   return filename;
 }
 
+/**
+ * A cache-busting version token for a stored avatar, derived from the file's
+ * last-modified time. Changes whenever the avatar is overwritten, so clients
+ * fetch the fresh image instead of a stale cached one (the URL is otherwise
+ * stable per user).
+ */
+export function avatarVersion(avatarPath: string): number | null {
+  const full = resolveAvatarFile(avatarPath);
+  if (!full) return null;
+  try {
+    return Math.floor(statSync(full).mtimeMs);
+  } catch {
+    return null;
+  }
+}
+
 /** Absolute path for a stored avatar, or null if missing on disk. */
 export function resolveAvatarFile(avatarPath: string): string | null {
   if (!avatarPath) return null;
