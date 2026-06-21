@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import {
-  Settings,
   Plus,
   LayoutDashboard,
   Search,
@@ -10,7 +9,7 @@ import {
   ChevronRight,
   Moon,
   Sun,
-  Users,
+  ShieldAlert,
   LogOut,
   User as UserIcon,
 } from 'lucide-react'
@@ -44,10 +43,7 @@ export default function Layout({ children }: LayoutProps) {
 
   const secondaryNavItems = [
     ...(user?.role === 'admin'
-      ? [
-          { path: '/admin/users', icon: Users, label: 'Users' },
-          { path: '/settings', icon: Settings, label: 'Settings' },
-        ]
+      ? [{ path: '/admin', icon: ShieldAlert, label: 'Admin Center' }]
       : []),
   ]
 
@@ -141,7 +137,7 @@ export default function Layout({ children }: LayoutProps) {
           )}
           <nav className="flex flex-col gap-0.5">
             {secondaryNavItems.map((item) => {
-              const isActive = location.pathname === item.path
+              const isActive = location.pathname.startsWith(item.path)
               return (
                 <Link
                   key={item.path}

@@ -256,6 +256,33 @@ export async function ensureSchema(pool: pg.Pool): Promise<void> {
     CREATE INDEX IF NOT EXISTS course_review_request_reviewer_idx ON course_review_requests (reviewer_id);
     CREATE INDEX IF NOT EXISTS course_review_request_course_idx ON course_review_requests (course_code);
     CREATE INDEX IF NOT EXISTS course_review_request_requester_idx ON course_review_requests (requester_id);
+
+    -- ===== Audit log (append-only high-value action history) =====
+    CREATE TABLE IF NOT EXISTS audit_events (
+      id             serial PRIMARY KEY,
+      actor_user_id  text,
+      actor_email    text NOT NULL DEFAULT '',
+      actor_name     text NOT NULL DEFAULT '',
+      actor_role     text NOT NULL DEFAULT '',
+      action         text NOT NULL,
+      category       text NOT NULL DEFAULT '',
+      entity_type    text NOT NULL DEFAULT '',
+      entity_id      text NOT NULL DEFAULT '',
+      course_code    text NOT NULL DEFAULT '',
+      target_user_id text NOT NULL DEFAULT '',
+      status         text NOT NULL DEFAULT 'success',
+      summary        text NOT NULL DEFAULT '',
+      metadata       jsonb,
+      method         text NOT NULL DEFAULT '',
+      path           text NOT NULL DEFAULT '',
+      ip             text NOT NULL DEFAULT '',
+      created_at     timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS audit_events_actor_idx ON audit_events (actor_user_id);
+    CREATE INDEX IF NOT EXISTS audit_events_course_idx ON audit_events (course_code);
+    CREATE INDEX IF NOT EXISTS audit_events_entity_idx ON audit_events (entity_type, entity_id);
+    CREATE INDEX IF NOT EXISTS audit_events_action_idx ON audit_events (action);
+    CREATE INDEX IF NOT EXISTS audit_events_created_at_idx ON audit_events (created_at);
   `);
 }
 

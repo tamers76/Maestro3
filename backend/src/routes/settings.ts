@@ -1,10 +1,37 @@
 import { Router, Request, Response } from 'express';
+import pg from 'pg';
 import { getSettings, updateSettings, clearSettingsCache, getRecommendedPrompts } from '../config.js';
 import { initNeo4j } from '../services/neo4j.service.js';
 import { checkEmbeddingHealth } from '../services/embedding.service.js';
+import { getPostgresStatus } from '../db/client.js';
+import { recordAudit } from '../services/audit.service.js';
 import type { Settings } from '../models/schemas.js';
 
 const router = Router();
+
+/**
+ * Mask the Postgres connection for display. The connection string and password
+ * are secrets, so we never echo them; we return a masked placeholder when set so
+ * the UI can show "configured" without leaking the value. A masked echo on PUT is
+ * treated as "no change" (see chooseSecret in config.ts).
+ */
+function maskPostgres(pgSettings: Settings['postgres']): Settings['postgres'] {
+  return {
+    ...pgSettings,
+    connectionString: pgSettings.connectionString
+      ? `${pgSettings.connectionString.slice(0, 12)}...${pgSettings.connectionString.slice(-4)}`
+      : '',
+    password: pgSettings.password ? '********' : '',
+  };
+}
+
+/** Field names whose VALUES must never be written to the audit log. */
+const SETTINGS_SECRET_FIELDS = new Set(['openrouter', 'openai', 'neo4j', 'postgres']);
+
+/** Top-level setting keys present in a partial update (for audit metadata). */
+function changedSettingKeys(updates: Partial<Settings>): string[] {
+  return Object.keys(updates || {});
+}
 
 function neo4jCredentialsChanged(
   before: Settings['neo4j'],
@@ -62,7 +89,8 @@ router.get('/', async (_req: Request, res: Response) => {
       neo4j: {
         ...settings.neo4j,
         password: settings.neo4j.password ? '********' : ''
-      }
+      },
+      postgres: maskPostgres(settings.postgres),
     };
     
     res.json(maskedSettings);
@@ -134,8 +162,22 @@ router.put('/', async (req: Request, res: Response) => {
       neo4j: {
         ...updated.neo4j,
         password: updated.neo4j.password ? '********' : ''
-      }
+      },
+      postgres: maskPostgres(updated.postgres),
     };
+
+    const changedKeys = changedSettingKeys(updates);
+    void recordAudit(req, {
+      action: 'settings.update',
+      category: 'settings',
+      entityType: 'app_settings',
+      summary: `Updated settings: ${changedKeys.join(', ') || '(none)'}`,
+      metadata: {
+        changed: changedKeys,
+        // Flag which secret-bearing sections were touched, never their values.
+        secrets_touched: changedKeys.filter((k) => SETTINGS_SECRET_FIELDS.has(k)),
+      },
+    });
     
     res.json({ 
       message: 'Settings updated successfully',
@@ -246,6 +288,54 @@ router.post('/test-neo4j', async (_req: Request, res: Response) => {
       success: false, 
       error: error instanceof Error ? error.message : 'Connection failed' 
     });
+  }
+});
+
+// GET /api/settings/postgres-status - Live status of the ACTIVE Postgres pool.
+// The active pool is created at startup; changes saved here apply on next restart
+// (we never hot-swap the live pool mid-request). This surfaces that distinction.
+router.get('/postgres-status', async (_req: Request, res: Response) => {
+  try {
+    res.json(getPostgresStatus());
+  } catch (error) {
+    res.status(500).json({
+      connected: false,
+      last_error: error instanceof Error ? error.message : 'Failed to read status',
+    });
+  }
+});
+
+// POST /api/settings/test-postgres - Validate a Postgres connection WITHOUT
+// touching the live pool. Accepts an optional { connectionString } in the body so
+// the admin can test the value they just typed (a masked/empty value falls back
+// to the stored connection). This guards against saving a value that would brick
+// the next boot.
+router.post('/test-postgres', async (req: Request, res: Response) => {
+  let pool: pg.Pool | null = null;
+  try {
+    const settings = getSettings();
+    const bodyConn =
+      typeof req.body?.connectionString === 'string' ? req.body.connectionString.trim() : '';
+    const connectionString =
+      bodyConn && !bodyConn.includes('...') ? bodyConn : settings.postgres.connectionString?.trim();
+    if (!connectionString) {
+      throw new Error('No Postgres connection string configured. Enter a value and try again.');
+    }
+    pool = new pg.Pool({ connectionString, max: 1, connectionTimeoutMillis: 5000 });
+    const client = await pool.connect();
+    try {
+      await client.query('SELECT 1');
+    } finally {
+      client.release();
+    }
+    res.json({ success: true, message: 'Postgres connection successful' });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Connection failed',
+    });
+  } finally {
+    if (pool) await pool.end().catch(() => undefined);
   }
 });
 

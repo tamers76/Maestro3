@@ -11,6 +11,7 @@ import * as reviewRequestRepo from '../db/repos/reviewRequestRepo.js';
 import type { ReviewRequestRecord } from '../db/repos/reviewRequestRepo.js';
 import { resolveCourseAccess } from '../auth/courseAccess.js';
 import * as curriculumStore from '../services/curriculumStore.service.js';
+import { recordAudit } from '../services/audit.service.js';
 
 const router = Router();
 
@@ -97,6 +98,15 @@ router.post('/', async (req: Request, res: Response) => {
       reviewerId,
       message,
     });
+    void recordAudit(req, {
+      action: 'review_request.create',
+      category: 'review',
+      entityType: 'review_request',
+      entityId: created.id,
+      courseCode,
+      targetUserId: reviewerId,
+      summary: `Requested review of ${courseCode} from ${reviewer.email}`,
+    });
     res.status(201).json(created);
   } catch (error) {
     console.error('[ReviewRequests] create failed:', error);
@@ -141,6 +151,15 @@ router.post('/:id/respond', async (req: Request, res: Response) => {
     } else {
       await reviewRequestRepo.setStatus(request.id, 'declined');
     }
+    void recordAudit(req, {
+      action: action === 'accept' ? 'review_request.accept' : 'review_request.decline',
+      category: 'review',
+      entityType: 'review_request',
+      entityId: request.id,
+      courseCode: request.course_code,
+      targetUserId: request.requester_id,
+      summary: `${action === 'accept' ? 'Accepted' : 'Declined'} review of ${request.course_code}`,
+    });
     res.json({ ok: true, status: action === 'accept' ? 'accepted' : 'declined' });
   } catch (error) {
     console.error('[ReviewRequests] respond failed:', error);

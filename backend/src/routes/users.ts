@@ -11,6 +11,7 @@ import * as courseStore from '../services/curriculumStore.service.js';
 import { hashPassword } from '../auth/password.js';
 import { requireAuth, requireRole } from '../auth/middleware.js';
 import { isRole, type UserRole } from '../auth/permissions.js';
+import { recordAudit } from '../services/audit.service.js';
 
 const router = Router();
 
@@ -56,6 +57,15 @@ router.post('/', async (req: Request, res: Response) => {
       role: role as UserRole,
       passwordHash: await hashPassword(password),
     });
+    void recordAudit(req, {
+      action: 'user.create',
+      category: 'user',
+      entityType: 'user',
+      entityId: user.id,
+      targetUserId: user.id,
+      summary: `Created ${role} ${email}`,
+      metadata: { email, name, role },
+    });
     res.status(201).json({ user });
   } catch (error) {
     console.error('[Users] create failed:', error);
@@ -74,6 +84,14 @@ router.patch('/:id/active', async (req: Request, res: Response) => {
     const user = await userRepo.getUserById(id);
     if (!user) return res.status(404).json({ error: 'User not found' });
     await userRepo.setUserActive(id, isActive);
+    void recordAudit(req, {
+      action: isActive ? 'user.activate' : 'user.deactivate',
+      category: 'user',
+      entityType: 'user',
+      entityId: id,
+      targetUserId: id,
+      summary: `${isActive ? 'Activated' : 'Deactivated'} ${user.email}`,
+    });
     res.json({ user: { ...user, is_active: isActive } });
   } catch (error) {
     console.error('[Users] set active failed:', error);
@@ -92,6 +110,14 @@ router.post('/:id/password', async (req: Request, res: Response) => {
     const user = await userRepo.getUserById(id);
     if (!user) return res.status(404).json({ error: 'User not found' });
     await userRepo.updatePassword(id, await hashPassword(password));
+    void recordAudit(req, {
+      action: 'user.password_reset',
+      category: 'user',
+      entityType: 'user',
+      entityId: id,
+      targetUserId: id,
+      summary: `Reset password for ${user.email}`,
+    });
     res.json({ success: true });
   } catch (error) {
     console.error('[Users] reset password failed:', error);
@@ -139,6 +165,15 @@ router.put('/courses/:code/owner', async (req: Request, res: Response) => {
       }
     }
     await userRepo.setCourseOwner(code, ownerUserId ?? null);
+    void recordAudit(req, {
+      action: ownerUserId ? 'course.owner_set' : 'course.owner_cleared',
+      category: 'access',
+      entityType: 'course',
+      entityId: code,
+      courseCode: code,
+      targetUserId: ownerUserId ?? '',
+      summary: ownerUserId ? `Set owner of ${code}` : `Cleared owner of ${code}`,
+    });
     res.json({ success: true, owner_user_id: ownerUserId ?? null });
   } catch (error) {
     console.error('[Users] set owner failed:', error);
@@ -161,6 +196,15 @@ router.post('/courses/:code/reviewers', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Only professors can be assigned as reviewers' });
     }
     await userRepo.assignReviewer(code, professorId, req.user?.id ?? '');
+    void recordAudit(req, {
+      action: 'course.reviewer_assigned',
+      category: 'access',
+      entityType: 'course',
+      entityId: code,
+      courseCode: code,
+      targetUserId: professorId,
+      summary: `Assigned reviewer ${prof.email} to ${code}`,
+    });
     res.status(201).json({ success: true });
   } catch (error) {
     console.error('[Users] assign reviewer failed:', error);
@@ -173,6 +217,15 @@ router.delete('/courses/:code/reviewers/:professorId', async (req: Request, res:
   try {
     const { code, professorId } = req.params;
     await userRepo.removeReviewer(code, professorId);
+    void recordAudit(req, {
+      action: 'course.reviewer_removed',
+      category: 'access',
+      entityType: 'course',
+      entityId: code,
+      courseCode: code,
+      targetUserId: professorId,
+      summary: `Removed reviewer from ${code}`,
+    });
     res.json({ success: true });
   } catch (error) {
     console.error('[Users] remove reviewer failed:', error);
@@ -195,6 +248,15 @@ router.post('/courses/:code/students', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Only students can be assigned for consumption' });
     }
     await userRepo.assignStudent(code, studentId, req.user?.id ?? '');
+    void recordAudit(req, {
+      action: 'course.student_assigned',
+      category: 'access',
+      entityType: 'course',
+      entityId: code,
+      courseCode: code,
+      targetUserId: studentId,
+      summary: `Assigned student ${student.email} to ${code}`,
+    });
     res.status(201).json({ success: true });
   } catch (error) {
     console.error('[Users] assign student failed:', error);
@@ -207,6 +269,15 @@ router.delete('/courses/:code/students/:studentId', async (req: Request, res: Re
   try {
     const { code, studentId } = req.params;
     await userRepo.removeStudent(code, studentId);
+    void recordAudit(req, {
+      action: 'course.student_removed',
+      category: 'access',
+      entityType: 'course',
+      entityId: code,
+      courseCode: code,
+      targetUserId: studentId,
+      summary: `Removed student from ${code}`,
+    });
     res.json({ success: true });
   } catch (error) {
     console.error('[Users] remove student failed:', error);

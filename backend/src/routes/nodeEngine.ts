@@ -113,6 +113,7 @@ import {
   updateNodeGenerationPrompt,
 } from '../node-engine/nodeGenerationPrompt.service.js';
 import { requireRole, courseAccessParamHandler } from '../auth/middleware.js';
+import { recordAudit } from '../services/audit.service.js';
 
 const router = Router();
 
@@ -187,6 +188,15 @@ router.put('/prompt-templates/:id', requireRole('admin'), async (req: Request, r
       status: status as never,
       last_updated_by,
       change_note,
+    });
+
+    void recordAudit(req, {
+      action: 'config.prompt_template_update',
+      category: 'settings',
+      entityType: 'prompt_template',
+      entityId: req.params.id,
+      summary: `Updated prompt template "${req.params.id}" (new version)`,
+      metadata: { change_note },
     });
 
     res.json({ message: 'Prompt template updated (new version created)', template: updated });
@@ -314,6 +324,14 @@ router.put('/modality-config/:vehicle', requireRole('admin'), async (req: Reques
     }
 
     const updated = await updateConfigForVehicle(vehicle, update);
+    void recordAudit(req, {
+      action: 'config.modality_update',
+      category: 'settings',
+      entityType: 'modality_config',
+      entityId: vehicle,
+      summary: `Updated modality config for "${vehicle}"`,
+      metadata: { fields: Object.keys(update) },
+    });
     res.json({
       message: 'Modality config updated (no prompt-template version created)',
       config: hydrateTaskPrompt(updated),
@@ -512,6 +530,13 @@ router.put('/reference-coverage-config', requireRole('admin'), async (req: Reque
       distributionMin: Math.round(requireNumberInRange(raw.distributionMin, 'distributionMin', 1, 100)),
     };
     const config = await updateReferenceCoverageConfig(thresholds);
+    void recordAudit(req, {
+      action: 'config.reference_coverage_update',
+      category: 'settings',
+      entityType: 'reference_coverage_config',
+      summary: 'Updated reference coverage thresholds',
+      metadata: { thresholds },
+    });
     res.json({
       message: 'Reference coverage thresholds updated (no prompt-template version created)',
       config,
@@ -557,6 +582,13 @@ router.put('/node-generation-prompt', requireRole('admin'), async (req: Request,
       output_schema_ref: typeof output_schema_ref === 'string' ? output_schema_ref : undefined,
       last_updated_by,
       change_note,
+    });
+    void recordAudit(req, {
+      action: 'config.node_generation_prompt_update',
+      category: 'settings',
+      entityType: 'node_generation_prompt',
+      summary: 'Updated node-generation prompt (new version)',
+      metadata: { change_note },
     });
     res.json({ message: 'Node-generation prompt updated (new version created)', prompt: updated });
   } catch (error) {
@@ -619,6 +651,15 @@ router.post(
         : undefined;
       const overrideReason = typeof body.overrideReason === 'string' ? body.overrideReason : undefined;
       const nodeSet = await approveNodeSet(courseCode, subtopicId, { approver, nodeIds, overrideReason });
+      void recordAudit(req, {
+        action: 'node_set.approve',
+        category: 'approval',
+        entityType: 'node_set',
+        entityId: `${courseCode}/${subtopicId}`,
+        courseCode,
+        summary: `Approved node-set for ${courseCode}/${subtopicId}`,
+        metadata: { approver, nodeCount: nodeIds?.length, override: !!overrideReason },
+      });
       res.json({ message: 'Node-set approval updated', node_set: nodeSet });
     } catch (error) {
       if (error instanceof AcademicApprovalRequiredError) {

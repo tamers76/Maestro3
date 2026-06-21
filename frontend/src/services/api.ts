@@ -1179,14 +1179,34 @@ export interface Settings {
     user: string;
     password: string;
   };
+  // Postgres (primary DB). connectionString is authoritative; discrete fields are
+  // a fallback. Secrets are returned masked from the API.
+  postgres: PostgresSettings;
   // New per-stage model configuration
   stageConfigs: StageConfigs;
   // Global council settings (temperature, prompts)
   councilSettings: CouncilSettings;
+  // Node Engine global defaults (system fallback models)
+  nodeEngineDefaults?: NodeEngineDefaults;
   // Legacy fields (kept for backward compatibility)
   council: CouncilConfig;
   stageExecution: StageExecution;
   stage1Layers?: Stage1LayerConfig[];
+}
+
+export interface PostgresSettings {
+  connectionString: string;
+  host?: string;
+  port?: number;
+  user?: string;
+  password?: string;
+  database?: string;
+  poolMax?: number;
+}
+
+export interface NodeEngineDefaults {
+  defaultModel?: string;
+  contextHeaderModel?: string;
 }
 
 export type Stage1LayerStatus =
@@ -1404,6 +1424,100 @@ export async function fetchEmbeddingHealth(): Promise<EmbeddingHealth> {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || 'Failed to check embedding health');
   return data;
+}
+
+export interface PostgresStatus {
+  connected: boolean;
+  last_error: string | null;
+}
+
+/** Status of the ACTIVE Postgres pool (created at startup). */
+export async function fetchPostgresStatus(): Promise<PostgresStatus> {
+  const response = await fetch(`${API_BASE}/settings/postgres-status`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to read Postgres status');
+  return data;
+}
+
+/** Validate a Postgres connection string without touching the live pool. */
+export async function testPostgresConnection(connectionString?: string): Promise<{ success: boolean; message?: string; error?: string }> {
+  const response = await fetch(`${API_BASE}/settings/test-postgres`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ connectionString }),
+  });
+  return response.json();
+}
+
+// ============================================================================
+// Audit log (Admin Center)
+// ============================================================================
+
+export interface AuditEvent {
+  id: number;
+  actor_user_id: string | null;
+  actor_email: string;
+  actor_name: string;
+  actor_role: string;
+  action: string;
+  category: string;
+  entity_type: string;
+  entity_id: string;
+  course_code: string;
+  target_user_id: string;
+  status: string;
+  summary: string;
+  metadata: unknown;
+  method: string;
+  path: string;
+  ip: string;
+  created_at: string;
+}
+
+export interface AuditEventPage {
+  events: AuditEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface AuditFilters {
+  actor_user_id?: string;
+  course_code?: string;
+  entity_type?: string;
+  entity_id?: string;
+  action?: string;
+  category?: string;
+  status?: string;
+  from?: string;
+  to?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export async function listAuditEvents(filters: AuditFilters = {}): Promise<AuditEventPage> {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && `${v}` !== '') params.set(k, String(v));
+  });
+  const response = await fetch(`${API_BASE}/audit?${params.toString()}`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error((data as { error?: string }).error || 'Failed to load audit events');
+  return data as AuditEventPage;
+}
+
+export interface AuditFacets {
+  actions: string[];
+  categories: string[];
+  entityTypes: string[];
+}
+
+export async function fetchAuditFacets(): Promise<AuditFacets> {
+  const response = await fetch(`${API_BASE}/audit/facets`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error((data as { error?: string }).error || 'Failed to load audit facets');
+  return data as AuditFacets;
 }
 
 // Recommended prompts interface (from backend defaults)

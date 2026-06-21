@@ -76,6 +76,7 @@ import type {
 } from '../models/schemas.js';
 import { assertAIConfigured } from '../services/council.service.js';
 import { requireRole, courseAccessParamHandler } from '../auth/middleware.js';
+import { recordAudit } from '../services/audit.service.js';
 import * as userRepo from '../db/repos/userRepo.js';
 import { listAccessibleCourseCodes } from '../auth/courseAccess.js';
 import { LEGACY_STAGES_ENABLED, isLegacyStage } from '../config/featureFlags.js';
@@ -339,6 +340,16 @@ router.post('/', upload.single('file'), async (req: Request, res: Response) => {
       await userRepo.setCourseOwner(createdCode, req.user.id);
     }
 
+    void recordAudit(req, {
+      action: 'course.create',
+      category: 'course',
+      entityType: 'course',
+      entityId: createdCode ?? '',
+      courseCode: createdCode ?? '',
+      summary: `Created course ${createdCode ?? '(unknown)'} from upload "${file.originalname}"`,
+      metadata: { source: 'file', filename: file.originalname },
+    });
+
     res.status(201).json(result);
   } catch (error) {
     console.error('Error creating course:', error);
@@ -391,6 +402,16 @@ router.post('/form', async (req: Request, res: Response) => {
       await userRepo.setCourseOwner(course_code, req.user.id);
     }
 
+    void recordAudit(req, {
+      action: 'course.create',
+      category: 'course',
+      entityType: 'course',
+      entityId: course_code,
+      courseCode: course_code,
+      summary: `Created course ${course_code} from manual entry`,
+      metadata: { source: 'form', title },
+    });
+
     res.status(201).json(result);
   } catch (error) {
     console.error('Error creating course from form:', error);
@@ -416,6 +437,15 @@ router.delete('/:code', requireRole('admin'), async (req: Request, res: Response
     // Delete files
     await fileService.deleteCourseDirectory(code);
     
+    void recordAudit(req, {
+      action: 'course.delete',
+      category: 'course',
+      entityType: 'course',
+      entityId: code,
+      courseCode: code,
+      summary: `Deleted course ${code}`,
+    });
+
     res.json({ message: `Course ${code} deleted successfully` });
   } catch (error) {
     console.error('Error deleting course:', error);
@@ -1022,6 +1052,15 @@ router.post('/:code/stage1/layers/:layerId/approve', async (req: Request, res: R
     const state = await approveStage1Layer(code, layerId);
     const layers = await getLayerStateViews(code);
     const allApproved = await allStage1LayersApproved(code);
+    void recordAudit(req, {
+      action: 'course.stage1_layer_approve',
+      category: 'approval',
+      entityType: 'stage1_layer',
+      entityId: `${code}/${layerId}`,
+      courseCode: code,
+      summary: `Approved Stage 1 layer "${layerId}" for ${code}`,
+      metadata: { layerId, allApproved },
+    });
     res.json({
       message: 'Layer approved',
       layer: state,
@@ -1047,6 +1086,15 @@ router.post('/:code/stage1/layers/:layerId/reject', async (req: Request, res: Re
 
     const state = await rejectStage1Layer(code, layerId);
     const layers = await getLayerStateViews(code);
+    void recordAudit(req, {
+      action: 'course.stage1_layer_reject',
+      category: 'approval',
+      entityType: 'stage1_layer',
+      entityId: `${code}/${layerId}`,
+      courseCode: code,
+      summary: `Marked Stage 1 layer "${layerId}" for revision for ${code}`,
+      metadata: { layerId },
+    });
     res.json({ message: 'Layer marked for revision', layer: state, layers });
   } catch (error) {
     console.error('Error rejecting Stage 1 layer:', error);

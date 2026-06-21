@@ -4,3 +4,4 @@ export * from './references.js';
 export * from './nodeEngine.js';
 export * from './artifacts.js';
 export * from './auth.js';
+export * from './audit.js';

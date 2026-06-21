@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from './components/ui/Toaster'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { AuthProvider } from './contexts/AuthContext'
@@ -6,14 +6,21 @@ import ProtectedRoute from './components/ProtectedRoute'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import CourseDetail from './pages/CourseDetail'
-import Settings from './pages/Settings'
 import NewCourse from './pages/NewCourse'
 import Login from './pages/Login'
-import Admin from './pages/Admin'
 import Profile from './pages/Profile'
 import HeroSection from './components/HeroSection'
 import CourseWizard from './components/wizard/CourseWizard'
 import { LEGACY_STAGES_ENABLED } from './config/featureFlags'
+import AdminCenter from './pages/admin/AdminCenter'
+import UsersPage from './pages/admin/UsersPage'
+import CourseAccessPage from './pages/admin/CourseAccessPage'
+import ApiKeysPage from './pages/admin/ApiKeysPage'
+import DatabasePage from './pages/admin/DatabasePage'
+import ModelsPage from './pages/admin/ModelsPage'
+import PromptsPage from './pages/admin/PromptsPage'
+import RagPage from './pages/admin/RagPage'
+import AuditPage from './pages/admin/AuditPage'
 
 function App() {
   return (
@@ -54,22 +61,28 @@ function App() {
               </ProtectedRoute>
             }
           />
+          {/* Compatibility redirects for the previous routes */}
+          <Route path="/settings" element={<Navigate to="/admin/api-keys" replace />} />
+
+          {/* Admin Center — admin-only routed shell with browsable sub-pages */}
           <Route
-            path="/settings"
+            path="/admin"
             element={
               <ProtectedRoute roles={['admin']}>
-                <Layout><Settings /></Layout>
+                <Layout><AdminCenter /></Layout>
               </ProtectedRoute>
             }
-          />
-          <Route
-            path="/admin/users"
-            element={
-              <ProtectedRoute roles={['admin']}>
-                <Layout><Admin /></Layout>
-              </ProtectedRoute>
-            }
-          />
+          >
+            <Route index element={<Navigate to="/admin/users" replace />} />
+            <Route path="users" element={<UsersPage />} />
+            <Route path="access" element={<CourseAccessPage />} />
+            <Route path="api-keys" element={<ApiKeysPage />} />
+            <Route path="database" element={<DatabasePage />} />
+            <Route path="models" element={<ModelsPage />} />
+            <Route path="prompts" element={<PromptsPage />} />
+            <Route path="rag" element={<RagPage />} />
+            <Route path="audit" element={<AuditPage />} />
+          </Route>
           <Route
             path="/profile"
             element={

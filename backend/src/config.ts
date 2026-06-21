@@ -457,17 +457,15 @@ export function loadSettings(): Settings {
 }
 
 /**
- * Strip only the Postgres connection secrets, which are managed exclusively via
- * environment/.env (the DB pool is bootstrapped from env before settings exist).
- * API keys (OpenRouter/OpenAI) and the Neo4j password ARE persisted to
- * `app_settings` so credentials entered in the UI survive a server restart.
- * Environment variables still take precedence at load time (overlayEnvSecrets).
+ * Persist settings as-is. API keys (OpenRouter/OpenAI), the Neo4j password, and
+ * the Postgres connection (connection string / password) are all persisted to
+ * `app_settings` so credentials entered in the Admin Center survive a restart.
+ * Environment variables still take precedence at load time (overlayEnvSecrets):
+ * if DATABASE_URL/PG* are set, they always win over the persisted Postgres value,
+ * so saving a bad value cannot override an env-managed deployment.
  */
 function sanitizeSettings(settings: Settings): Settings {
-  return {
-    ...settings,
-    postgres: { ...settings.postgres, connectionString: '', password: '' },
-  };
+  return { ...settings };
 }
 
 /**
@@ -570,7 +568,15 @@ export async function updateSettings(newSettings: Partial<Settings>): Promise<Se
       ...newSettings.neo4j,
       password: chooseSecret(newSettings.neo4j?.password, current.neo4j.password),
     },
-    postgres: { ...current.postgres, ...newSettings.postgres },
+    postgres: {
+      ...current.postgres,
+      ...newSettings.postgres,
+      connectionString: chooseSecret(
+        newSettings.postgres?.connectionString,
+        current.postgres.connectionString || ''
+      ),
+      password: chooseSecret(newSettings.postgres?.password, current.postgres.password || ''),
+    },
     // NEW: Per-stage configs with deep merge
     stageConfigs: {
       stage1: { ...current.stageConfigs.stage1, ...newSettings.stageConfigs?.stage1 },
