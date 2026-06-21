@@ -2613,6 +2613,83 @@ export async function listReferences(code: string): Promise<ReferenceDocument[]>
   return data.documents ?? [];
 }
 
+// ----------------------------------------------------------------------------
+// Reference ingestion live progress (SSE)
+// ----------------------------------------------------------------------------
+
+export type IngestionPhase =
+  | 'queued'
+  | 'fetching'
+  | 'extracting'
+  | 'chunking'
+  | 'contextualizing'
+  | 'embedding'
+  | 'indexing'
+  | 'done'
+  | 'error';
+
+export interface IngestionProgress {
+  jobId: string;
+  courseCode?: string;
+  phase: IngestionPhase;
+  status: 'running' | 'completed' | 'error';
+  message?: string;
+  percent: number;
+  current?: number;
+  total?: number;
+  chunkCount?: number;
+  charCount?: number;
+  docTitle?: string;
+  filename?: string;
+  error?: string;
+  updatedAt?: number;
+}
+
+/** Generate a client-side ingestion job id (used to correlate upload + SSE). */
+export function newIngestionJobId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return `job-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+/**
+ * Subscribe to live progress for ALL ingestion jobs in a course over a SINGLE
+ * SSE connection (events are demuxed by `jobId`). Using one stream per batch — not
+ * one per file — avoids exhausting the browser's per-host connection pool, which
+ * otherwise blocks the upload POSTs from running. Resolves (with an unsubscribe
+ * function) once the connection is open so callers can await it BEFORE uploading.
+ */
+export function subscribeToCourseIngestion(
+  code: string,
+  onProgress: (update: IngestionProgress) => void,
+  onError?: (error: Event) => void
+): Promise<() => void> {
+  return new Promise((resolve) => {
+    const eventSource = new EventSource(
+      withAccessToken(`${API_BASE}/courses/${encodeURIComponent(code)}/references/ingest/stream`)
+    );
+
+    eventSource.onopen = () => {
+      resolve(() => eventSource.close());
+    };
+
+    eventSource.onmessage = (event) => {
+      try {
+        const update = JSON.parse(event.data) as IngestionProgress;
+        onProgress(update);
+      } catch (e) {
+        console.error('Failed to parse ingestion progress update:', e);
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      if (onError) onError(error);
+      resolve(() => eventSource.close());
+    };
+  });
+}
+
 export async function uploadReference(
   code: string,
   file: File,
@@ -2622,6 +2699,7 @@ export async function uploadReference(
     citation_label?: string;
     clo_ids?: string[];
     subtopic_ids?: string[];
+    job_id?: string;
   } = {}
 ): Promise<ReferenceDocument> {
   const formData = new FormData();
@@ -2631,6 +2709,7 @@ export async function uploadReference(
   if (meta.citation_label) formData.append('citation_label', meta.citation_label);
   if (meta.clo_ids?.length) formData.append('clo_ids', JSON.stringify(meta.clo_ids));
   if (meta.subtopic_ids?.length) formData.append('subtopic_ids', JSON.stringify(meta.subtopic_ids));
+  if (meta.job_id) formData.append('job_id', meta.job_id);
 
   const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/references`, {
     method: 'POST',
@@ -2647,7 +2726,7 @@ export async function uploadReference(
 export async function uploadReferenceFromLink(
   code: string,
   url: string,
-  meta: { title?: string; source_type?: ReferenceSourceType } = {}
+  meta: { title?: string; source_type?: ReferenceSourceType; job_id?: string } = {}
 ): Promise<ReferenceDocument> {
   const response = await fetch(`${API_BASE}/courses/${encodeURIComponent(code)}/references/link`, {
     method: 'POST',

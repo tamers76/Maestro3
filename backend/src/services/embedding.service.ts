@@ -96,8 +96,14 @@ async function embedOllamaSingle(input: string, model: string): Promise<number[]
 
 /**
  * Embed a batch of texts. Returns one vector per input, in input order.
+ *
+ * `onProgress(done, total)` (optional) is invoked after each provider batch/item
+ * so callers can surface live embedding progress.
  */
-export async function embedTexts(texts: string[]): Promise<EmbeddingResult> {
+export async function embedTexts(
+  texts: string[],
+  onProgress?: (done: number, total: number) => void
+): Promise<EmbeddingResult> {
   const config = getEmbeddingConfig();
   if (texts.length === 0) {
     return { vectors: [], model: config.model, dimensions: config.dimensions };
@@ -109,11 +115,13 @@ export async function embedTexts(texts: string[]): Promise<EmbeddingResult> {
     for (let i = 0; i < texts.length; i += OPENAI_BATCH_SIZE) {
       const batch = texts.slice(i, i + OPENAI_BATCH_SIZE);
       vectors.push(...(await embedOpenAIBatch(batch, config.model)));
+      onProgress?.(Math.min(vectors.length, texts.length), texts.length);
     }
   } else {
     // Ollama embeds one prompt per request.
     for (const text of texts) {
       vectors.push(await embedOllamaSingle(text, config.model));
+      onProgress?.(vectors.length, texts.length);
     }
   }
 

@@ -7,9 +7,13 @@ import {
   uploadReference,
   uploadReferenceFromLink,
   deleteReference,
+  subscribeToCourseIngestion,
+  newIngestionJobId,
   type ReferenceDocument,
   type ReferenceSourceType,
+  type IngestionProgress,
 } from '@/services/api'
+import IngestionProgressCard from '@/components/IngestionProgressCard'
 import { Loader2, Upload, Trash2, BookOpen, FileText, Link as LinkIcon, AlertTriangle } from 'lucide-react'
 
 const SOURCE_TYPE_OPTIONS: { value: ReferenceSourceType; label: string }[] = [
@@ -17,6 +21,31 @@ const SOURCE_TYPE_OPTIONS: { value: ReferenceSourceType; label: string }[] = [
   { value: 'paper', label: 'Paper' },
   { value: 'other', label: 'Other' },
 ]
+
+/** Ingest one file at a time so the SME sees a clear one-by-one activity list. */
+const UPLOAD_CONCURRENCY = 1
+
+/** Run `worker` over `items` with bounded concurrency, returning allSettled-style results. */
+async function runSettledWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length)
+  let cursor = 0
+  const runner = async () => {
+    while (cursor < items.length) {
+      const index = cursor++
+      try {
+        results[index] = { status: 'fulfilled', value: await worker(items[index], index) }
+      } catch (reason) {
+        results[index] = { status: 'rejected', reason }
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, runner))
+  return results
+}
 
 interface ReferenceMaterialsPanelProps {
   courseCode: string
@@ -61,7 +90,19 @@ export default function ReferenceMaterialsPanel({
   )
   const [linkUrl, setLinkUrl] = useState(initialLinkUrl ?? '')
   const [linking, setLinking] = useState(false)
+  // Live per-job ingestion progress (one card per in-flight upload/link).
+  const [ingestJobs, setIngestJobs] = useState<IngestionProgress[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const upsertJob = useCallback((update: IngestionProgress) => {
+    setIngestJobs((prev) => {
+      const idx = prev.findIndex((j) => j.jobId === update.jobId)
+      if (idx === -1) return [...prev, update]
+      const next = prev.slice()
+      next[idx] = { ...next[idx], ...update }
+      return next
+    })
+  }, [])
 
   const load = useCallback(async () => {
     try {
@@ -110,16 +151,32 @@ export default function ReferenceMaterialsPanel({
       showToast({ title: 'No files', description: 'Choose one or more PDF/DOCX files first.', variant: 'destructive' })
       return
     }
+    setIngestJobs([])
+    const jobs = files.map((file) => ({ file, jobId: newIngestionJobId() }))
+    let unsubscribe: (() => void) | undefined
     try {
       setUploading(true)
       const singleFileTitle = files.length === 1 ? title.trim() || undefined : undefined
-      const results = await Promise.allSettled(
-        files.map((file) =>
-          uploadReference(courseCode, file, {
-            title: singleFileTitle,
-            source_type: sourceType,
-          })
-        )
+
+      // Seed a card per file, then open ONE multiplexed SSE stream BEFORE uploading
+      // so we don't miss early phase events (and don't starve the connection pool).
+      setIngestJobs(
+        jobs.map(({ file, jobId }) => ({
+          jobId,
+          phase: 'queued' as const,
+          status: 'running' as const,
+          percent: 0,
+          filename: file.name,
+        }))
+      )
+      unsubscribe = await subscribeToCourseIngestion(courseCode, upsertJob)
+
+      const results = await runSettledWithConcurrency(jobs, UPLOAD_CONCURRENCY, ({ file, jobId }) =>
+        uploadReference(courseCode, file, {
+          title: singleFileTitle,
+          source_type: sourceType,
+          job_id: jobId,
+        })
       )
       const successes = results.filter(
         (r): r is PromiseFulfilledResult<ReferenceDocument> => r.status === 'fulfilled'
@@ -157,7 +214,14 @@ export default function ReferenceMaterialsPanel({
         variant: 'destructive',
       })
     } finally {
+      unsubscribe?.()
       setUploading(false)
+      // Keep error cards visible; auto-dismiss once everything finished cleanly.
+      setIngestJobs((prev) => {
+        if (prev.some((j) => j.status === 'error')) return prev
+        setTimeout(() => setIngestJobs([]), 2500)
+        return prev
+      })
     }
   }
 
@@ -167,9 +231,20 @@ export default function ReferenceMaterialsPanel({
       showToast({ title: 'No link', description: 'Paste a PDF URL first.', variant: 'destructive' })
       return
     }
+    setIngestJobs([])
+    const jobId = newIngestionJobId()
+    let unsubscribe: (() => void) | undefined
     try {
       setLinking(true)
-      const doc = await uploadReferenceFromLink(courseCode, url, { source_type: sourceType })
+      setIngestJobs([
+        { jobId, phase: 'queued', status: 'running', percent: 0, filename: url },
+      ])
+      unsubscribe = await subscribeToCourseIngestion(courseCode, upsertJob)
+
+      const doc = await uploadReferenceFromLink(courseCode, url, {
+        source_type: sourceType,
+        job_id: jobId,
+      })
       showToast({
         title: 'Reference ingested',
         description: `${doc.title} — ${doc.chunk_count} passages indexed`,
@@ -185,7 +260,13 @@ export default function ReferenceMaterialsPanel({
         variant: 'destructive',
       })
     } finally {
+      unsubscribe?.()
       setLinking(false)
+      setIngestJobs((prev) => {
+        if (prev.some((j) => j.status === 'error')) return prev
+        setTimeout(() => setIngestJobs([]), 2500)
+        return prev
+      })
     }
   }
 
@@ -323,6 +404,20 @@ export default function ReferenceMaterialsPanel({
           </p>
         </div>
       </div>
+
+      {/* Live ingestion progress (one compact row per in-flight upload/link) */}
+      {ingestJobs.length > 0 && (
+        <div className="space-y-1.5">
+          {ingestJobs.length > 1 && (
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Ingesting {ingestJobs.length} files
+            </p>
+          )}
+          {ingestJobs.map((job) => (
+            <IngestionProgressCard key={job.jobId} progress={job} />
+          ))}
+        </div>
+      )}
 
       {/* Document list */}
       {loading ? (

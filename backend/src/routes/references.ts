@@ -31,6 +31,13 @@ import {
   recomputeCoverageWithDelta,
 } from '../services/referenceCoverage.service.js';
 import { suggestSourcesForClo } from '../services/referenceSourceSuggestion.service.js';
+import {
+  makeIngestionReporter,
+  subscribeToCourseIngestion,
+  getActiveIngestionsForCourse,
+  emitIngestionProgress,
+  type IngestionProgress,
+} from '../services/ingestionProgress.service.js';
 import { requireRole, courseAccessParamHandler } from '../auth/middleware.js';
 
 const router = Router();
@@ -83,18 +90,35 @@ router.post('/:code/references', upload.single('file'), async (req: Request, res
       subtopic_ids: parseList(req.body.subtopic_ids),
     };
 
-    const doc = await ingestReferenceDocument({
-      courseCode: code,
-      buffer: file.buffer,
-      originalFilename: file.originalname,
-      mimeType: file.mimetype,
-      title: req.body.title ? String(req.body.title) : undefined,
-      sourceType,
-      citationLabel: req.body.citation_label ? String(req.body.citation_label) : undefined,
-      scope,
-    });
+    const jobId = req.body.job_id ? String(req.body.job_id) : undefined;
+    const onProgress = makeIngestionReporter(jobId, code);
 
-    return res.status(201).json({ document: doc });
+    try {
+      const doc = await ingestReferenceDocument({
+        courseCode: code,
+        buffer: file.buffer,
+        originalFilename: file.originalname,
+        mimeType: file.mimetype,
+        title: req.body.title ? String(req.body.title) : undefined,
+        sourceType,
+        citationLabel: req.body.citation_label ? String(req.body.citation_label) : undefined,
+        scope,
+        onProgress,
+      });
+      return res.status(201).json({ document: doc });
+    } catch (error) {
+      if (jobId) {
+        emitIngestionProgress({
+          jobId,
+          courseCode: code,
+          phase: 'error',
+          filename: file.originalname,
+          error: error instanceof Error ? error.message : 'Failed to ingest reference',
+          message: error instanceof Error ? error.message : 'Ingestion failed.',
+        });
+      }
+      throw error;
+    }
   } catch (error) {
     console.error('[references] ingest failed:', error);
     return res
@@ -115,22 +139,71 @@ router.post('/:code/references/link', async (req: Request, res: Response) => {
     const rawType = String(source_type || 'other') as ReferenceSourceType;
     const sourceType = SOURCE_TYPES.includes(rawType) ? rawType : 'other';
 
-    const doc = await ingestReferenceFromUrl({
-      courseCode: code,
-      url,
-      title: title ? String(title) : undefined,
-      sourceType,
-      citationLabel: citation_label ? String(citation_label) : undefined,
-      scope: { clo_ids: parseList(clo_ids), subtopic_ids: parseList(subtopic_ids) },
-    });
+    const jobId = req.body?.job_id ? String(req.body.job_id) : undefined;
+    const onProgress = makeIngestionReporter(jobId, code);
 
-    return res.status(201).json({ document: doc });
+    try {
+      const doc = await ingestReferenceFromUrl({
+        courseCode: code,
+        url,
+        title: title ? String(title) : undefined,
+        sourceType,
+        citationLabel: citation_label ? String(citation_label) : undefined,
+        scope: { clo_ids: parseList(clo_ids), subtopic_ids: parseList(subtopic_ids) },
+        onProgress,
+      });
+      return res.status(201).json({ document: doc });
+    } catch (error) {
+      if (jobId) {
+        emitIngestionProgress({
+          jobId,
+          courseCode: code,
+          phase: 'error',
+          error: error instanceof Error ? error.message : 'Failed to ingest reference link',
+          message: error instanceof Error ? error.message : 'Ingestion failed.',
+        });
+      }
+      throw error;
+    }
   } catch (error) {
     console.error('[references] link ingest failed:', error);
     return res
       .status(400)
       .json({ error: error instanceof Error ? error.message : 'Failed to ingest reference link' });
   }
+});
+
+// GET /api/courses/:code/references/ingest/stream — SSE live progress for ALL
+// in-flight ingestion jobs in this course, multiplexed over ONE connection. The
+// client opens this BEFORE POSTing uploads (each tagged with its own job_id) and
+// demuxes events by `jobId`. Using a single stream avoids exhausting the browser's
+// per-host connection pool when several files ingest at once.
+router.get('/:code/references/ingest/stream', async (req: Request, res: Response) => {
+  const { code } = req.params;
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.flushHeaders();
+
+  // Replay any in-flight/recent jobs so a late-connecting client catches up.
+  for (const job of getActiveIngestionsForCourse(code)) {
+    res.write(`data: ${JSON.stringify(job)}\n\n`);
+  }
+
+  const unsubscribe = subscribeToCourseIngestion(code, (update: IngestionProgress) => {
+    res.write(`data: ${JSON.stringify(update)}\n\n`);
+  });
+
+  const heartbeat = setInterval(() => {
+    res.write(': heartbeat\n\n');
+  }, 30000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
 });
 
 // GET /api/courses/:code/references — list ingested reference documents

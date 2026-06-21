@@ -119,13 +119,20 @@ export async function generateContextHeadersForChunks(
      * production never passes this.
      */
     generateHeader?: (input: GenerateContextHeaderInput) => Promise<string>;
+    /**
+     * Optional progress reporter, called after each chunk is resolved (cache hit
+     * or freshly generated) so callers can surface live header-generation progress.
+     */
+    onProgress?: (done: number, total: number) => void;
   } = {}
 ): Promise<ChunkHeaderResult[]> {
   const concurrency = Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY);
   const generate = options.generateHeader ?? generateContextHeader;
   const results: ChunkHeaderResult[] = new Array(inputs.length);
+  const onProgress = options.onProgress;
 
   let next = 0;
+  let done = 0;
   async function worker(): Promise<void> {
     while (true) {
       const i = next++;
@@ -139,6 +146,7 @@ export async function generateContextHeadersForChunks(
 
       if (isCacheHit) {
         results[i] = { key: input.key, contentHash, header: input.existingHeader!, cacheHit: true };
+        onProgress?.(++done, inputs.length);
         continue;
       }
 
@@ -148,6 +156,7 @@ export async function generateContextHeadersForChunks(
         text: input.text,
       });
       results[i] = { key: input.key, contentHash, header, cacheHit: false };
+      onProgress?.(++done, inputs.length);
     }
   }
 

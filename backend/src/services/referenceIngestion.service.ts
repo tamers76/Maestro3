@@ -25,6 +25,9 @@ import {
   chunkToHeaderInput,
   type ChunkHeaderInput,
 } from './contextualEmbedding.service.js';
+import type { IngestionReporter } from './ingestionProgress.service.js';
+
+const noopReporter: IngestionReporter = () => {};
 
 export interface IngestReferenceParams {
   courseCode: string;
@@ -35,6 +38,8 @@ export interface IngestReferenceParams {
   sourceType?: ReferenceSourceType;
   citationLabel?: string;
   scope?: ReferenceScope;
+  /** Optional live-progress reporter (no-op when omitted). */
+  onProgress?: IngestionReporter;
 }
 
 export async function ingestReferenceDocument(
@@ -49,15 +54,17 @@ export async function ingestReferenceDocument(
     sourceType = 'other',
     citationLabel,
     scope = {},
+    onProgress = noopReporter,
   } = params;
 
+  const docTitle = (title || originalFilename).trim();
+  onProgress({ phase: 'extracting', docTitle, filename: originalFilename });
   const text = (await extractTextFromBuffer(buffer, mimeType, originalFilename))?.trim();
   if (!text) {
     throw new Error('No extractable text found in the uploaded reference file.');
   }
 
   const docId = uuidv4();
-  const docTitle = (title || originalFilename).trim();
   const label = (citationLabel || docTitle).trim();
   const cloIds = scope.clo_ids ?? [];
   const subtopicIds = scope.subtopic_ids ?? [];
@@ -65,12 +72,19 @@ export async function ingestReferenceDocument(
   // chunkText() now applies the Issue 2 junk filter internally (drops page-number
   // noise, TOC/index fragments, and thin chunks), so rawChunks are already
   // quality-gated before embedding/indexing.
+  onProgress({ phase: 'chunking', charCount: text.length });
   const rawChunks = chunkText(text);
   if (rawChunks.length === 0) {
     throw new Error(
       'Reference file produced no usable chunks after extraction (all content was filtered as junk/thin).'
     );
   }
+  onProgress({
+    phase: 'chunking',
+    charCount: text.length,
+    chunkCount: rawChunks.length,
+    message: `Found ${rawChunks.length} passages to ingest.`,
+  });
 
   // Contextual embeddings (V1.0): generate a per-chunk context header, then embed
   // the ENRICHED text (header + sep + raw). No existing cache on a fresh upload, so
@@ -81,12 +95,41 @@ export async function ingestReferenceDocument(
     sectionHeading: raw.section_heading,
     text: raw.text,
   }));
-  const headerResults = await generateContextHeadersForChunks(headerInputs);
+  onProgress({
+    phase: 'contextualizing',
+    current: 0,
+    total: headerInputs.length,
+    chunkCount: rawChunks.length,
+  });
+  const headerResults = await generateContextHeadersForChunks(headerInputs, {
+    onProgress: (current, total) =>
+      onProgress({
+        phase: 'contextualizing',
+        current,
+        total,
+        chunkCount: rawChunks.length,
+        message: `Adding context to passage ${current} of ${total}…`,
+      }),
+  });
 
   const enrichedTexts = rawChunks.map((raw, i) =>
     buildEnrichedText(headerResults[i].header, raw.text)
   );
-  const { vectors, model, dimensions } = await embedTexts(enrichedTexts);
+  onProgress({
+    phase: 'embedding',
+    current: 0,
+    total: enrichedTexts.length,
+    chunkCount: rawChunks.length,
+  });
+  const { vectors, model, dimensions } = await embedTexts(enrichedTexts, (current, total) =>
+    onProgress({
+      phase: 'embedding',
+      current,
+      total,
+      chunkCount: rawChunks.length,
+      message: `Embedding passage ${current} of ${total}…`,
+    })
+  );
 
   const chunks: ReferenceChunk[] = rawChunks.map((raw, i) => ({
     chunk_id: `${docId}-C${raw.seq}`,
@@ -122,9 +165,23 @@ export async function ingestReferenceDocument(
   };
 
   // Persist document (+full text) then index chunks/embeddings into pgvector.
+  onProgress({
+    phase: 'indexing',
+    chunkCount: chunks.length,
+    charCount: text.length,
+    docTitle,
+  });
   await referenceRepo.saveDocument(doc, text);
   const store = await resolveStoreForIndexing(dimensions);
   await store.indexChunks(chunks);
+
+  onProgress({
+    phase: 'done',
+    chunkCount: chunks.length,
+    charCount: text.length,
+    docTitle,
+    message: `Ingested "${docTitle}" — ${chunks.length} passages indexed.`,
+  });
 
   return doc;
 }
@@ -136,6 +193,8 @@ export interface IngestReferenceFromUrlParams {
   sourceType?: ReferenceSourceType;
   citationLabel?: string;
   scope?: ReferenceScope;
+  /** Optional live-progress reporter (no-op when omitted). */
+  onProgress?: IngestionReporter;
 }
 
 const UPLOAD_FALLBACK_MSG =
@@ -149,7 +208,15 @@ const UPLOAD_FALLBACK_MSG =
 export async function ingestReferenceFromUrl(
   params: IngestReferenceFromUrlParams
 ): Promise<ReferenceDocument> {
-  const { courseCode, url, title, sourceType = 'other', citationLabel, scope } = params;
+  const {
+    courseCode,
+    url,
+    title,
+    sourceType = 'other',
+    citationLabel,
+    scope,
+    onProgress = noopReporter,
+  } = params;
 
   let parsed: URL;
   try {
@@ -161,6 +228,7 @@ export async function ingestReferenceFromUrl(
     throw new Error('Only http(s) links are supported.');
   }
 
+  onProgress({ phase: 'fetching', message: 'Downloading the source PDF…' });
   let response: Response;
   try {
     response = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(60000) });
@@ -190,6 +258,7 @@ export async function ingestReferenceFromUrl(
     sourceType,
     citationLabel,
     scope,
+    onProgress,
   });
 }
 
