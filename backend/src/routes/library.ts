@@ -220,6 +220,9 @@ router.get('/books/ingest/stream', requireRole('admin'), (req: Request, res: Res
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
+  // Disable proxy buffering (nginx) so progress events stream in real time instead
+  // of being held until the connection closes — otherwise the UI appears stuck.
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
   for (const job of getActiveIngestionsForCourse(LIBRARY_INGEST_CHANNEL)) {

@@ -205,6 +205,9 @@ router.get('/:code/references/ingest/stream', async (req: Request, res: Response
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
+  // Disable proxy buffering (nginx) so progress events stream in real time instead
+  // of being held until the connection closes — otherwise the UI appears stuck.
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
   // Replay any in-flight/recent jobs so a late-connecting client catches up.
