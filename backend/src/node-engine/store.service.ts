@@ -83,6 +83,11 @@ export async function hasCourseArtifact(courseCode: string, fileName: string): P
   return artifactRepo.has(courseCode, artifactType(fileName));
 }
 
+/** Delete a per-course node-engine artifact (no-op if it does not exist). */
+export async function deleteCourseArtifact(courseCode: string, fileName: string): Promise<void> {
+  await artifactRepo.remove(courseCode, artifactType(fileName));
+}
+
 // ============== M7 node-set artifacts (per subtopic) ==============
 
 /** Stable artifact filename for one subtopic's generated node-set. */

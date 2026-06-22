@@ -37,6 +37,11 @@ export default function Layout({ children }: LayoutProps) {
 
   const canAuthor = user?.role === 'admin' || user?.role === 'professor'
 
+  // The Course Architect / Node Engine wizard (any `/courses/:code/*` except the
+  // new-course form) uses the full viewport width so wide tables (e.g. the Layer 4
+  // rubric) have room. Other pages keep the centered 1280px cap.
+  const wide = /^\/courses\/(?!new(?:\/|$))[^/]+/.test(location.pathname)
+
   const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/library', icon: Library, label: 'Digital Library' },
@@ -66,7 +71,7 @@ export default function Layout({ children }: LayoutProps) {
         <Link
           to="/dashboard"
           className={cn(
-            'flex items-center border-b border-white/10 px-4 hover:bg-white/5 transition-colors',
+            'mt-6 flex items-center border-b border-white/10 px-4 hover:bg-white/5 transition-colors',
             collapsed ? 'h-11 justify-center' : 'h-11 gap-2.5'
           )}
         >
@@ -96,7 +101,7 @@ export default function Layout({ children }: LayoutProps) {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto px-2 py-2">
+        <div className="flex-1 overflow-y-auto px-2 pb-2 pt-4">
           {!collapsed && (
             <p className="mb-2 px-3 text-fine-print text-white/40 uppercase tracking-wide">
               Application
@@ -241,15 +246,15 @@ export default function Layout({ children }: LayoutProps) {
 
       <div
         className={cn(
-          'flex-1 flex flex-col min-h-screen transition-all duration-300',
+          'flex-1 min-w-0 flex flex-col min-h-screen transition-all duration-300',
           collapsed ? 'ml-[72px]' : 'ml-[240px]'
         )}
       >
-        {/* Top nav — frosted glass bar with hairline */}
+        {/* Top nav — clay bar with soft bottom edge */}
         <header
           className={cn(
-            'sticky top-0 z-40 flex h-[52px] items-center justify-between border-b px-6',
-            'bg-white/60 dark:bg-white/[0.04] backdrop-blur-xl border-border/70'
+            'clay-scope sticky top-0 z-40 flex h-[56px] items-center justify-between border-b-[3px] px-6',
+            'bg-card/90 backdrop-blur-xl border-white/70 dark:border-white/5 shadow-[0_6px_18px_-12px_hsl(221_90%_30%/0.2)]'
           )}
         >
           <div className="flex items-center gap-4">
@@ -302,12 +307,17 @@ export default function Layout({ children }: LayoutProps) {
           </div>
         </header>
 
-        <main className="flex-1 p-6 md:p-8 relative z-10 max-w-content mx-auto w-full">
+        <main
+          className={cn(
+            'flex-1 p-6 md:p-8 relative z-10 w-full',
+            wide ? 'max-w-none' : 'max-w-content mx-auto'
+          )}
+        >
           {children}
         </main>
 
         <footer
-          className="border-t border-white/10 bg-[#101220]/85 backdrop-blur-xl py-8 px-6 md:px-8 text-fine-print text-white/70"
+          className="border-t-[3px] border-white/70 dark:border-white/5 bg-card py-8 px-6 md:px-8 text-fine-print text-muted-foreground"
         >
           <div className="max-w-content mx-auto flex items-center justify-between">
             <span>Developed by the-Code.ai Labs</span>

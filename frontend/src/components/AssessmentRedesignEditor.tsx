@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Textarea'
 import { Markdown } from '@/components/ui/Markdown'
 import { showToast } from '@/components/ui/Toaster'
@@ -17,23 +16,33 @@ import {
 } from '@/services/api'
 import { cn } from '@/lib/utils'
 import {
-  Save,
   Loader2,
   AlertCircle,
   ClipboardList,
   Sparkles,
   Check,
+  CheckCircle2,
+  Clock,
   ChevronDown,
   ChevronRight,
   XCircle,
+  Ban,
+  Pencil,
+  RefreshCw,
 } from 'lucide-react'
+import { StatTile, STAT_TILE } from '@/components/ui/StatTile'
 
-const CARD_COLORS = [
-  { bg: 'bg-blue-100 dark:bg-blue-900/40', border: 'border-blue-400 dark:border-blue-500', text: 'text-blue-700 dark:text-blue-300', badge: 'bg-blue-500 text-white' },
-  { bg: 'bg-emerald-100 dark:bg-emerald-900/40', border: 'border-emerald-400 dark:border-emerald-500', text: 'text-emerald-700 dark:text-emerald-300', badge: 'bg-emerald-500 text-white' },
-  { bg: 'bg-violet-100 dark:bg-violet-900/40', border: 'border-violet-400 dark:border-violet-500', text: 'text-violet-700 dark:text-violet-300', badge: 'bg-violet-500 text-white' },
-  { bg: 'bg-orange-100 dark:bg-orange-900/40', border: 'border-orange-400 dark:border-orange-500', text: 'text-orange-700 dark:text-orange-300', badge: 'bg-orange-500 text-white' },
-  { bg: 'bg-pink-100 dark:bg-pink-900/40', border: 'border-pink-400 dark:border-pink-500', text: 'text-pink-700 dark:text-pink-300', badge: 'bg-pink-500 text-white' },
+/**
+ * Per-assessment accent: reuses the dashboard / StatTile gradient palette (tile +
+ * glow) and pairs it with a matching text color for the assessment id. The card
+ * surface stays neutral grey; only the icon tile and id carry the color.
+ */
+const ACCENTS: { key: keyof typeof STAT_TILE; text: string }[] = [
+  { key: 'blue', text: 'text-[#024ad8] dark:text-blue-300' },
+  { key: 'emerald', text: 'text-emerald-600 dark:text-emerald-400' },
+  { key: 'rose', text: 'text-rose-600 dark:text-rose-400' },
+  { key: 'amber', text: 'text-amber-600 dark:text-amber-400' },
+  { key: 'slate', text: 'text-slate-600 dark:text-slate-300' },
 ]
 
 const DECISION_LABELS: Record<AssessmentSmeDecision, string> = {
@@ -42,6 +51,61 @@ const DECISION_LABELS: Record<AssessmentSmeDecision, string> = {
   accept_ai_redesign: 'Accept AI redesign',
   custom_redesign: 'Edit redesign',
 }
+
+const DECISION_OPTIONS: {
+  value: Exclude<AssessmentSmeDecision, 'pending'>
+  label: string
+  icon: JSX.Element
+}[] = [
+  {
+    value: 'accept_ai_redesign',
+    label: DECISION_LABELS.accept_ai_redesign,
+    icon: <Sparkles className="h-4 w-4" />,
+  },
+  {
+    value: 'custom_redesign',
+    label: DECISION_LABELS.custom_redesign,
+    icon: <Pencil className="h-4 w-4" />,
+  },
+  {
+    value: 'keep_original',
+    label: DECISION_LABELS.keep_original,
+    icon: <Ban className="h-4 w-4" />,
+  },
+]
+
+/**
+ * Per-assessment approval actions reuse the dashboard Material button shape
+ * (`md-btn`) with the page's semantic gradients: emerald for approve, rose for
+ * needs-revision (matching the Approved / Needs Revision stat tiles).
+ */
+const ACTION_BTN_BASE =
+  'md-btn inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-white disabled:pointer-events-none disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const APPROVE_BTN = cn(ACTION_BTN_BASE, STAT_TILE.emerald.tile, 'focus-visible:ring-emerald-500/40')
+const REVISION_BTN = cn(ACTION_BTN_BASE, STAT_TILE.rose.tile, 'focus-visible:ring-rose-500/40')
+
+/**
+ * SME decision buttons share a single blue family: a light blue tint at rest
+ * that darkens to solid blue on hover, and the full blue gradient once selected
+ * so the chosen option stays clearly distinct.
+ */
+const SME_BTN_BASE =
+  'inline-flex w-full items-center justify-center gap-2 rounded-[12px] px-4 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const SME_BTN_IDLE = cn(
+  SME_BTN_BASE,
+  'border border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300 hover:bg-blue-600 hover:text-white hover:border-transparent'
+)
+const SME_BTN_SELECTED = cn(
+  SME_BTN_BASE,
+  'md-btn border border-transparent bg-gradient-to-br from-[#296ef9] to-[#024ad8] text-white'
+)
+
+/**
+ * Regenerate button: amber so it stands out as a distinct action (re-runs the
+ * council) — a light amber tint that darkens to solid amber on hover.
+ */
+const REGEN_BTN =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border border-amber-500/40 bg-amber-500/15 font-semibold text-amber-700 transition-colors hover:border-transparent hover:bg-amber-600 hover:text-white dark:text-amber-300 disabled:pointer-events-none disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
 
 const APPROVAL_LABELS: Record<CloApprovalStatus, string> = {
   pending: 'Pending approval',
@@ -62,10 +126,7 @@ function approvalBadgeClass(status: CloApprovalStatus): string {
 
 function FieldLabel({ label }: { label: string }) {
   return (
-    <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-primary">
-      <span className="h-3 w-1 shrink-0 rounded-full bg-primary/70" />
-      {label}
-    </p>
+    <p className="text-[11px] font-bold uppercase tracking-wider text-foreground">{label}</p>
   )
 }
 
@@ -74,7 +135,7 @@ function TextField({ label, value }: { label: string; value?: string }) {
   return (
     <div className="space-y-1">
       <FieldLabel label={label} />
-      <Markdown className="pl-2.5 text-foreground">{value}</Markdown>
+      <Markdown className="text-sm leading-relaxed text-foreground/90">{value}</Markdown>
     </div>
   )
 }
@@ -82,7 +143,7 @@ function TextField({ label, value }: { label: string; value?: string }) {
 function EditField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 block">
+      <label className="text-[11px] font-bold uppercase tracking-wider text-foreground mb-1 block">
         {label}
       </label>
       {children}
@@ -95,7 +156,7 @@ function ListBlock({ label, items }: { label: string; items?: string[] }) {
   return (
     <div className="space-y-1">
       <FieldLabel label={label} />
-      <ul className="ml-2.5 list-disc space-y-1 pl-4 text-sm leading-relaxed marker:text-primary">
+      <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-foreground/90">
         {items.map((it, i) => (
           <li key={i} className="text-foreground/90">
             <Markdown className="[&_p]:my-0 text-foreground/90">{it}</Markdown>
@@ -117,42 +178,6 @@ function fromLines(text: string): string[] {
     .filter((s) => !!s)
 }
 
-/**
- * A section whose body can be expanded/collapsed via a disclosure triangle.
- * Used to keep long blocks (AI redesign, final assessment) compact by default.
- */
-function CollapsibleSection({
-  title,
-  defaultOpen = false,
-  children,
-}: {
-  title: string
-  defaultOpen?: boolean
-  children: React.ReactNode
-}) {
-  const [open, setOpen] = useState(defaultOpen)
-  return (
-    <section className="space-y-2">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 text-left rounded-md border-l-2 border-primary/60 bg-primary/5 px-2.5 py-1.5 hover:bg-primary/10 transition-colors"
-      >
-        <ChevronRight
-          className={cn(
-            'h-4 w-4 shrink-0 text-primary transition-transform duration-200',
-            open && 'rotate-90'
-          )}
-        />
-        <h4 className="text-sm font-bold uppercase tracking-wide text-primary">{title}</h4>
-        {!open && <span className="ml-auto text-[11px] font-semibold text-primary/80">Show</span>}
-      </button>
-      {open && <div className="space-y-2 pl-6">{children}</div>}
-    </section>
-  )
-}
-
 function FullAnalysisDisclosure({ analysis }: { analysis: FullAssessmentCouncilAnalysis }) {
   const textFields: { label: string; key: keyof FullAssessmentCouncilAnalysis }[] = [
     { label: '1. CLO Alignment Reasoning', key: 'clo_alignment_reasoning' },
@@ -171,12 +196,12 @@ function FullAnalysisDisclosure({ analysis }: { analysis: FullAssessmentCouncilA
   if (!hasAny) return null
 
   return (
-    <details className="rounded-lg border border-border bg-card overflow-hidden">
-      <summary className="flex cursor-pointer items-center gap-2 bg-primary/5 px-4 py-2.5 text-sm font-bold uppercase tracking-wide text-primary hover:bg-primary/10">
-        <Sparkles className="h-4 w-4" />
+    <details className="group">
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-[11px] font-bold uppercase tracking-wider label-accent hover:opacity-80 [&::-webkit-details-marker]:hidden">
+        <Sparkles className="h-3.5 w-3.5" />
         View Full Council Analysis
       </summary>
-      <div className="px-4 pb-4 space-y-3.5 border-t border-border pt-3">
+      <div className="space-y-3.5 pt-3">
         {textFields.map(({ label, key }) => (
           <TextField key={key} label={label} value={analysis[key] as string | undefined} />
         ))}
@@ -192,10 +217,9 @@ function AssessmentRedesignZone({
   colorIndex,
   readOnlyRedesign,
   saving,
-  noteChanged,
   onUpdate,
   onApproveItem,
-  onSaveNote,
+  onAutoSave,
   expanded,
   onToggle,
 }: {
@@ -203,14 +227,14 @@ function AssessmentRedesignZone({
   colorIndex: number
   readOnlyRedesign?: boolean
   saving?: boolean
-  noteChanged?: boolean
   onUpdate: (item: AssessmentRedesignItem) => void
   onApproveItem?: (item: AssessmentRedesignItem) => void | Promise<void>
-  onSaveNote?: () => void | Promise<void>
+  onAutoSave?: () => void
   expanded: boolean
   onToggle: () => void
 }) {
-  const colors = CARD_COLORS[colorIndex % CARD_COLORS.length]
+  const accent = ACCENTS[colorIndex % ACCENTS.length]
+  const accentTile = STAT_TILE[accent.key]
   const original = item.original_assessment
   const ai = item.ai_suggested_redesign
   const final = item.final_assessment_for_maestro
@@ -274,20 +298,27 @@ function AssessmentRedesignZone({
   }
 
   return (
-    <div className={cn('rounded-xl border-2 overflow-hidden', colors.border)}>
+    <div className="space-y-4">
+      <div className="rounded-[8px] border border-border/60 bg-muted/40 dark:bg-slate-800/30 overflow-hidden">
       <div
-        className={cn('px-5 py-4 border-b cursor-pointer', colors.border, colors.bg)}
+        className={cn('px-5 py-4 cursor-pointer', expanded && 'border-b border-border/60')}
         onClick={onToggle}
       >
         <div className="flex items-start gap-3">
-          <div className={cn('p-2.5 rounded-lg', colors.badge)}>
+          <div
+            className={cn(
+              'md-tile inline-flex h-10 w-10 items-center justify-center text-white',
+              accentTile.tile,
+              accentTile.glow
+            )}
+          >
             <ClipboardList className="h-5 w-5" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <span className={cn('text-base font-bold', colors.text)}>{item.assessment_id}</span>
+              <span className={cn('text-base font-bold', accent.text)}>{item.assessment_id}</span>
               {original.type_or_format && (
-                <span className={cn('text-xs px-2 py-0.5 rounded font-semibold', colors.badge)}>
+                <span className="text-xs px-2 py-0.5 rounded font-semibold bg-muted text-muted-foreground">
                   {original.type_or_format}
                 </span>
               )}
@@ -311,27 +342,39 @@ function AssessmentRedesignZone({
       </div>
 
       {expanded && (
-        <div className="p-4 space-y-5">
-          {/* 1. Original Assessment (read-only, sourced from syllabus snapshot) */}
+        <div className="p-5 space-y-5">
+          {/* 1. Original Assessment — title + type/weight badges on one line, then description */}
           <section className="space-y-2">
-            <h4 className="flex items-center gap-2 rounded-md border-l-2 border-muted-foreground/40 bg-muted/60 px-2.5 py-1.5 text-sm font-bold uppercase tracking-wide text-foreground">
-              Original Assessment
-            </h4>
-            <div className="p-3 rounded-md bg-muted/40 border space-y-3">
-              <TextField label="Title" value={original.title} />
-              <TextField label="Type or format" value={original.type_or_format} />
-              <TextField label="Weight" value={original.weight} />
-              <TextField label="Description" value={original.description} />
+            <FieldLabel label="Original Assessment" />
+            <div className="flex flex-wrap items-center gap-2">
+              {original.title && (
+                <h5 className="text-sm font-semibold text-foreground">{original.title}</h5>
+              )}
+              {original.type_or_format && (
+                <span className="text-xs px-2 py-0.5 rounded font-semibold bg-blue-500/10 text-blue-700 dark:text-blue-300">
+                  {original.type_or_format}
+                </span>
+              )}
+              {original.weight && (
+                <span className="text-xs px-2 py-0.5 rounded font-semibold bg-violet-500/10 text-violet-700 dark:text-violet-300">
+                  Weight: {original.weight}
+                </span>
+              )}
             </div>
+            {original.description?.trim() && (
+              <Markdown className="text-sm leading-relaxed text-foreground/90">
+                {original.description}
+              </Markdown>
+            )}
           </section>
 
-          {/* 2. Council Summary */}
-          <details className="rounded-lg border border-border bg-card overflow-hidden">
-            <summary className="flex cursor-pointer items-center gap-2 bg-primary/5 px-4 py-2.5 text-sm font-bold uppercase tracking-wide text-primary hover:bg-primary/10">
-              <Sparkles className="h-4 w-4" />
+          {/* 2. Council Summary — collapsible, only if the SME wants to read it */}
+          <details className="group">
+            <summary className="flex cursor-pointer list-none items-center gap-2 text-[11px] font-bold uppercase tracking-wider label-accent hover:opacity-80 [&::-webkit-details-marker]:hidden">
+              <Sparkles className="h-3.5 w-3.5" />
               Council Summary
             </summary>
-            <div className="px-4 pb-4 space-y-3.5 border-t border-border pt-3">
+            <div className="space-y-3.5 pt-3">
               {hasCouncilSummary ? (
                 <>
                   <TextField label="What works well" value={item.council_summary.what_works_well} />
@@ -345,29 +388,33 @@ function AssessmentRedesignZone({
             </div>
           </details>
 
-          {/* 3. AI Suggested Contribution Redesign (collapsible) */}
-          <CollapsibleSection title="AI Suggested Contribution Redesign">
-            <div className="p-4 rounded-md border border-purple-200 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-900/20 space-y-3.5">
-              <TextField label="Redesigned title" value={ai.redesigned_title} />
-              <TextField label="Redesigned description" value={ai.redesigned_description} />
-              <ListBlock label="Refined CLO alignment" items={ai.refined_clo_alignment} />
-              <TextField label="Contribution purpose" value={ai.contribution_purpose} />
-              <TextField label="Fixed academic core" value={ai.fixed_academic_core} />
-              <ListBlock label="Personalized context variables" items={ai.personalized_context_variables} />
-              <TextField label="Required artifact" value={ai.required_artifact} />
-              <ListBlock label="Output format options" items={ai.output_format_options} />
-              <div>
-                <ListBlock label="Suggested Evaluation Criteria" items={ai.suggested_evaluation_criteria} />
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                  These are the criteria Maestro suggests this redesigned assessment should evaluate. The full grading rubric and criterion weights will be developed in the next layer.
-                </p>
-              </div>
-              <ListBlock label="Readiness gate needs" items={ai.readiness_gate_needs} />
-              <ListBlock label="AI integrity features" items={ai.ai_integrity_features} />
-              <TextField label="Publication potential" value={ai.publication_potential} />
+          {/* 3. Full council analysis — collapsible */}
+          <FullAnalysisDisclosure analysis={item.full_council_analysis} />
+
+          {/* 4. AI Suggested Contribution Redesign — inline, all details */}
+          <section className="space-y-3 border-t border-border/60 pt-4">
+            <h4 className="text-xs font-bold uppercase tracking-wide label-accent">
+              AI Suggested Contribution Redesign
+            </h4>
+            <TextField label="Redesigned title" value={ai.redesigned_title} />
+            <TextField label="Redesigned description" value={ai.redesigned_description} />
+            <ListBlock label="Refined CLO alignment" items={ai.refined_clo_alignment} />
+            <TextField label="Contribution purpose" value={ai.contribution_purpose} />
+            <TextField label="Fixed academic core" value={ai.fixed_academic_core} />
+            <ListBlock label="Personalized context variables" items={ai.personalized_context_variables} />
+            <TextField label="Required artifact" value={ai.required_artifact} />
+            <ListBlock label="Output format options" items={ai.output_format_options} />
+            <div>
+              <ListBlock label="Suggested Evaluation Criteria" items={ai.suggested_evaluation_criteria} />
+              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                These are the criteria Maestro suggests this redesigned assessment should evaluate. The full grading rubric and criterion weights will be developed in the next layer.
+              </p>
             </div>
+            <ListBlock label="Readiness gate needs" items={ai.readiness_gate_needs} />
+            <ListBlock label="AI integrity features" items={ai.ai_integrity_features} />
+            <TextField label="Publication potential" value={ai.publication_potential} />
             {item.redesign_rationale.length > 0 && (
-              <div className="mt-2">
+              <div className="pt-1">
                 <p className="text-xs font-semibold text-muted-foreground mb-1.5">
                   Why Maestro suggests this redesign
                 </p>
@@ -378,144 +425,188 @@ function AssessmentRedesignZone({
                 </ul>
               </div>
             )}
-          </CollapsibleSection>
+          </section>
+        </div>
+      )}
+      </div>
 
-          {/* 4. Final Assessment for Maestro (collapsible) */}
-          <CollapsibleSection
-            key={finalEditable ? 'final-edit' : 'final-view'}
-            title="Final Assessment for Maestro"
-            defaultOpen={finalEditable}
-          >
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              This is the version later Maestro layers (weighting, integrity, subtopics) will use.
-            </p>
-            {finalEditable ? (
-              <div className="space-y-3">
-                <EditField label="Redesigned title">
-                  <Textarea
-                    className="text-sm"
-                    rows={1}
-                    placeholder="Final title"
-                    value={final.title}
-                    onChange={(e) => updateFinal({ title: e.target.value })}
-                  />
-                </EditField>
-                <EditField label="Redesigned description">
-                  <Textarea
-                    className="text-sm"
-                    rows={2}
-                    placeholder="Final description"
-                    value={final.description}
-                    onChange={(e) => updateFinal({ description: e.target.value })}
-                  />
-                </EditField>
-                <EditField label="Refined CLO alignment">
-                  <Textarea
-                    className="text-sm"
-                    rows={2}
-                    placeholder="Refined CLO alignment (one per line)"
-                    value={toLines(final.refined_clo_alignment)}
-                    onChange={(e) => updateFinal({ refined_clo_alignment: fromLines(e.target.value) })}
-                  />
-                </EditField>
-                <EditField label="Required artifact">
-                  <Textarea
-                    className="text-sm"
-                    rows={1}
-                    placeholder="Required artifact"
-                    value={final.required_artifact}
-                    onChange={(e) => updateFinal({ required_artifact: e.target.value })}
-                  />
-                </EditField>
-                <EditField label="Output format options">
-                  <Textarea
-                    className="text-sm"
-                    rows={2}
-                    placeholder="Output format options (one per line)"
-                    value={toLines(final.output_format_options)}
-                    onChange={(e) => updateFinal({ output_format_options: fromLines(e.target.value) })}
-                  />
-                </EditField>
-                <EditField label="Fixed academic core">
-                  <Textarea
-                    className="text-sm"
-                    rows={2}
-                    placeholder="Fixed academic core"
-                    value={final.fixed_academic_core}
-                    onChange={(e) => updateFinal({ fixed_academic_core: e.target.value })}
-                  />
-                </EditField>
-                <EditField label="Personalized context variables">
-                  <Textarea
-                    className="text-sm"
-                    rows={2}
-                    placeholder="Personalized context variables (one per line)"
-                    value={toLines(final.personalized_context_variables)}
-                    onChange={(e) =>
-                      updateFinal({ personalized_context_variables: fromLines(e.target.value) })
-                    }
-                  />
-                </EditField>
-                <EditField label="Suggested Evaluation Criteria">
-                  <Textarea
-                    className="text-sm"
-                    rows={2}
-                    placeholder="Suggested Evaluation Criteria (one per line)"
-                    value={toLines(final.suggested_evaluation_criteria)}
-                    onChange={(e) => updateFinal({ suggested_evaluation_criteria: fromLines(e.target.value) })}
-                  />
-                </EditField>
-                <EditField label="Readiness gate needs">
-                  <Textarea
-                    className="text-sm"
-                    rows={2}
-                    placeholder="Readiness gate needs (one per line)"
-                    value={toLines(final.readiness_gate_needs)}
-                    onChange={(e) => updateFinal({ readiness_gate_needs: fromLines(e.target.value) })}
-                  />
-                </EditField>
-                <EditField label="AI integrity features">
-                  <Textarea
-                    className="text-sm"
-                    rows={2}
-                    placeholder="AI integrity features (one per line)"
-                    value={toLines(final.ai_integrity_features)}
-                    onChange={(e) => updateFinal({ ai_integrity_features: fromLines(e.target.value) })}
-                  />
-                </EditField>
-                <EditField label="Publication potential">
-                  <Textarea
-                    className="text-sm"
-                    rows={1}
-                    placeholder="Publication potential"
-                    value={final.publication_potential}
-                    onChange={(e) => updateFinal({ publication_potential: e.target.value })}
-                  />
-                </EditField>
+      {expanded && (
+        <>
+          {/* SME Decision — segmented Material buttons on one line (unchanged) */}
+          {!readOnlyRedesign && (
+            <section>
+              <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-2">
+                SME Decision
+                <span className="ml-1.5 font-medium text-destructive">*</span>
+              </h4>
+              <div
+                className="grid grid-cols-1 gap-2 sm:grid-cols-3"
+                role="group"
+                aria-label={`Decision for ${item.assessment_id}`}
+              >
+                {DECISION_OPTIONS.map((opt) => {
+                  const selected = item.sme_decision === opt.value
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => applyDecision(opt.value)}
+                      className={selected ? SME_BTN_SELECTED : SME_BTN_IDLE}
+                    >
+                      {opt.icon}
+                      {opt.label}
+                    </button>
+                  )
+                })}
               </div>
-            ) : (
-              <div className="p-4 rounded-md border border-emerald-500/30 bg-emerald-500/5 space-y-3.5">
-                <TextField label="Title" value={final.title} />
-                <TextField label="Description" value={final.description} />
-                <ListBlock label="Refined CLO alignment" items={final.refined_clo_alignment} />
-                <TextField label="Required artifact" value={final.required_artifact} />
-                <ListBlock label="Output format options" items={final.output_format_options} />
-                <TextField label="Fixed academic core" value={final.fixed_academic_core} />
-                <ListBlock label="Personalized context variables" items={final.personalized_context_variables} />
-                <ListBlock label="Suggested Evaluation Criteria" items={final.suggested_evaluation_criteria} />
-                <ListBlock label="Readiness gate needs" items={final.readiness_gate_needs} />
-                <ListBlock label="AI integrity features" items={final.ai_integrity_features} />
-                <TextField label="Publication potential" value={final.publication_potential} />
-              </div>
-            )}
-            {!readOnlyRedesign && item.sme_decision !== 'custom_redesign' && (
-              <p className="text-xs text-muted-foreground">
-                Select &quot;Edit redesign&quot; below to customize the final assessment.
+              {item.sme_decision === 'pending' && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Choose a decision above to enable approval.
+                </p>
+              )}
+            </section>
+          )}
+
+          {/* Final Assessment for Maestro — its own card, always expanded */}
+          <div className="rounded-[8px] border border-border/60 bg-card overflow-hidden">
+            <div className="border-b border-border/60 px-5 py-3">
+              <h4 className="text-xs font-bold uppercase tracking-wide label-accent">
+                Final Assessment for Maestro
+              </h4>
+              <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                This is the version later Maestro layers (weighting, integrity, subtopics) will use.
               </p>
-            )}
-          </CollapsibleSection>
+            </div>
+            <div className="p-5 space-y-3">
+              {finalEditable ? (
+                <div className="space-y-3" onBlur={() => onAutoSave?.()}>
+                  <EditField label="Redesigned title">
+                    <Textarea
+                      className="text-sm"
+                      rows={1}
+                      placeholder="Final title"
+                      value={final.title}
+                      onChange={(e) => updateFinal({ title: e.target.value })}
+                    />
+                  </EditField>
+                  <EditField label="Redesigned description">
+                    <Textarea
+                      className="text-sm"
+                      rows={2}
+                      placeholder="Final description"
+                      value={final.description}
+                      onChange={(e) => updateFinal({ description: e.target.value })}
+                    />
+                  </EditField>
+                  <EditField label="Refined CLO alignment">
+                    <Textarea
+                      className="text-sm"
+                      rows={2}
+                      placeholder="Refined CLO alignment (one per line)"
+                      value={toLines(final.refined_clo_alignment)}
+                      onChange={(e) => updateFinal({ refined_clo_alignment: fromLines(e.target.value) })}
+                    />
+                  </EditField>
+                  <EditField label="Required artifact">
+                    <Textarea
+                      className="text-sm"
+                      rows={1}
+                      placeholder="Required artifact"
+                      value={final.required_artifact}
+                      onChange={(e) => updateFinal({ required_artifact: e.target.value })}
+                    />
+                  </EditField>
+                  <EditField label="Output format options">
+                    <Textarea
+                      className="text-sm"
+                      rows={2}
+                      placeholder="Output format options (one per line)"
+                      value={toLines(final.output_format_options)}
+                      onChange={(e) => updateFinal({ output_format_options: fromLines(e.target.value) })}
+                    />
+                  </EditField>
+                  <EditField label="Fixed academic core">
+                    <Textarea
+                      className="text-sm"
+                      rows={2}
+                      placeholder="Fixed academic core"
+                      value={final.fixed_academic_core}
+                      onChange={(e) => updateFinal({ fixed_academic_core: e.target.value })}
+                    />
+                  </EditField>
+                  <EditField label="Personalized context variables">
+                    <Textarea
+                      className="text-sm"
+                      rows={2}
+                      placeholder="Personalized context variables (one per line)"
+                      value={toLines(final.personalized_context_variables)}
+                      onChange={(e) =>
+                        updateFinal({ personalized_context_variables: fromLines(e.target.value) })
+                      }
+                    />
+                  </EditField>
+                  <EditField label="Suggested Evaluation Criteria">
+                    <Textarea
+                      className="text-sm"
+                      rows={2}
+                      placeholder="Suggested Evaluation Criteria (one per line)"
+                      value={toLines(final.suggested_evaluation_criteria)}
+                      onChange={(e) => updateFinal({ suggested_evaluation_criteria: fromLines(e.target.value) })}
+                    />
+                  </EditField>
+                  <EditField label="Readiness gate needs">
+                    <Textarea
+                      className="text-sm"
+                      rows={2}
+                      placeholder="Readiness gate needs (one per line)"
+                      value={toLines(final.readiness_gate_needs)}
+                      onChange={(e) => updateFinal({ readiness_gate_needs: fromLines(e.target.value) })}
+                    />
+                  </EditField>
+                  <EditField label="AI integrity features">
+                    <Textarea
+                      className="text-sm"
+                      rows={2}
+                      placeholder="AI integrity features (one per line)"
+                      value={toLines(final.ai_integrity_features)}
+                      onChange={(e) => updateFinal({ ai_integrity_features: fromLines(e.target.value) })}
+                    />
+                  </EditField>
+                  <EditField label="Publication potential">
+                    <Textarea
+                      className="text-sm"
+                      rows={1}
+                      placeholder="Publication potential"
+                      value={final.publication_potential}
+                      onChange={(e) => updateFinal({ publication_potential: e.target.value })}
+                    />
+                  </EditField>
+                </div>
+              ) : (
+                <div className="space-y-3.5">
+                  <TextField label="Title" value={final.title} />
+                  <TextField label="Description" value={final.description} />
+                  <ListBlock label="Refined CLO alignment" items={final.refined_clo_alignment} />
+                  <TextField label="Required artifact" value={final.required_artifact} />
+                  <ListBlock label="Output format options" items={final.output_format_options} />
+                  <TextField label="Fixed academic core" value={final.fixed_academic_core} />
+                  <ListBlock label="Personalized context variables" items={final.personalized_context_variables} />
+                  <ListBlock label="Suggested Evaluation Criteria" items={final.suggested_evaluation_criteria} />
+                  <ListBlock label="Readiness gate needs" items={final.readiness_gate_needs} />
+                  <ListBlock label="AI integrity features" items={final.ai_integrity_features} />
+                  <TextField label="Publication potential" value={final.publication_potential} />
+                </div>
+              )}
+              {!readOnlyRedesign && item.sme_decision !== 'custom_redesign' && (
+                <p className="text-xs text-muted-foreground">
+                  Select &quot;Edit redesign&quot; above to customize the final assessment.
+                </p>
+              )}
+            </div>
+          </div>
 
-          {/* 6. SME Internal Note */}
+          {/* SME Internal Note */}
           <section>
             <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-1">SME Internal Note</h4>
             <p className="text-xs text-muted-foreground mb-2">
@@ -527,97 +618,64 @@ function AssessmentRedesignZone({
               placeholder="e.g. scope boundary to define, criteria to revisit later..."
               value={item.sme_internal_note || ''}
               onChange={(e) => onUpdate({ ...item, sme_internal_note: e.target.value })}
+              onBlur={() => onAutoSave?.()}
             />
-            {readOnlyRedesign && noteChanged && (
-              <div className="mt-2 flex justify-end">
-                <Button size="sm" onClick={() => onSaveNote?.()} disabled={saving} className="gap-2">
-                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  Save note
-                </Button>
-              </div>
-            )}
           </section>
 
-          {/* Full council analysis (reasoning only) */}
-          <FullAnalysisDisclosure analysis={item.full_council_analysis} />
-
-          {/* SME Decision + per-assessment approval — the decision sits directly
-              above the approval action and gates it. */}
+          {/* Per-assessment approval */}
           {!readOnlyRedesign && (
-            <div className="space-y-3 pt-3 border-t border-border">
-              <div>
-                <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-2">
-                  SME Decision
-                  <span className="ml-1.5 font-medium text-destructive">*</span>
-                </h4>
-                <div className="flex flex-wrap gap-2">
-                  {(['keep_original', 'accept_ai_redesign', 'custom_redesign'] as const).map((d) => (
-                    <Button
-                      key={d}
-                      size="sm"
-                      variant={item.sme_decision === d ? 'default' : 'outline'}
-                      onClick={() => applyDecision(d)}
-                    >
-                      {item.sme_decision === d && <Check className="mr-2 h-4 w-4" />}
-                      {DECISION_LABELS[d]}
-                    </Button>
-                  ))}
-                </div>
-                {item.sme_decision === 'pending' && (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Choose a decision above to enable approval.
-                  </p>
-                )}
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="default"
-                  disabled={
-                    item.approval_status === 'approved' ||
-                    item.sme_decision === 'pending' ||
-                    saving
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                disabled={
+                  item.approval_status === 'approved' ||
+                  item.sme_decision === 'pending' ||
+                  saving
+                }
+                className={APPROVE_BTN}
+                title={
+                  item.sme_decision === 'pending'
+                    ? 'Select an SME decision first'
+                    : undefined
+                }
+                onClick={() => {
+                  if (item.sme_decision === 'pending') {
+                    showToast({
+                      title: 'Decision required',
+                      description: 'Select Keep original, Accept AI redesign, or Edit redesign first.',
+                      variant: 'destructive',
+                    })
+                    return
                   }
-                  onClick={() => {
-                    if (item.sme_decision === 'pending') {
-                      showToast({
-                        title: 'Decision required',
-                        description: 'Select Keep original, Accept AI redesign, or Edit redesign first.',
-                        variant: 'destructive',
-                      })
-                      return
-                    }
-                    if (!item.final_assessment_for_maestro?.title?.trim()) {
-                      showToast({
-                        title: 'Final assessment required',
-                        description: 'Ensure the final assessment title is set.',
-                        variant: 'destructive',
-                      })
-                      return
-                    }
-                    onApproveItem?.({ ...item, approval_status: 'approved' })
-                  }}
-                >
-                  {saving ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Check className="mr-2 h-4 w-4" />
-                  )}
-                  Approve assessment
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onUpdate({ ...item, approval_status: 'needs_revision' })}
-                >
-                  <XCircle className="mr-2 h-4 w-4" />
-                  Needs revision
-                </Button>
-              </div>
+                  if (!item.final_assessment_for_maestro?.title?.trim()) {
+                    showToast({
+                      title: 'Final assessment required',
+                      description: 'Ensure the final assessment title is set.',
+                      variant: 'destructive',
+                    })
+                    return
+                  }
+                  onApproveItem?.({ ...item, approval_status: 'approved' })
+                }}
+              >
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Check className="h-4 w-4" />
+                )}
+                Approve assessment
+              </button>
+              <button
+                type="button"
+                className={REVISION_BTN}
+                onClick={() => onUpdate({ ...item, approval_status: 'needs_revision' })}
+              >
+                <XCircle className="h-4 w-4" />
+                Needs revision
+              </button>
             </div>
           )}
-        </div>
+        </>
       )}
     </div>
   )
@@ -643,24 +701,29 @@ interface AssessmentRedesignEditorProps {
   courseCode: string
   layerHasOutput: boolean
   layerApproved?: boolean
+  reloadSignal?: string
   onSaved?: () => void
   onHasChanges?: (hasChanges: boolean) => void
   onSummaryChange?: (summary: AssessmentRedesignReviewSummary) => void
-  onApproveAndContinue?: () => void | Promise<void>
+  onRegenerate?: () => void
+  isRegenerating?: boolean
+  canRegenerate?: boolean
 }
 
 export default function AssessmentRedesignEditor({
   courseCode,
   layerHasOutput,
   layerApproved = false,
+  reloadSignal,
   onSaved,
   onHasChanges,
   onSummaryChange,
-  onApproveAndContinue,
+  onRegenerate,
+  isRegenerating,
+  canRegenerate,
 }: AssessmentRedesignEditorProps) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [continuing, setContinuing] = useState(false)
   const [draft, setDraft] = useState<AssessmentRedesignItem[]>([])
   const [initialDraft, setInitialDraft] = useState<AssessmentRedesignItem[]>([])
   const [generatedAt, setGeneratedAt] = useState<string | undefined>()
@@ -687,7 +750,7 @@ export default function AssessmentRedesignEditor({
 
   useEffect(() => {
     if (layerHasOutput) load()
-  }, [layerHasOutput, load])
+  }, [layerHasOutput, load, reloadSignal])
 
   const hasChanges = useMemo(
     () => JSON.stringify(draft) !== JSON.stringify(initialDraft),
@@ -718,7 +781,10 @@ export default function AssessmentRedesignEditor({
     setDraft((prev) => prev.map((r) => (r.assessment_id === id ? item : r)))
   }
 
-  const handleSave = async (itemsOverride?: AssessmentRedesignItem[]): Promise<boolean> => {
+  const handleSave = async (
+    itemsOverride?: AssessmentRedesignItem[],
+    opts?: { silent?: boolean }
+  ): Promise<boolean> => {
     try {
       setSaving(true)
       const items = itemsOverride ?? draft
@@ -726,11 +792,13 @@ export default function AssessmentRedesignEditor({
       setDraft(result.redesigns)
       setInitialDraft(result.redesigns)
       onSaved?.()
-      showToast({
-        title: 'Saved',
-        description: layerApproved ? 'Personal notes saved' : 'Assessment redesigns saved',
-        variant: 'success',
-      })
+      if (!opts?.silent) {
+        showToast({
+          title: 'Saved',
+          description: layerApproved ? 'Personal notes saved' : 'Assessment redesigns saved',
+          variant: 'success',
+        })
+      }
       return true
     } catch (error) {
       showToast({
@@ -742,6 +810,14 @@ export default function AssessmentRedesignEditor({
     } finally {
       setSaving(false)
     }
+  }
+
+  // Autosave on blur of free-text fields (internal note, custom final-assessment
+  // edits). Saves silently so the "unsaved changes" gate on Next layer clears
+  // itself without the SME needing a manual Save button.
+  const handleAutoSave = () => {
+    if (!hasChanges || saving) return
+    void handleSave(undefined, { silent: true })
   }
 
   const handleApproveItem = async (id: string, updated: AssessmentRedesignItem) => {
@@ -769,29 +845,21 @@ export default function AssessmentRedesignEditor({
     // Defer past the collapse/expand re-render and layout shift so the scroll lands
     // on the correct zone even as the approved body collapses above it.
     if (nextId) {
+      // Land a little ABOVE the next assessment title (not flush to the top edge)
+      // so the SME gets some breathing room and clearly perceives they've moved
+      // on to the next assessment.
+      const SCROLL_OFFSET = 100
       const scrollToNext = () => {
         const el = zoneRefs.current[nextId]
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        if (!el) return
+        const top = el.getBoundingClientRect().top + window.scrollY - SCROLL_OFFSET
+        window.scrollTo({ top: Math.max(top, 0), behavior: 'smooth' })
       }
       requestAnimationFrame(scrollToNext)
       ;[120, 300].forEach((ms) => setTimeout(scrollToNext, ms))
     }
 
     await handleSave(next)
-  }
-
-  const handleReadyForNextLayer = async () => {
-    if (!onApproveAndContinue) return
-    setContinuing(true)
-    try {
-      if (hasChanges) {
-        const saved = await handleSave()
-        if (!saved) return
-      }
-      await onApproveAndContinue()
-    } finally {
-      setContinuing(false)
-    }
   }
 
   if (!layerHasOutput) {
@@ -818,71 +886,114 @@ export default function AssessmentRedesignEditor({
           <span className="text-sm text-muted-foreground">{draft.length} assessments</span>
         </div>
         <div className="flex items-center gap-2">
-          {!layerApproved && hasChanges && (
-            <span className="text-sm text-amber-600 flex items-center gap-1">
-              <AlertCircle className="h-4 w-4" />
-              Unsaved
+          {saving ? (
+            <span className="text-sm text-muted-foreground flex items-center gap-1.5">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Saving…
             </span>
-          )}
-          {!layerApproved && (
-            <Button size="sm" onClick={() => handleSave()} disabled={saving || !hasChanges} className="gap-2">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save redesigns
-            </Button>
+          ) : hasChanges ? (
+            <span className="text-sm text-amber-600 flex items-center gap-1.5">
+              <AlertCircle className="h-4 w-4" />
+              Unsaved changes
+            </span>
+          ) : (
+            <span className="text-sm text-muted-foreground flex items-center gap-1.5">
+              <Check className="h-4 w-4" />
+              All changes saved
+            </span>
           )}
         </div>
       </div>
 
       <div className="flex flex-col gap-6 p-6">
-        <div className="rounded-xl border-2 border-purple-300 dark:border-purple-600 bg-purple-50/50 dark:bg-purple-900/20 p-4 space-y-2">
+        <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-purple-500" />
               <h4 className="font-bold text-sm">Layer 3 Council</h4>
             </div>
-            {generatedAt && (
-              <p className="text-xs text-muted-foreground">
-                Generated {new Date(generatedAt).toLocaleString()}
-              </p>
-            )}
+            <div className="flex items-center gap-3">
+              {generatedAt && (
+                <p className="text-xs text-muted-foreground">
+                  Generated {new Date(generatedAt).toLocaleString()}
+                </p>
+              )}
+              {onRegenerate && (
+                <button
+                  type="button"
+                  className={cn(REGEN_BTN, 'h-8 px-3 text-xs')}
+                  onClick={onRegenerate}
+                  disabled={isRegenerating || !canRegenerate}
+                >
+                  {isRegenerating ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Regenerating…
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Regenerate
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
           <p className="text-xs text-muted-foreground leading-relaxed">
             {layerApproved
-              ? 'Layer 3 is approved. You can still edit personal notes and save.'
-              : 'For each assessment: review council summary, choose a decision, set the final assessment, then Approve assessment. Save before approving the layer.'}
+              ? 'Layer 3 is approved. You can still edit personal notes; changes save automatically.'
+              : 'For each assessment: review council summary, choose a decision, set the final assessment, then Approve assessment. Your edits save automatically.'}
           </p>
         </div>
 
+        {draftSummary && (
+          <div className="md-scope grid grid-cols-2 gap-4 md:grid-cols-4">
+            <StatTile icon={ClipboardList} label="Total assessments" value={draft.length} color="slate" />
+            <StatTile
+              icon={CheckCircle2}
+              label="Approved"
+              value={draftSummary.approved_count}
+              color="emerald"
+            />
+            <StatTile
+              icon={Clock}
+              label="Pending"
+              value={draftSummary.pending_count}
+              color="blue"
+            />
+            <StatTile
+              icon={AlertCircle}
+              label="Needs Revision"
+              value={draftSummary.needs_revision_count}
+              color="rose"
+              tone={draftSummary.needs_revision_count > 0 ? 'warning' : 'default'}
+            />
+          </div>
+        )}
+
         <div className="grid gap-5">
-          {draft.map((item, index) => {
-            const initial = initialDraft.find((r) => r.assessment_id === item.assessment_id)
-            const noteChanged =
-              (item.sme_internal_note || '') !== (initial?.sme_internal_note || '')
-            return (
-              <div
-                key={item.assessment_id}
-                ref={(el) => {
-                  zoneRefs.current[item.assessment_id] = el
-                }}
-                style={{ scrollMarginTop: 16 }}
-              >
-                <AssessmentRedesignZone
-                  item={item}
-                  colorIndex={index}
-                  readOnlyRedesign={layerApproved}
-                  saving={saving}
-                  noteChanged={noteChanged}
-                  onUpdate={(updated) => handleUpdate(item.assessment_id, updated)}
-                  onApproveItem={(updated) => handleApproveItem(item.assessment_id, updated)}
-                  onSaveNote={async () => {
-                    await handleSave()
-                  }}
-                  expanded={expandedIds.has(item.assessment_id)}
-                  onToggle={() => toggleExpanded(item.assessment_id)}
-                />
-              </div>
-            )
-          })}
+          {draft.map((item, index) => (
+            <div
+              key={item.assessment_id}
+              ref={(el) => {
+                zoneRefs.current[item.assessment_id] = el
+              }}
+              style={{ scrollMarginTop: 16 }}
+            >
+              <AssessmentRedesignZone
+                item={item}
+                colorIndex={index}
+                readOnlyRedesign={layerApproved}
+                saving={saving}
+                onUpdate={(updated) => handleUpdate(item.assessment_id, updated)}
+                onApproveItem={(updated) => handleApproveItem(item.assessment_id, updated)}
+                onAutoSave={handleAutoSave}
+                expanded={expandedIds.has(item.assessment_id)}
+                onToggle={() => toggleExpanded(item.assessment_id)}
+              />
+            </div>
+          ))}
         </div>
       </div>
 
@@ -893,26 +1004,10 @@ export default function AssessmentRedesignEditor({
             {draftSummary.needs_revision_count} need revision
           </span>
           {draftSummary.all_approved ? (
-            layerApproved || !onApproveAndContinue ? (
-              <span className="flex items-center gap-2 px-3 py-1.5 rounded-md font-medium bg-green-500/10 text-green-600">
-                <Check className="h-4 w-4" />
-                {layerApproved ? 'Layer 3 approved' : 'All assessments approved'}
-              </span>
-            ) : (
-              <Button
-                size="sm"
-                onClick={handleReadyForNextLayer}
-                disabled={saving || continuing}
-                className="gap-2"
-              >
-                {saving || continuing ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Check className="h-4 w-4" />
-                )}
-                Approve Layer 3
-              </Button>
-            )
+            <span className="flex items-center gap-2 px-3 py-1.5 rounded-md font-medium bg-green-500/10 text-green-600">
+              <Check className="h-4 w-4" />
+              {layerApproved ? 'Layer 3 approved' : 'All assessments approved'}
+            </span>
           ) : (
             <span className="flex items-center gap-2 px-3 py-1.5 rounded-md font-medium bg-amber-500/10 text-amber-600">
               <AlertCircle className="h-4 w-4" />

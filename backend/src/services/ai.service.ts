@@ -141,16 +141,27 @@ export function parseAIJson<T>(response: string): T {
   
   // Remove control characters that break JSON parsing (except valid whitespace)
   cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
-  
+
+  // Try parsing the minimally-cleaned response FIRST. Valid JSON can legitimately
+  // contain smart quotes, em-dashes, or ellipses INSIDE string values (e.g. an LLM
+  // writing 'Integrates "innovative"' with curly quotes). The normalization below
+  // rewrites those characters and would corrupt such otherwise-valid JSON, so it
+  // must only run as a repair fallback after a clean parse fails.
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch {
+    // Fall through to normalization + repair attempts below.
+  }
+
   // Replace smart quotes and other Unicode quote variants with ASCII quotes
   cleaned = cleaned.replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"'); // Various double quotes
   cleaned = cleaned.replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "'"); // Various single quotes
   cleaned = cleaned.replace(/[\u2013\u2014]/g, '-'); // En-dash and em-dash to regular dash
   cleaned = cleaned.replace(/\u2026/g, '...'); // Ellipsis to three dots
-  
+
   // Fix mismatched brackets (AI sometimes closes { with ] or [ with })
   cleaned = fixMismatchedBrackets(cleaned);
-  
+
   // Try to parse
   try {
     return JSON.parse(cleaned) as T;

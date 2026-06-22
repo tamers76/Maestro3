@@ -1,0 +1,49 @@
+---
+description: Default label/header typography for workflow pages (CLO, Assessment, and future layers)
+globs: frontend/src/**/*.tsx
+alwaysApply: false
+---
+
+# Label & Section-Header Typography (App Default)
+
+Use this for field labels and section headers across workflow/layer pages
+(e.g. CLO review, Assessment redesign, and any new pages going forward).
+Base typeface is **Inter** (already the app default via `font-sans`).
+
+## Field / sub-labels (default for everything)
+
+Near-black, bold, small uppercase. Use the SAME style in both read and edit
+views so a label looks identical whether viewing or editing.
+
+```tsx
+<p className="text-[11px] font-bold uppercase tracking-wider field-label">Official CLO</p>
+// edit-view <label> uses the identical classes
+```
+
+- size `text-[11px]`, weight `font-bold`, `uppercase`, `tracking-wider`
+- color via the `field-label` class (= `text-foreground`, near-black)
+
+## Main section headers (only a few per card)
+
+Reserve the softer blue (`label-accent`) for the few top-level section headers
+only — NOT for every field label. Examples: Council Summary, View Full Council
+Analysis, AI Suggested Contribution / Refinement, Final Assessment / Final CLO.
+
+```tsx
+<h4 className="text-xs font-bold uppercase tracking-wide label-accent">AI Suggested Refinement</h4>
+```
+
+- `label-accent` is a muted blue (`hsl(221 53% 47%)`; lighter in dark mode) defined
+  in `index.css` — softer than `--primary` so small text doesn't strain the eyes.
+- Do NOT use raw `text-primary` for small uppercase labels; it's too harsh.
+
+## Body text
+
+Body/value text aligns flush-left with its label and uses:
+
+```tsx
+<p className="text-sm leading-relaxed text-foreground/90">...</p>
+```
+
+Keep labels and body left-aligned (no extra `pl-*`/`ml-*` indents) and avoid
+decorative vertical bars before labels or boxes/backgrounds around collapsibles.

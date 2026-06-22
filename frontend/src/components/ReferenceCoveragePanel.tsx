@@ -19,7 +19,6 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
 import {
   Dialog,
   DialogContent,
@@ -29,10 +28,12 @@ import {
 } from '@/components/ui/Dialog'
 import { showToast } from '@/components/ui/Toaster'
 import { cn } from '@/lib/utils'
+import { mdBtn, mdBtnSoft } from '@/components/ui/materialButton'
 import ReferenceMaterialsPanel from '@/components/ReferenceMaterialsPanel'
 import {
   fetchCoverage,
   computeCoverage,
+  confirmCoverage,
   suggestSources,
   uploadReferenceFromLink,
   type CoverageBand,
@@ -45,6 +46,14 @@ import {
   type ReferenceCoverageReport,
   type ReferenceSourceType,
 } from '@/services/api'
+
+/**
+ * Gap-closing action buttons: a light blue tint at rest so they read clearly as
+ * actions, darkening to solid blue on hover. Mirrors the SME decision buttons on
+ * the Layer 2 page for a consistent, noticeable look.
+ */
+const FIX_GAP_BTN =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border border-blue-500/30 bg-blue-500/10 font-semibold text-blue-700 transition-colors hover:border-transparent hover:bg-blue-600 hover:text-white dark:text-blue-300 disabled:pointer-events-none disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
 
 const BAND_META: Record<CoverageBand, { label: string; cls: string; icon: typeof CheckCircle2 }> = {
   well_covered: {
@@ -323,10 +332,9 @@ function SuggestedSourcesResults({
                       {SOURCE_TYPE_LABEL[s.source_type]}
                     </span>
                   </div>
-                  <Button
-                    size="sm"
-                    variant={ingested ? 'outline' : 'default'}
-                    className="h-7 shrink-0 px-2 text-xs"
+                  <button
+                    type="button"
+                    className={cn(ingested ? mdBtnSoft : mdBtn, 'h-8 shrink-0 px-3 text-xs')}
                     disabled={approving || ingested}
                     onClick={() => onApprove(s)}
                     title={
@@ -337,21 +345,21 @@ function SuggestedSourcesResults({
                   >
                     {ingested ? (
                       <>
-                        <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                        <CheckCircle2 className="h-3.5 w-3.5" />
                         Ingested
                       </>
                     ) : approving ? (
                       <>
-                        <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         Ingesting…
                       </>
                     ) : (
                       <>
-                        <Plus className="mr-1 h-3.5 w-3.5" />
+                        <Plus className="h-3.5 w-3.5" />
                         Approve &amp; ingest
                       </>
                     )}
-                  </Button>
+                  </button>
                 </div>
               </li>
             )
@@ -490,27 +498,35 @@ function CloExpandedBody({
       {flagged && (
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => onUploadReference(clo)}>
-              <Upload className="mr-2 h-4 w-4" />
+            <button
+              type="button"
+              className={cn(FIX_GAP_BTN, 'h-9 px-4 text-sm')}
+              onClick={() => onUploadReference(clo)}
+            >
+              <Upload className="h-4 w-4" />
               Upload reference
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
+            </button>
+            <button
+              type="button"
+              className={cn(FIX_GAP_BTN, 'h-9 px-4 text-sm')}
               onClick={() => void suggested.handleSuggest()}
               disabled={suggested.loading}
             >
               {suggested.loading ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <Sparkles className="mr-2 h-4 w-4" />
+                <Sparkles className="h-4 w-4" />
               )}
               {suggested.loaded ? 'Re-suggest sources' : 'Suggest sources'}
-            </Button>
-            <Button size="sm" variant="outline" onClick={handleFullReport}>
-              <FileText className="mr-2 h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className={cn(FIX_GAP_BTN, 'h-9 px-4 text-sm')}
+              onClick={handleFullReport}
+            >
+              <FileText className="h-4 w-4" />
               Full report
-            </Button>
+            </button>
           </div>
           {suggested.loaded && (
             <p className="text-[11px] text-muted-foreground">
@@ -584,23 +600,22 @@ function CloRows({
         </td>
         <td className="px-3 py-2.5">
           {flagged ? (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 px-2 text-xs"
+            <button
+              type="button"
+              className={cn(FIX_GAP_BTN, 'h-8 px-3 text-xs')}
               onClick={(e) => {
                 e.stopPropagation()
                 onToggle()
               }}
             >
-              <Wrench className="mr-1 h-3.5 w-3.5" />
+              <Wrench className="h-3.5 w-3.5" />
               Fix gap
               {open ? (
-                <ChevronDown className="ml-1 h-3.5 w-3.5" />
+                <ChevronDown className="h-3.5 w-3.5" />
               ) : (
-                <ChevronRight className="ml-1 h-3.5 w-3.5" />
+                <ChevronRight className="h-3.5 w-3.5" />
               )}
-            </Button>
+            </button>
           ) : (
             <span className="inline-flex items-center gap-1 text-muted-foreground">
               <CheckCircle2 className="h-3.5 w-3.5" />
@@ -629,10 +644,22 @@ function CloRows({
 export default function ReferenceCoveragePanel({
   courseCode,
   refreshSignal = 0,
+  closApproved = false,
+  onGateChange,
 }: {
   courseCode: string
   /** Bumped by the parent after a reference is ingested to auto-re-run coverage. */
   refreshSignal?: number
+  /**
+   * Whether all Layer 2 CLO refinements are approved. The panel auto-expands the
+   * moment this flips true (coverage just unlocked), so the SME sees the next step.
+   */
+  closApproved?: boolean
+  /**
+   * Reports whether the SME has approved the measured coverage. The parent gates
+   * Layer 2 approval on this so the SME must measure + sign off before continuing.
+   */
+  onGateChange?: (confirmed: boolean) => void
 }) {
   const [panelOpen, setPanelOpen] = useState(false)
   const [state, setState] = useState<CoverageStateSummary | null>(null)
@@ -669,6 +696,22 @@ export default function ReferenceCoveragePanel({
     void load()
   }, [load])
 
+  // Auto-expand the moment all CLOs become approved (coverage just unlocked).
+  // Reload the state a few times so the freshly-unlocked status appears once the
+  // CLO approval save settles on the backend (the prop flips from the local draft
+  // slightly before persistence completes).
+  const prevClosApproved = useRef(closApproved)
+  useEffect(() => {
+    const was = prevClosApproved.current
+    prevClosApproved.current = closApproved
+    if (!was && closApproved) {
+      setPanelOpen(true)
+      void load()
+      const timers = [400, 1200].map((ms) => setTimeout(() => void load(), ms))
+      return () => timers.forEach(clearTimeout)
+    }
+  }, [closApproved, load])
+
   const handleCompute = useCallback(async () => {
     try {
       setComputing(true)
@@ -697,8 +740,39 @@ export default function ReferenceCoveragePanel({
     }
   }, [courseCode, load])
 
+  const [confirming, setConfirming] = useState(false)
+
   const status = state?.status ?? 'available'
   const locked = status === 'locked' || status === 'no_references'
+  // Coverage is "approved" only when it has actually been measured AND signed off.
+  const coverageConfirmed = status === 'computed' && !!report?.confirmed_at
+
+  // Surface the gate to the parent (Layer 2 approval depends on it).
+  useEffect(() => {
+    onGateChange?.(coverageConfirmed)
+  }, [coverageConfirmed, onGateChange])
+
+  const handleConfirm = useCallback(async () => {
+    try {
+      setConfirming(true)
+      const { report: confirmed } = await confirmCoverage(courseCode)
+      setReport(confirmed)
+      showToast({
+        title: 'Coverage approved',
+        description: 'Reference coverage signed off — you can now approve Layer 2.',
+        variant: 'success',
+      })
+      await load()
+    } catch (error) {
+      showToast({
+        title: 'Could not approve coverage',
+        description: error instanceof Error ? error.message : 'Failed to approve coverage',
+        variant: 'destructive',
+      })
+    } finally {
+      setConfirming(false)
+    }
+  }, [courseCode, load])
 
   // Auto re-run coverage when the parent signals that a reference was ingested,
   // so the SME immediately sees the before/after deltas. Skips the initial mount.
@@ -774,10 +848,13 @@ export default function ReferenceCoveragePanel({
   const referenceCount = report?.reference_doc_count ?? state?.reference_doc_count ?? 0
 
   return (
-    <div className="rounded-lg border border-border">
+    <div className="flex flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
       <button
         type="button"
-        className="flex w-full items-start justify-between gap-3 p-4 text-left"
+        className={cn(
+          'flex w-full items-start justify-between gap-3 p-4 text-left',
+          panelOpen && 'border-b bg-muted/30'
+        )}
         onClick={() => setPanelOpen((open) => !open)}
       >
         <div className="min-w-0 flex-1">
@@ -816,7 +893,7 @@ export default function ReferenceCoveragePanel({
       </button>
 
       {panelOpen && (
-        <div className="space-y-3 border-t border-border px-4 pb-4 pt-3">
+        <div className="space-y-3 px-4 pb-4 pt-3">
         {loading ? (
           <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading coverage…
@@ -855,17 +932,48 @@ export default function ReferenceCoveragePanel({
               </div>
             )}
 
-            {/* Re-run coverage bar */}
+            {/* Measure / approve coverage bar */}
             {!locked && (
               <div className="flex flex-wrap items-center gap-2">
-                <Button size="sm" onClick={handleCompute} disabled={computing}>
+                <button
+                  type="button"
+                  className={cn(mdBtn, 'h-9 px-4 text-sm')}
+                  onClick={handleCompute}
+                  disabled={computing || confirming}
+                >
                   {computing ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <RefreshCw className="mr-2 h-4 w-4" />
+                    <RefreshCw className="h-4 w-4" />
                   )}
                   {report?.generated_at ? 'Re-run coverage' : 'Measure coverage'}
-                </Button>
+                </button>
+
+                {status === 'computed' &&
+                  (coverageConfirmed ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-3 py-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Coverage approved
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className={cn(
+                        mdBtn,
+                        'h-9 bg-gradient-to-br from-emerald-500 to-emerald-700 px-4 text-sm focus-visible:ring-emerald-500/40'
+                      )}
+                      onClick={handleConfirm}
+                      disabled={confirming || computing}
+                    >
+                      {confirming ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="h-4 w-4" />
+                      )}
+                      Approve coverage
+                    </button>
+                  ))}
+
                 {report?.generated_at && (
                   <span className="text-xs text-muted-foreground">
                     Last measured {new Date(report.generated_at).toLocaleString()}

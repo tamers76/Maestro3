@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Textarea'
 import { Input } from '@/components/ui/Input'
 import { Markdown } from '@/components/ui/Markdown'
 import { showToast } from '@/components/ui/Toaster'
+import { STAT_TILE } from '@/components/ui/StatTile'
 import {
   fetchIntegrityReview,
   saveIntegrityReview,
@@ -19,7 +20,6 @@ import {
 } from '@/services/api'
 import { cn } from '@/lib/utils'
 import {
-  Save,
   Loader2,
   AlertCircle,
   ShieldCheck,
@@ -102,26 +102,104 @@ const STATUS_BADGE: Record<string, string> = {
   pending: 'bg-muted text-muted-foreground',
 }
 
-const CARD_COLORS = [
-  'border-blue-400 dark:border-blue-500',
-  'border-emerald-400 dark:border-emerald-500',
-  'border-violet-400 dark:border-violet-500',
-  'border-orange-400 dark:border-orange-500',
-  'border-pink-400 dark:border-pink-500',
+/**
+ * Per-assessment accent: reuses the StatTile gradient palette (tile + glow) with a
+ * matching text color for the assessment id. Card surface stays neutral grey; only
+ * the icon tile and id carry color (matches Layers 3/4).
+ */
+const ACCENTS: { key: keyof typeof STAT_TILE; text: string }[] = [
+  { key: 'blue', text: 'text-[#024ad8] dark:text-blue-300' },
+  { key: 'emerald', text: 'text-emerald-600 dark:text-emerald-400' },
+  { key: 'rose', text: 'text-rose-600 dark:text-rose-400' },
+  { key: 'amber', text: 'text-amber-600 dark:text-amber-400' },
+  { key: 'slate', text: 'text-slate-600 dark:text-slate-300' },
 ]
+
+/**
+ * Decision-button styles shared with Layers 3/4 (app convention): every colored
+ * button shows a light tint at rest and turns solid on hover/selection. Edit = amber,
+ * approve = emerald, needs-revision = magenta/pink, "approve (blue)" = light blue.
+ */
+const EDIT_BTN =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-500 hover:text-white hover:border-transparent disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const APPROVE_BTN =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300 transition-colors hover:bg-emerald-500 hover:text-white hover:border-transparent disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const REVISION_BTN =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border border-pink-500/30 bg-pink-500/10 px-4 py-2 text-sm font-semibold text-pink-700 dark:text-pink-300 transition-colors hover:bg-pink-600 hover:text-white hover:border-transparent disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+
+// Edit fields use a slightly tighter corner than the card (rounded-[6px]).
+const FIELD_RADIUS = 'rounded-[4px]'
 
 // ----------------------------------------------------------------------------
 // Small presentational helpers
 // ----------------------------------------------------------------------------
 
+function FieldLabel({ label }: { label: string }) {
+  return <p className="text-[11px] font-bold uppercase tracking-wider field-label">{label}</p>
+}
+
+/** Look up the display label for a select value (used in read-only view). */
+function optionLabel(options: { value: string; label: string }[], value: string): string {
+  return options.find((o) => o.value === value)?.label ?? value
+}
+
+/** Read-only value paragraph that aligns with its FieldLabel. */
+function ReadValue({ children }: { children: React.ReactNode }) {
+  return <p className="text-sm leading-relaxed text-foreground/90">{children}</p>
+}
+
+/**
+ * Textarea that grows to fit its content so the full text is visible (no inner
+ * scrollbar, no wasted empty rows). Matches Layers 3/4.
+ */
+function AutoTextarea({
+  value,
+  onChange,
+  onBlur,
+  className,
+  placeholder,
+  disabled,
+}: {
+  value: string
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
+  onBlur?: () => void
+  className?: string
+  placeholder?: string
+  disabled?: boolean
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const fit = useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [])
+  useLayoutEffect(() => {
+    fit()
+  }, [value, fit])
+  return (
+    <Textarea
+      ref={ref}
+      rows={1}
+      value={value}
+      onChange={onChange}
+      onInput={fit}
+      onBlur={onBlur}
+      placeholder={placeholder}
+      disabled={disabled}
+      className={cn('min-h-0 resize-none overflow-hidden leading-relaxed', FIELD_RADIUS, className)}
+    />
+  )
+}
+
 function LabeledList({ label, items }: { label: string; items: string[] }) {
   return (
     <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+      <FieldLabel label={label} />
       {items.length === 0 ? (
         <p className="text-sm text-muted-foreground mt-0.5">None specified.</p>
       ) : (
-        <ul className="list-disc pl-5 space-y-0.5 text-sm mt-1 leading-relaxed">
+        <ul className="list-disc pl-5 space-y-0.5 text-sm mt-1 leading-relaxed text-foreground/90">
           {items.map((it, i) => (
             <li key={i}>{it}</li>
           ))}
@@ -138,8 +216,8 @@ function LabeledList({ label, items }: { label: string; items: string[] }) {
 function AiUseFrameworkTable({ framework }: { framework: AiUseFrameworkItem[] }) {
   if (framework.length === 0) return null
   return (
-    <div className="rounded-xl border bg-card overflow-hidden">
-      <div className="px-4 py-2.5 border-b bg-muted/30">
+    <div className="rounded-[6px] border border-border/50 bg-card overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-border/60 bg-muted/30">
         <h4 className="font-bold text-sm">AI Use Framework</h4>
         <p className="text-xs text-muted-foreground">
           Maestro supports active AI use, not passive outsourcing.
@@ -149,10 +227,10 @@ function AiUseFrameworkTable({ framework }: { framework: AiUseFrameworkItem[] })
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-muted/50 text-left">
-              <th className="px-3 py-2 font-semibold">AI Use Category</th>
-              <th className="px-3 py-2 font-semibold">Meaning</th>
-              <th className="px-3 py-2 font-semibold">Allowed?</th>
-              <th className="px-3 py-2 font-semibold">Disclosure?</th>
+              <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider field-label">AI Use Category</th>
+              <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider field-label">Meaning</th>
+              <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider field-label">Allowed?</th>
+              <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider field-label">Disclosure?</th>
             </tr>
           </thead>
           <tbody>
@@ -185,7 +263,7 @@ function AiUseFrameworkTable({ framework }: { framework: AiUseFrameworkItem[] })
 // ----------------------------------------------------------------------------
 
 function selectClass() {
-  return 'h-8 w-full rounded-md border border-input bg-background px-2 text-sm'
+  return 'h-8 w-full rounded-[4px] border border-input bg-background px-2 text-sm'
 }
 
 function AssessmentIntegrityCard({
@@ -193,10 +271,9 @@ function AssessmentIntegrityCard({
   colorIndex,
   readOnly,
   saving,
-  noteChanged,
   onUpdate,
   onApprove,
-  onSaveNote,
+  onAutoSave,
   expanded,
   onToggle,
 }: {
@@ -204,34 +281,57 @@ function AssessmentIntegrityCard({
   colorIndex: number
   readOnly: boolean
   saving?: boolean
-  noteChanged: boolean
   onUpdate: (next: AssessmentIntegrityReview) => void
   onApprove: (next: AssessmentIntegrityReview) => void
-  onSaveNote: () => void | Promise<void>
+  onAutoSave?: () => void
   expanded: boolean
   onToggle: () => void
 }) {
-  const editable = !readOnly && review.approval_status !== 'approved'
+  const canEdit = !readOnly && review.approval_status !== 'approved'
+  // Cards open in read-only text mode; fields only become editable after the SME
+  // clicks "Edit integrity requirements" (or if a prior edit decision was saved).
+  const [editingState, setEditingState] = useState(review.sme_decision === 'edit')
+  const editing = canEdit && editingState
   const ref = review.final_assessment_reference
   const risk = review.passive_ai_risk_summary
+  const accent = ACCENTS[colorIndex % ACCENTS.length]
+  const accentTile = STAT_TILE[accent.key]
 
   const update = (patch: Partial<AssessmentIntegrityReview>) => onUpdate({ ...review, ...patch })
 
   return (
-    <div className={cn('rounded-xl border-2 bg-card overflow-hidden', CARD_COLORS[colorIndex % CARD_COLORS.length])}>
+    <div className="rounded-[6px] border border-border/40 bg-muted/40 dark:bg-slate-800/30 overflow-hidden">
       {/* Header */}
       <div
-        className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b bg-muted/30 cursor-pointer"
+        className={cn(
+          'flex flex-wrap items-center justify-between gap-2 px-4 py-3 cursor-pointer',
+          expanded && 'border-b border-border/60'
+        )}
         onClick={onToggle}
       >
-        <div className="flex items-center gap-2 min-w-0">
-          {expanded ? (
-            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-          )}
-          <span className="font-bold text-sm">{review.assessment_id}</span>
-          <span className="text-sm text-muted-foreground truncate">— {ref.title || 'Untitled assessment'}</span>
+        <div className="flex items-center gap-3 min-w-0">
+          <div
+            className={cn(
+              'md-tile inline-flex h-10 w-10 shrink-0 items-center justify-center text-white',
+              accentTile.tile,
+              accentTile.glow
+            )}
+          >
+            <ShieldCheck className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className={cn('text-base font-bold', accent.text)}>{review.assessment_id}</span>
+              {expanded ? (
+                <ChevronDown className="h-4 w-4 shrink-0 text-black/40" />
+              ) : (
+                <ChevronRight className="h-4 w-4 shrink-0 text-black/40" />
+              )}
+            </div>
+            <p className="text-sm text-black/70 dark:text-slate-400 truncate">
+              {ref.title || 'Untitled assessment'}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {ref.selected_weight && (
@@ -258,23 +358,24 @@ function AssessmentIntegrityCard({
       {expanded && (
       <div className="p-4 space-y-4">
         {/* Approved assessment reference (collapsed) */}
-        <details className="rounded-lg border border-dashed border-border">
-          <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-primary hover:underline">
+        <details className="group">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-bold uppercase tracking-wide label-accent hover:opacity-80">
             Approved Assessment Reference
+            <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
           </summary>
-          <div className="px-3 pb-3 pt-1 space-y-2 text-sm">
+          <div className="pt-2 space-y-2 text-sm">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Title</p>
-              <p className="mt-0.5">{ref.title || 'n/a'}</p>
+              <FieldLabel label="Title" />
+              <p className="mt-0.5 text-foreground/90">{ref.title || 'n/a'}</p>
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Required artifact</p>
-              <p className="mt-0.5">{ref.required_artifact || 'n/a'}</p>
+              <FieldLabel label="Required artifact" />
+              <p className="mt-0.5 text-foreground/90">{ref.required_artifact || 'n/a'}</p>
             </div>
             <LabeledList label="Refined CLO alignment" items={ref.refined_clo_alignment} />
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Selected weight</p>
-              <p className="mt-0.5">{ref.selected_weight || 'n/a'}</p>
+              <FieldLabel label="Selected weight" />
+              <p className="mt-0.5 text-foreground/90">{ref.selected_weight || 'n/a'}</p>
             </div>
             <LabeledList label="Rubric criteria summary" items={ref.rubric_summary} />
           </div>
@@ -282,14 +383,13 @@ function AssessmentIntegrityCard({
 
         {/* Passive AI risk summary */}
         <section className="space-y-2">
-          <h5 className="text-xs font-bold uppercase tracking-wide text-foreground">Passive AI Risk Summary</h5>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div>
-              <label className="text-xs font-semibold text-muted-foreground mb-1 block">Risk level</label>
+          <h5 className="text-xs font-bold uppercase tracking-wide label-accent">Passive AI Risk Summary</h5>
+          <div>
+            <FieldLabel label="Risk level" />
+            {editing ? (
               <select
                 className={selectClass()}
                 value={risk.risk_level}
-                disabled={!editable}
                 onChange={(e) =>
                   update({ passive_ai_risk_summary: { ...risk, risk_level: e.target.value as PassiveAiRiskLevel } })
                 }
@@ -300,66 +400,80 @@ function AssessmentIntegrityCard({
                   </option>
                 ))}
               </select>
-            </div>
+            ) : (
+              <ReadValue>{riskLabel(risk.risk_level)}</ReadValue>
+            )}
           </div>
           <div>
-            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Why passive AI could happen</label>
-            <Textarea
-              className="text-sm"
-              rows={2}
-              disabled={!editable}
-              value={risk.why_passive_ai_could_happen}
-              onChange={(e) =>
-                update({ passive_ai_risk_summary: { ...risk, why_passive_ai_could_happen: e.target.value } })
-              }
-            />
+            <FieldLabel label="Why passive AI could happen" />
+            {editing ? (
+              <AutoTextarea
+                className="text-sm"
+                value={risk.why_passive_ai_could_happen}
+                onBlur={onAutoSave}
+                onChange={(e) =>
+                  update({ passive_ai_risk_summary: { ...risk, why_passive_ai_could_happen: e.target.value } })
+                }
+              />
+            ) : (
+              <ReadValue>{risk.why_passive_ai_could_happen || '—'}</ReadValue>
+            )}
           </div>
           <div>
-            <label className="text-xs font-semibold text-muted-foreground mb-1 block">
-              Why the assessment resists passive AI
-            </label>
-            <Textarea
-              className="text-sm"
-              rows={2}
-              disabled={!editable}
-              value={risk.why_assessment_resists_passive_ai}
-              onChange={(e) =>
-                update({ passive_ai_risk_summary: { ...risk, why_assessment_resists_passive_ai: e.target.value } })
-              }
-            />
+            <FieldLabel label="Why the assessment resists passive AI" />
+            {editing ? (
+              <AutoTextarea
+                className="text-sm"
+                value={risk.why_assessment_resists_passive_ai}
+                onBlur={onAutoSave}
+                onChange={(e) =>
+                  update({ passive_ai_risk_summary: { ...risk, why_assessment_resists_passive_ai: e.target.value } })
+                }
+              />
+            ) : (
+              <ReadValue>{risk.why_assessment_resists_passive_ai || '—'}</ReadValue>
+            )}
           </div>
           <div>
-            <label className="text-xs font-semibold text-muted-foreground mb-1 block">
-              What must be protected (one per line)
-            </label>
-            <Textarea
-              className="text-sm"
-              rows={2}
-              disabled={!editable}
-              value={risk.what_must_be_protected.join('\n')}
-              onChange={(e) =>
-                update({
-                  passive_ai_risk_summary: {
-                    ...risk,
-                    what_must_be_protected: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean),
-                  },
-                })
-              }
-            />
+            <FieldLabel label="What must be protected" />
+            {editing ? (
+              <AutoTextarea
+                className="text-sm"
+                placeholder="One item per line"
+                value={risk.what_must_be_protected.join('\n')}
+                onBlur={onAutoSave}
+                onChange={(e) =>
+                  update({
+                    passive_ai_risk_summary: {
+                      ...risk,
+                      what_must_be_protected: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean),
+                    },
+                  })
+                }
+              />
+            ) : risk.what_must_be_protected.length === 0 ? (
+              <ReadValue>—</ReadValue>
+            ) : (
+              <ul className="list-disc pl-5 space-y-0.5 text-sm leading-relaxed text-foreground/90">
+                {risk.what_must_be_protected.map((item, i) => (
+                  <li key={i}>{item}</li>
+                ))}
+              </ul>
+            )}
           </div>
         </section>
 
         {/* Required learner ownership evidence */}
         <section className="space-y-2">
-          <h5 className="text-xs font-bold uppercase tracking-wide text-foreground">Required Learner Ownership Evidence</h5>
-          <div className="rounded-lg border overflow-x-auto">
+          <h5 className="text-xs font-bold uppercase tracking-wide label-accent">Required Learner Ownership Evidence</h5>
+          <div className="rounded-[6px] border border-border/50 overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-muted/50 text-left">
-                  <th className="px-3 py-2 font-semibold">Ownership Evidence</th>
-                  <th className="px-3 py-2 font-semibold">Purpose</th>
-                  <th className="px-3 py-2 font-semibold w-40">Required?</th>
-                  <th className="px-3 py-2 font-semibold w-44">Used for?</th>
+                  <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider field-label">Ownership Evidence</th>
+                  <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider field-label">Purpose</th>
+                  <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider field-label w-40">Required?</th>
+                  <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider field-label w-44">Used for?</th>
                 </tr>
               </thead>
               <tbody>
@@ -368,40 +482,50 @@ function AssessmentIntegrityCard({
                     <td className="px-3 py-2 font-medium leading-relaxed">{e.evidence_item}</td>
                     <td className="px-3 py-2 text-muted-foreground leading-relaxed">{e.purpose}</td>
                     <td className="px-3 py-2">
-                      <select
-                        className={selectClass()}
-                        value={e.required_status}
-                        disabled={!editable}
-                        onChange={(ev) => {
-                          const next = [...review.learner_ownership_evidence]
-                          next[i] = { ...e, required_status: ev.target.value as OwnershipRequiredStatus }
-                          update({ learner_ownership_evidence: next })
-                        }}
-                      >
-                        {REQUIRED_STATUS_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
+                      {editing ? (
+                        <select
+                          className={selectClass()}
+                          value={e.required_status}
+                          onChange={(ev) => {
+                            const next = [...review.learner_ownership_evidence]
+                            next[i] = { ...e, required_status: ev.target.value as OwnershipRequiredStatus }
+                            update({ learner_ownership_evidence: next })
+                          }}
+                        >
+                          {REQUIRED_STATUS_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="leading-relaxed">
+                          {optionLabel(REQUIRED_STATUS_OPTIONS, e.required_status)}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2">
-                      <select
-                        className={selectClass()}
-                        value={e.use_status}
-                        disabled={!editable}
-                        onChange={(ev) => {
-                          const next = [...review.learner_ownership_evidence]
-                          next[i] = { ...e, use_status: ev.target.value as OwnershipUseStatus }
-                          update({ learner_ownership_evidence: next })
-                        }}
-                      >
-                        {USE_STATUS_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
+                      {editing ? (
+                        <select
+                          className={selectClass()}
+                          value={e.use_status}
+                          onChange={(ev) => {
+                            const next = [...review.learner_ownership_evidence]
+                            next[i] = { ...e, use_status: ev.target.value as OwnershipUseStatus }
+                            update({ learner_ownership_evidence: next })
+                          }}
+                        >
+                          {USE_STATUS_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="leading-relaxed">
+                          {optionLabel(USE_STATUS_OPTIONS, e.use_status)}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -412,24 +536,25 @@ function AssessmentIntegrityCard({
 
         {/* AI-use disclosure requirements */}
         <section className="space-y-2">
-          <h5 className="text-xs font-bold uppercase tracking-wide text-foreground">AI-Use Disclosure Requirements</h5>
-          <div className="rounded-lg border overflow-x-auto">
+          <h5 className="text-xs font-bold uppercase tracking-wide label-accent">AI-Use Disclosure Requirements</h5>
+          <div className="rounded-[6px] border border-border/50 overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-muted/50 text-left">
-                  <th className="px-3 py-2 font-semibold w-64">Disclosure Field</th>
-                  <th className="px-3 py-2 font-semibold">Learner Must Explain</th>
-                  {editable && <th className="px-2 py-2 w-8" />}
+                  <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider field-label w-64">Disclosure Field</th>
+                  <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider field-label">Learner Must Explain</th>
+                  {editing && <th className="px-2 py-2 w-8" />}
                 </tr>
               </thead>
               <tbody>
                 {review.ai_use_disclosure_requirements.map((d, i) => (
                   <tr key={i} className="border-t border-border align-top">
                     <td className="px-3 py-2 align-top">
-                      {editable ? (
+                      {editing ? (
                         <Input
-                          className="h-8 text-sm"
+                          className="h-8 px-2 py-1 text-sm rounded-[4px]"
                           value={d.field}
+                          onBlur={onAutoSave}
                           onChange={(ev) => {
                             const next = [...review.ai_use_disclosure_requirements]
                             next[i] = { ...d, field: ev.target.value }
@@ -441,10 +566,11 @@ function AssessmentIntegrityCard({
                       )}
                     </td>
                     <td className="px-3 py-2 align-top">
-                      {editable ? (
+                      {editing ? (
                         <Input
-                          className="h-8 text-sm"
+                          className="h-8 px-2 py-1 text-sm rounded-[4px]"
                           value={d.learner_must_explain}
+                          onBlur={onAutoSave}
                           onChange={(ev) => {
                             const next = [...review.ai_use_disclosure_requirements]
                             next[i] = { ...d, learner_must_explain: ev.target.value }
@@ -455,7 +581,7 @@ function AssessmentIntegrityCard({
                         <span className="text-muted-foreground leading-relaxed">{d.learner_must_explain}</span>
                       )}
                     </td>
-                    {editable && (
+                    {editing && (
                       <td className="px-2 py-2">
                         <button
                           type="button"
@@ -478,11 +604,10 @@ function AssessmentIntegrityCard({
               </tbody>
             </table>
           </div>
-          {editable && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1.5"
+          {editing && (
+            <button
+              type="button"
+              className={cn(EDIT_BTN, 'h-8 px-3 text-xs')}
               onClick={() =>
                 update({
                   ai_use_disclosure_requirements: [
@@ -494,20 +619,21 @@ function AssessmentIntegrityCard({
             >
               <Plus className="h-4 w-4" />
               Add disclosure field
-            </Button>
+            </button>
           )}
         </section>
 
         {/* Context verification requirements */}
         <section className="space-y-2">
-          <h5 className="text-xs font-bold uppercase tracking-wide text-foreground">Context Verification Requirements</h5>
+          <h5 className="text-xs font-bold uppercase tracking-wide label-accent">Context Verification Requirements</h5>
           <div className="space-y-1.5">
             {review.context_verification_requirements.map((c, i) => (
               <div key={i} className="flex items-center gap-2">
-                {editable ? (
+                {editing ? (
                   <Input
-                    className="h-8 text-sm flex-1"
+                    className="h-8 px-2 py-1 text-sm flex-1 rounded-[4px]"
                     value={c.check_item}
+                    onBlur={onAutoSave}
                     onChange={(ev) => {
                       const next = [...review.context_verification_requirements]
                       next[i] = { ...c, check_item: ev.target.value }
@@ -517,7 +643,7 @@ function AssessmentIntegrityCard({
                 ) : (
                   <span className="text-sm flex-1">{c.check_item}</span>
                 )}
-                {editable && (
+                {editing && (
                   <button
                     type="button"
                     className="text-muted-foreground hover:text-red-600"
@@ -536,11 +662,10 @@ function AssessmentIntegrityCard({
               </div>
             ))}
           </div>
-          {editable && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1.5"
+          {editing && (
+            <button
+              type="button"
+              className={cn(EDIT_BTN, 'h-8 px-3 text-xs')}
               onClick={() =>
                 update({
                   context_verification_requirements: [
@@ -552,40 +677,45 @@ function AssessmentIntegrityCard({
             >
               <Plus className="h-4 w-4" />
               Add check
-            </Button>
+            </button>
           )}
         </section>
 
         {/* Reflection / defense requirement */}
         <section className="space-y-1.5">
-          <h5 className="text-xs font-bold uppercase tracking-wide text-foreground">Reflection or Defense Requirement</h5>
-          <select
-            className={selectClass()}
-            value={review.reflection_or_defense_requirement}
-            disabled={!editable}
-            onChange={(e) =>
-              update({ reflection_or_defense_requirement: e.target.value as ReflectionDefenseRequirement })
-            }
-          >
-            {REFLECTION_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+          <h5 className="text-xs font-bold uppercase tracking-wide label-accent">Reflection or Defense Requirement</h5>
+          {editing ? (
+            <select
+              className={selectClass()}
+              value={review.reflection_or_defense_requirement}
+              onChange={(e) =>
+                update({ reflection_or_defense_requirement: e.target.value as ReflectionDefenseRequirement })
+              }
+            >
+              {REFLECTION_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <ReadValue>
+              {optionLabel(REFLECTION_OPTIONS, review.reflection_or_defense_requirement)}
+            </ReadValue>
+          )}
         </section>
 
         {/* Integrity flags */}
         <section className="space-y-1.5">
-          <h5 className="text-xs font-bold uppercase tracking-wide text-foreground flex items-center gap-1.5">
+          <h5 className="text-xs font-bold uppercase tracking-wide label-accent flex items-center gap-1.5">
             <Flag className="h-3.5 w-3.5" /> Integrity Flags
           </h5>
-          {editable ? (
-            <Textarea
+          {editing ? (
+            <AutoTextarea
               className="text-sm"
-              rows={3}
               placeholder="One flag per line (signals later AI/faculty review should detect)"
               value={review.integrity_flags.join('\n')}
+              onBlur={onAutoSave}
               onChange={(e) =>
                 update({ integrity_flags: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })
               }
@@ -593,7 +723,7 @@ function AssessmentIntegrityCard({
           ) : review.integrity_flags.length === 0 ? (
             <p className="text-sm text-muted-foreground">No flags defined.</p>
           ) : (
-            <ul className="list-disc pl-5 space-y-0.5 text-sm leading-relaxed">
+            <ul className="list-disc pl-5 space-y-0.5 text-sm leading-relaxed text-foreground/90">
               {review.integrity_flags.map((f, i) => (
                 <li key={i}>{f}</li>
               ))}
@@ -603,21 +733,17 @@ function AssessmentIntegrityCard({
 
         {/* SME internal note */}
         <section className="space-y-1.5">
-          <h5 className="text-xs font-bold uppercase tracking-wide text-foreground">SME Internal Note</h5>
-          <Textarea
-            className="text-sm"
-            rows={2}
-            placeholder="Optional note for yourself or your team."
-            value={review.sme_internal_note || ''}
-            onChange={(e) => update({ sme_internal_note: e.target.value })}
-          />
-          {readOnly && noteChanged && (
-            <div className="flex justify-end">
-              <Button size="sm" onClick={() => onSaveNote()} disabled={saving} className="gap-2">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                Save note
-              </Button>
-            </div>
+          <h5 className="text-xs font-bold uppercase tracking-wide label-accent">SME Internal Note</h5>
+          {editing ? (
+            <AutoTextarea
+              className="text-sm"
+              placeholder="Optional note for yourself or your team."
+              value={review.sme_internal_note || ''}
+              onBlur={onAutoSave}
+              onChange={(e) => update({ sme_internal_note: e.target.value })}
+            />
+          ) : (
+            <ReadValue>{review.sme_internal_note?.trim() || 'No note yet.'}</ReadValue>
           )}
         </section>
 
@@ -629,31 +755,54 @@ function AssessmentIntegrityCard({
               disclosure, context verification, reflection/defense, flags, and notes.
             </p>
             <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="default"
+              <button
+                type="button"
+                className={APPROVE_BTN}
                 disabled={review.approval_status === 'approved' || saving}
-                onClick={() => onApprove({ ...review, sme_decision: 'approve', approval_status: 'approved' })}
+                onClick={() => {
+                  setEditingState(false)
+                  onApprove({ ...review, sme_decision: 'approve', approval_status: 'approved' })
+                }}
               >
-                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                 Approve integrity design
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => update({ sme_decision: 'edit', approval_status: 'pending' })}
+              </button>
+              {editing ? (
+                <button
+                  type="button"
+                  className={EDIT_BTN}
+                  onClick={() => {
+                    setEditingState(false)
+                    onAutoSave?.()
+                  }}
+                >
+                  <Check className="h-4 w-4" />
+                  Done editing
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={EDIT_BTN}
+                  onClick={() => {
+                    setEditingState(true)
+                    update({ sme_decision: 'edit', approval_status: 'pending' })
+                  }}
+                >
+                  <Pencil className="h-4 w-4" />
+                  Edit integrity requirements
+                </button>
+              )}
+              <button
+                type="button"
+                className={REVISION_BTN}
+                onClick={() => {
+                  setEditingState(false)
+                  update({ sme_decision: 'needs_revision', approval_status: 'needs_revision' })
+                }}
               >
-                <Pencil className="mr-2 h-4 w-4" />
-                Edit integrity requirements
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => update({ sme_decision: 'needs_revision', approval_status: 'needs_revision' })}
-              >
-                <XCircle className="mr-2 h-4 w-4" />
+                <XCircle className="h-4 w-4" />
                 Needs revision
-              </Button>
+              </button>
             </div>
           </div>
         )}
@@ -714,7 +863,6 @@ export default function Layer5IntegrityEditor({
   const [continuing, setContinuing] = useState(false)
   const [course, setCourse] = useState<CourseLevelIntegritySummary | null>(null)
   const [reviews, setReviews] = useState<AssessmentIntegrityReview[]>([])
-  const [initialReviews, setInitialReviews] = useState<AssessmentIntegrityReview[]>([])
   const [initialSnapshot, setInitialSnapshot] = useState('')
   const [generatedAt, setGeneratedAt] = useState<string | undefined>()
 
@@ -724,7 +872,6 @@ export default function Layer5IntegrityEditor({
       const data = await fetchIntegrityReview(courseCode)
       setCourse(data.course_level_integrity_summary)
       setReviews(data.assessment_integrity_reviews)
-      setInitialReviews(data.assessment_integrity_reviews)
       setInitialSnapshot(
         JSON.stringify({ c: data.course_level_integrity_summary, r: data.assessment_integrity_reviews })
       )
@@ -763,7 +910,11 @@ export default function Layer5IntegrityEditor({
   }, [summary, onSummaryChange])
 
   const persist = useCallback(
-    async (c: CourseLevelIntegritySummary, r: AssessmentIntegrityReview[]): Promise<boolean> => {
+    async (
+      c: CourseLevelIntegritySummary,
+      r: AssessmentIntegrityReview[],
+      opts?: { silent?: boolean }
+    ): Promise<boolean> => {
       try {
         setSaving(true)
         const result = await saveIntegrityReview(courseCode, {
@@ -772,7 +923,6 @@ export default function Layer5IntegrityEditor({
         })
         setCourse(result.course_level_integrity_summary)
         setReviews(result.assessment_integrity_reviews)
-        setInitialReviews(result.assessment_integrity_reviews)
         setInitialSnapshot(
           JSON.stringify({
             c: result.course_level_integrity_summary,
@@ -780,11 +930,13 @@ export default function Layer5IntegrityEditor({
           })
         )
         onSaved?.()
-        showToast({
-          title: 'Saved',
-          description: layerApproved ? 'Personal notes saved' : 'Integrity decisions saved',
-          variant: 'success',
-        })
+        if (!opts?.silent) {
+          showToast({
+            title: 'Saved',
+            description: layerApproved ? 'Personal notes saved' : 'Integrity decisions saved',
+            variant: 'success',
+          })
+        }
         return true
       } catch (error) {
         showToast({
@@ -804,6 +956,13 @@ export default function Layer5IntegrityEditor({
     if (!course) return Promise.resolve(false)
     return persist(course, reviews)
   }
+
+  // Silent autosave fired from field onBlur — only persists when there are
+  // pending changes, so tabbing through untouched fields doesn't spam the server.
+  const handleAutoSave = useCallback(() => {
+    if (!course || saving || !hasChanges) return
+    void persist(course, reviews, { silent: true })
+  }, [course, reviews, saving, hasChanges, persist])
 
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const zoneRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -846,16 +1005,25 @@ export default function Layer5IntegrityEditor({
     // When a next item auto-expands, scroll its header to the top of the viewport.
     // Defer past the collapse/expand re-render and layout shift so the scroll lands
     // on the correct zone even as the approved body collapses above it.
+    const scrollToNext = () => {
+      if (!nextId) return
+      const el = zoneRefs.current[nextId]
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
     if (nextId) {
-      const scrollToNext = () => {
-        const el = zoneRefs.current[nextId]
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }
       requestAnimationFrame(scrollToNext)
       ;[120, 300].forEach((ms) => setTimeout(scrollToNext, ms))
     }
 
     await persist(course, nextReviews)
+
+    // The save replaces `reviews` with the server result and re-renders the cards,
+    // which can shift layout after the timed scrolls above. Re-run the scroll once
+    // the new content has painted so the next assessment's title stays in view.
+    if (nextId) {
+      requestAnimationFrame(scrollToNext)
+      ;[120, 320].forEach((ms) => setTimeout(scrollToNext, ms))
+    }
   }
 
   const handleReadyForNextLayer = async () => {
@@ -889,31 +1057,35 @@ export default function Layer5IntegrityEditor({
   }
 
   return (
-    <div className="flex flex-col rounded-xl border bg-card shadow-sm overflow-hidden mt-4">
-      <div className="flex items-center justify-between px-6 py-4 border-b bg-muted/30">
+    <div className="flex flex-col rounded-[6px] border border-border/50 bg-card shadow-sm overflow-hidden mt-4">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border/60 bg-muted/30">
         <div className="flex items-center gap-3">
           <h3 className="font-bold text-base">Assessment Integrity Editor</h3>
           <span className="text-sm text-muted-foreground">{reviews.length} assessments</span>
         </div>
-        <div className="flex items-center gap-2">
-          {!layerApproved && hasChanges && (
-            <span className="text-sm text-amber-600 flex items-center gap-1">
-              <AlertCircle className="h-4 w-4" />
-              Unsaved
+        <div className="flex items-center gap-2 text-sm">
+          {saving ? (
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Saving…
             </span>
-          )}
-          {!layerApproved && (
-            <Button size="sm" onClick={handleSave} disabled={saving || !hasChanges} className="gap-2">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save
-            </Button>
+          ) : hasChanges ? (
+            <span className="flex items-center gap-1.5 text-amber-600">
+              <AlertCircle className="h-4 w-4" />
+              Unsaved changes
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-emerald-600">
+              <Check className="h-4 w-4" />
+              All changes saved
+            </span>
           )}
         </div>
       </div>
 
       <div className="p-6 space-y-6">
         {/* Short layer explanation */}
-        <div className="rounded-xl border-2 border-purple-300 dark:border-purple-600 bg-purple-50/50 dark:bg-purple-900/20 p-4 space-y-2">
+        <div className="rounded-[6px] border border-purple-300/70 dark:border-purple-600/70 bg-purple-50/50 dark:bg-purple-900/20 p-4 space-y-2">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-purple-500" />
             <h4 className="font-bold text-sm">Layer 5 — Assessment Integrity and Active AI Use</h4>
@@ -927,13 +1099,11 @@ export default function Layer5IntegrityEditor({
         </div>
 
         {/* Course-level integrity summary */}
-        <section className="rounded-xl border bg-card p-4 space-y-3">
+        <section className="rounded-[6px] border border-border/50 bg-card p-4 space-y-3">
           <h4 className="font-bold text-sm">Course-Level Integrity Summary</h4>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Overall integrity position
-            </p>
-            <p className="text-sm mt-0.5 leading-relaxed">
+            <FieldLabel label="Overall integrity position" />
+            <p className="text-sm mt-0.5 leading-relaxed text-foreground/90">
               {course.overall_integrity_position || 'Not generated.'}
             </p>
           </div>
@@ -951,47 +1121,38 @@ export default function Layer5IntegrityEditor({
         <section className="space-y-4">
           <h4 className="font-bold text-sm">Assessment Integrity Cards</h4>
           <div className="grid gap-5">
-            {reviews.map((review, index) => {
-              const initial = initialReviews.find((r) => r.assessment_id === review.assessment_id)
-              const noteChanged = (review.sme_internal_note || '') !== (initial?.sme_internal_note || '')
-              return (
-                <div
-                  key={review.assessment_id}
-                  ref={(el) => {
-                    zoneRefs.current[review.assessment_id] = el
-                  }}
-                  style={{ scrollMarginTop: 16 }}
-                >
-                  <AssessmentIntegrityCard
-                    review={review}
-                    colorIndex={index}
-                    readOnly={layerApproved}
-                    saving={saving}
-                    noteChanged={noteChanged}
-                    onUpdate={(next) => updateReview(review.assessment_id, next)}
-                    onApprove={(next) => approveReview(review.assessment_id, next)}
-                    onSaveNote={async () => {
-                      await handleSave()
-                    }}
-                    expanded={expandedIds.has(review.assessment_id)}
-                    onToggle={() => toggleExpanded(review.assessment_id)}
-                  />
-                </div>
-              )
-            })}
+            {reviews.map((review, index) => (
+              <div
+                key={review.assessment_id}
+                ref={(el) => {
+                  zoneRefs.current[review.assessment_id] = el
+                }}
+                style={{ scrollMarginTop: 120 }}
+              >
+                <AssessmentIntegrityCard
+                  review={review}
+                  colorIndex={index}
+                  readOnly={layerApproved}
+                  saving={saving}
+                  onUpdate={(next) => updateReview(review.assessment_id, next)}
+                  onApprove={(next) => approveReview(review.assessment_id, next)}
+                  onAutoSave={handleAutoSave}
+                  expanded={expandedIds.has(review.assessment_id)}
+                  onToggle={() => toggleExpanded(review.assessment_id)}
+                />
+              </div>
+            ))}
           </div>
         </section>
 
         {/* Course-level SME decision summary — final checklist before completion */}
         {summary && (
-          <section className="rounded-xl border bg-card p-4 space-y-4">
+          <section className="rounded-[6px] border border-border/50 bg-card p-4 space-y-4">
             <h4 className="font-bold text-sm">SME Decisions Required</h4>
 
             {/* A. Assessment-level approvals */}
             <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Assessment Integrity Designs
-              </p>
+              <FieldLabel label="Assessment Integrity Designs" />
               <ul className="space-y-1 text-sm">
                 {reviews.map((r) => (
                   <li key={r.assessment_id} className="flex items-center justify-between gap-2">
@@ -1020,11 +1181,12 @@ export default function Layer5IntegrityEditor({
 
         {/* Collapsible full report */}
         {course.full_integrity_report?.trim() && (
-          <details className="rounded-lg border border-dashed border-border">
-            <summary className="cursor-pointer px-4 py-2.5 text-sm font-medium text-primary hover:underline">
+          <details className="group">
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-bold uppercase tracking-wide label-accent hover:opacity-80">
               View Full Assessment Integrity Report
+              <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
             </summary>
-            <div className="px-4 pb-4 border-t border-border pt-3">
+            <div className="pt-3">
               <Markdown>{course.full_integrity_report}</Markdown>
             </div>
           </details>

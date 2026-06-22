@@ -1,9 +1,50 @@
 import { Link } from 'react-router-dom'
-import { Button } from '@/components/ui/Button'
 import StageProgress from './StageProgress'
-import { formatDate } from '@/lib/utils'
 import { ArrowRight, Trash2, UserPlus, Eye } from 'lucide-react'
 import type { CourseListItem } from '@/services/api'
+
+/** Numeric day/month/year, e.g. 21/06/2026. */
+function formatNumericDate(value: string): string {
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  return `${dd}/${mm}/${d.getFullYear()}`
+}
+
+interface CourseStatus {
+  label: string
+  dotClass: string
+  pillClass: string
+}
+
+/**
+ * Map the legacy stage counter to a scannable, color-coded status.
+ * Buckets mirror the Dashboard summary (completed=5, in progress=1–4,
+ * not started=0) and reuse the in-card progress palette (emerald=done,
+ * violet=active) for visual consistency.
+ */
+function getCourseStatus(stage: number): CourseStatus {
+  if (stage >= 5) {
+    return {
+      label: 'Completed',
+      dotClass: 'bg-emerald-500',
+      pillClass: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300',
+    }
+  }
+  if (stage <= 0) {
+    return {
+      label: 'Not started',
+      dotClass: 'bg-amber-500',
+      pillClass: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300',
+    }
+  }
+  return {
+    label: 'In progress',
+    dotClass: 'bg-violet-500',
+    pillClass: 'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300',
+  }
+}
 
 interface CourseCardProps {
   course: CourseListItem
@@ -12,7 +53,12 @@ interface CourseCardProps {
   canDelete?: boolean
 }
 
-export default function CourseCard({ course, onDelete, onRequestReview, canDelete = true }: CourseCardProps) {
+export default function CourseCard({
+  course,
+  onDelete,
+  onRequestReview,
+  canDelete = true,
+}: CourseCardProps) {
   const isReviewing = course.access === 'reviewer'
   const ownerDisplay =
     course.owner_name ||
@@ -21,72 +67,73 @@ export default function CourseCard({ course, onDelete, onRequestReview, canDelet
   const reviewerNames = (course.reviewers ?? [])
     .map((r) => r.name || r.email || r.user_id)
     .filter(Boolean) as string[]
+  const status = getCourseStatus(course.current_stage)
+
   return (
-    <div className="group relative rounded-2xl bg-white dark:bg-card border border-slate-100 dark:border-border p-6 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden">
-      {/* Top accent bar */}
-      <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-violet-500 to-blue-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-      
+    <div className="md-scope md-card md-card-interactive group relative p-5">
       <div className="flex items-start justify-between">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-bold text-violet-600 dark:text-violet-400 uppercase tracking-wider">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="md-chip inline-flex bg-[#eef4ff] px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider text-[#0e3191] dark:bg-[#024ad8]/20 dark:text-[#7aabf5]">
               {course.course_code}
-            </p>
+            </span>
+            <span
+              className={`md-pill inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-semibold ${status.pillClass}`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${status.dotClass}`} />
+              {status.label}
+            </span>
             {isReviewing && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-500/20 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
+              <span className="md-pill inline-flex items-center gap-1 bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">
                 <Eye className="h-3 w-3" /> Reviewing
               </span>
             )}
           </div>
-          <h3 className="mt-2 text-base font-bold text-black dark:text-foreground line-clamp-2 leading-snug">
+          <h3 className="mt-2.5 line-clamp-2 text-base font-bold leading-snug text-foreground">
             {course.title}
           </h3>
-          <p className="mt-1 text-xs text-black/55 dark:text-muted-foreground">
-            Owner: <span className="font-semibold text-black/75 dark:text-foreground/90">{ownerDisplay}</span>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            Owner: <span className="font-semibold text-foreground/90">{ownerDisplay}</span>
           </p>
-          <p className="mt-0.5 text-xs text-black/55 dark:text-muted-foreground">
+          <p className="mt-0.5 text-xs text-muted-foreground">
             {reviewerNames.length > 0 ? (
               <>
                 Reviewers:{' '}
-                <span className="font-semibold text-black/75 dark:text-foreground/90">
-                  {reviewerNames.join(', ')}
-                </span>
+                <span className="font-semibold text-foreground/90">{reviewerNames.join(', ')}</span>
               </>
             ) : (
-              <>Reviewers: <span className="text-black/45 dark:text-muted-foreground/80">None</span></>
+              <>
+                Reviewers: <span className="text-muted-foreground/80">None</span>
+              </>
             )}
           </p>
         </div>
         {canDelete && (
-          <Button
-            variant="ghost"
-            size="icon"
+          <button
             title="Delete course"
-            className="opacity-0 group-hover:opacity-100 transition-opacity text-black/40 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 h-9 w-9 -mt-1 -mr-1"
+            className="-mr-1 -mt-1 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-foreground/40 opacity-0 transition-all hover:bg-rose-50 hover:text-rose-500 group-hover:opacity-100 dark:hover:bg-rose-500/10"
             onClick={(e) => {
               e.preventDefault()
               onDelete(course.course_code)
             }}
           >
             <Trash2 className="h-4 w-4" />
-          </Button>
+          </button>
         )}
       </div>
-      
+
       <div className="mt-5">
         <StageProgress currentStage={course.current_stage} compact />
       </div>
-      
-      <div className="mt-5 flex items-center justify-between pt-4 border-t border-slate-100 dark:border-border">
-        <span className="text-sm text-black/50 dark:text-muted-foreground">
-          Updated {formatDate(course.updated_at)}
+
+      <div className="mt-5 flex items-center justify-between border-t border-border pt-4">
+        <span className="text-sm text-muted-foreground">
+          Updated {formatNumericDate(course.updated_at)}
         </span>
-        <div className="flex items-center gap-1.5">
+        <div className={onRequestReview ? 'grid grid-cols-2 gap-2' : 'flex'}>
           {onRequestReview && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1.5 text-black/60 dark:text-muted-foreground hover:text-violet-700 hover:bg-violet-50 dark:hover:bg-violet-500/10 h-9 text-sm font-semibold rounded-lg px-3"
+            <button
+              className="md-btn-soft flex w-full items-center justify-center gap-1.5 px-4 py-2 text-sm font-semibold text-foreground/70 transition-colors hover:text-[#024ad8]"
               onClick={(e) => {
                 e.preventDefault()
                 onRequestReview(course.course_code)
@@ -94,13 +141,13 @@ export default function CourseCard({ course, onDelete, onRequestReview, canDelet
             >
               <UserPlus className="h-4 w-4" />
               Request review
-            </Button>
+            </button>
           )}
-          <Link to={`/courses/${encodeURIComponent(course.course_code)}`}>
-            <Button variant="ghost" size="sm" className="gap-1.5 group/btn text-violet-600 dark:text-violet-400 hover:text-violet-700 hover:bg-violet-50 dark:hover:bg-violet-500/10 h-9 text-sm font-semibold rounded-lg px-3">
-              Open 
+          <Link to={`/courses/${encodeURIComponent(course.course_code)}`} className="contents">
+            <button className="md-btn group/btn flex w-full items-center justify-center gap-1.5 bg-gradient-to-br from-[#296ef9] to-[#024ad8] px-4 py-2 text-sm font-semibold text-white">
+              Open
               <ArrowRight className="h-4 w-4 transition-transform group-hover/btn:translate-x-0.5" />
-            </Button>
+            </button>
           </Link>
         </div>
       </div>

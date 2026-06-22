@@ -4,7 +4,7 @@ import { ArrowLeft, Boxes, ChevronRight, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { showToast } from '@/components/ui/Toaster'
 import { fetchCourse, listReferences, type CourseDetail as CourseDetailType } from '@/services/api'
-import Stage1Layers from '@/components/Stage1Layers'
+import Stage1Layers, { type SoloLayerActions } from '@/components/Stage1Layers'
 import { type IntakeSummaryProps } from '@/components/IntakeSummaryView'
 import NodeEnginePanel from '@/components/nodeEngine/NodeEnginePanel'
 import JourneyRail from './JourneyRail'
@@ -60,6 +60,12 @@ function ArchitectScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layerId])
 
+  // Each layer is a full page; landing on a new layer should start at the top
+  // (router navigation alone preserves the previous scroll position).
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }, [layerId])
+
   // Unknown / not-yet-loaded layer id → bounce to the resume frontier.
   if (steps.length > 0 && idx === -1) {
     return <Navigate to={`${base}/architect/${journey.architectFrontierId ?? steps[0].id}`} replace />
@@ -68,9 +74,14 @@ function ArchitectScreen({
   const active = idx >= 0 ? steps[idx] : undefined
   const prev = idx > 0 ? steps[idx - 1] : undefined
   const next = idx >= 0 && idx < steps.length - 1 ? steps[idx + 1] : undefined
+  // The forward action only appears once the current layer is approved.
+  const approved = active?.status === 'done'
   const goLayer = (id: string) => navigate(`${base}/architect/${id}`)
   const goEngine = () => navigate(`${base}/engine/${journey.engineFrontierLayer}`)
   const [referenceDocsCount, setReferenceDocsCount] = useState(0)
+  // Layer 2 (CLO review) lifts its Approve/Regenerate actions up so the sticky
+  // action bar can own them, alongside the "Next layer" navigation.
+  const [soloActions, setSoloActions] = useState<SoloLayerActions | null>(null)
 
   // Stabilize the callbacks handed to Stage1Layers. These are invoked from
   // inside Stage1Layers' data-loading effects; an unstable identity here would
@@ -119,6 +130,7 @@ function ArchitectScreen({
           soloLayerId={layerId}
           onNavigateLayer={goLayer}
           onAllApproved={handleAllApproved}
+          onSoloActionsChange={setSoloActions}
           onAlignmentAutoPropose={handleAlignmentSignals}
           onReferenceUploaded={handleAlignmentSignals}
           alignmentFetchSignal={alignmentFetchSignal}
@@ -131,23 +143,33 @@ function ArchitectScreen({
       <WizardActionBar
         back={prev ? { label: `Back: ${prev.label}`, onClick: () => goLayer(prev.id) } : undefined}
         primary={
-          next
-            ? {
-                label: 'Next layer',
-                onClick: () => goLayer(next.id),
-                disabled: next.status === 'locked' || layer1BlockedByMissingReferences,
-                icon: <ChevronRight className="h-4 w-4" />,
-              }
-            : {
-                label: 'Continue to Node Engine',
-                onClick: goEngine,
-                disabled: !journey.engineUnlocked,
-                icon: <ChevronRight className="h-4 w-4" />,
-              }
+          approved
+            ? next
+              ? {
+                  label: 'Next layer',
+                  onClick: () => goLayer(next.id),
+                  icon: <ChevronRight className="h-4 w-4" />,
+                }
+              : {
+                  label: 'Continue to Node Engine',
+                  onClick: goEngine,
+                  disabled: !journey.engineUnlocked,
+                  icon: <ChevronRight className="h-4 w-4" />,
+                }
+            : soloActions
+              ? {
+                  label: 'Next layer',
+                  onClick: soloActions.approve,
+                  disabled: !soloActions.canApprove,
+                  icon: <ChevronRight className="h-4 w-4" />,
+                }
+              : undefined
         }
         hint={
           layer1BlockedByMissingReferences
             ? 'Upload at least one grounding reference before moving to the next layer.'
+            : soloActions && !approved && !soloActions.canApprove
+            ? soloActions.approveHint ?? 'Approve every CLO refinement below to enable approval.'
             : next && next.status === 'locked'
             ? 'Approve this layer to unlock the next step.'
             : !next && !journey.engineUnlocked
@@ -175,6 +197,11 @@ function EngineScreen({ courseCode, journey, alignmentFetchSignal }: EngineScree
   useEffect(() => {
     void journey.refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layerNum])
+
+  // Land at the top of the page when moving to a new engine layer.
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
   }, [layerNum])
 
   const goArchitect = () =>
@@ -365,8 +392,8 @@ export default function CourseWizard() {
         <h1 className="font-display text-2xl font-semibold text-foreground">{course.title}</h1>
       </div>
 
-      <div className="flex flex-col gap-6 lg:flex-row">
-        <aside className="lg:sticky lg:top-[68px] lg:h-fit lg:w-[264px] lg:shrink-0">
+      <div className="flex flex-col gap-5 lg:flex-row">
+        <aside className="lg:sticky lg:top-[68px] lg:h-fit lg:w-[220px] lg:shrink-0">
           <div className="glass-strong rounded-xl p-3">
             <JourneyRail
               courseCode={course.course_code}

@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react'
 import { ChevronLeft } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { mdBtn, mdBtnSoft } from '@/components/ui/materialButton'
 import { cn } from '@/lib/utils'
 
 export interface WizardAction {
@@ -31,35 +31,44 @@ export default function WizardActionBar({
   hint,
   className,
 }: WizardActionBarProps) {
+  // Nothing to show (e.g. first layer, not yet approved, no hint) → render nothing
+  // so there's no empty bar / leftover chrome on the page.
+  if (!back && !secondary && !primary && !hint) return null
+
   return (
-    <div
-      className={cn(
-        'sticky bottom-0 z-30 -mx-6 mt-6 border-t border-border bg-card/95 px-6 py-3 backdrop-blur md:-mx-8 md:px-8',
-        className
-      )}
-    >
+    <div className={cn('md-scope mt-6', className)}>
       {hint && <p className="mb-2 text-right text-fine-print text-muted-foreground">{hint}</p>}
       <div className="flex items-center justify-between gap-3">
         <div>
           {back && (
-            <Button variant="ghost" onClick={back.onClick} disabled={back.disabled}>
-              <ChevronLeft className="mr-1 h-4 w-4" />
+            <button type="button" className={mdBtnSoft} onClick={back.onClick} disabled={back.disabled}>
+              <ChevronLeft className="h-4 w-4" />
               {back.label}
-            </Button>
+            </button>
           )}
         </div>
         <div className="flex items-center gap-2">
           {secondary && (
-            <Button variant="outline" size="sm" onClick={secondary.onClick} disabled={secondary.disabled}>
+            <button
+              type="button"
+              className={mdBtnSoft}
+              onClick={secondary.onClick}
+              disabled={secondary.disabled}
+            >
               {secondary.icon}
               {secondary.label}
-            </Button>
+            </button>
           )}
           {primary && (
-            <Button onClick={primary.onClick} disabled={primary.disabled} className="gap-2">
+            <button
+              type="button"
+              className={mdBtn}
+              onClick={primary.onClick}
+              disabled={primary.disabled}
+            >
               {primary.label}
               {primary.icon}
-            </Button>
+            </button>
           )}
         </div>
       </div>

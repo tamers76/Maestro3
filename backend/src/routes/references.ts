@@ -29,6 +29,7 @@ import {
   getCoverageState,
   getCoverageReport,
   recomputeCoverageWithDelta,
+  confirmCoverage,
 } from '../services/referenceCoverage.service.js';
 import { suggestSourcesForClo } from '../services/referenceSourceSuggestion.service.js';
 import {
@@ -461,6 +462,21 @@ router.post('/:code/references/coverage/compute', async (req: Request, res: Resp
     return res
       .status(500)
       .json({ error: error instanceof Error ? error.message : 'Failed to compute coverage' });
+  }
+});
+
+// POST /api/courses/:code/references/coverage/confirm — SME sign-off on the
+// measured coverage. Gates Layer 2 approval; only valid once coverage is computed.
+router.post('/:code/references/coverage/confirm', async (req: Request, res: Response) => {
+  try {
+    const { code } = req.params;
+    const report = await confirmCoverage(code);
+    return res.json({ report });
+  } catch (error) {
+    console.error('[references] coverage confirm failed:', error);
+    return res
+      .status(400)
+      .json({ error: error instanceof Error ? error.message : 'Failed to approve coverage' });
   }
 });
 

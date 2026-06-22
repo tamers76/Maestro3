@@ -16,6 +16,7 @@ import {
   assertLayer2ReadyForApproval,
   getCloRefinementContext,
 } from './cloRefinements.service.js';
+import { clearCoverage } from './referenceCoverage.service.js';
 import {
   parseLayer3Suggestions,
   seedRedesignsFromSuggestions,
@@ -467,6 +468,9 @@ export async function runStage1Layer(
         const suggestions = parseLayer2Suggestions(outputJson, clos);
         outputJson = { ...(typeof outputJson === 'object' && outputJson ? outputJson : {}), clos: suggestions };
         await seedRefinementsFromSuggestions(courseCode);
+        // The reviewed CLOs just changed; any prior coverage measurement and its
+        // SME sign-off are now stale, so discard them — coverage must be redone.
+        await clearCoverage(courseCode);
       }
 
       if (layerId === 'layer3-assessment-redesign') {

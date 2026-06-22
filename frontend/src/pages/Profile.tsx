@@ -150,7 +150,7 @@ export default function Profile() {
       </div>
 
       {/* Avatar + identity */}
-      <div className="rounded-xl border border-border/70 bg-white/55 dark:bg-white/[0.04] backdrop-blur-md p-6">
+      <div className="glass-strong rounded-2xl p-6">
         <div className="flex items-center gap-5">
           <div className="relative">
             {src ? (
@@ -198,7 +198,7 @@ export default function Profile() {
       {/* Profile fields */}
       <form
         onSubmit={handleSaveProfile}
-        className="rounded-xl border border-border/70 bg-white/55 dark:bg-white/[0.04] backdrop-blur-md p-6 space-y-4"
+        className="glass-strong rounded-2xl p-6 space-y-4"
       >
         <h2 className="text-body font-semibold text-foreground">Personal information</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -238,7 +238,7 @@ export default function Profile() {
             value={form.bio}
             onChange={(e) => setForm({ ...form, bio: e.target.value })}
             rows={4}
-            className="flex w-full rounded-md border border-input bg-white/55 dark:bg-white/5 backdrop-blur-md px-4 py-3 text-body text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex w-full rounded-md border-2 border-input bg-white/70 dark:bg-white/5 px-4 py-3 text-body text-foreground shadow-[inset_2px_2px_5px_rgb(2_74_216_/_0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             placeholder="A short bio..."
           />
         </Field>
@@ -253,7 +253,7 @@ export default function Profile() {
       {/* Change password */}
       <form
         onSubmit={handleChangePassword}
-        className="rounded-xl border border-border/70 bg-white/55 dark:bg-white/[0.04] backdrop-blur-md p-6 space-y-4"
+        className="glass-strong rounded-2xl p-6 space-y-4"
       >
         <div className="flex items-center gap-2">
           <KeyRound className="h-4 w-4 text-muted-foreground" />

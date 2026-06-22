@@ -23,7 +23,11 @@ import type { RetrievedChunk } from '../models/schemas.js';
 import * as referenceRepo from '../db/repos/referenceRepo.js';
 import { hybridRetrieveDetailed } from './referenceRetrieval.service.js';
 import { buildV1ContractBundle } from '../node-engine/stage1Adapter.service.js';
-import { saveCourseArtifact, getCourseArtifact } from '../node-engine/store.service.js';
+import {
+  saveCourseArtifact,
+  getCourseArtifact,
+  deleteCourseArtifact,
+} from '../node-engine/store.service.js';
 import { getReferenceCoverageThresholds } from '../node-engine/referenceCoverageConfig.service.js';
 import {
   judgeCoveragePassages,
@@ -125,6 +129,8 @@ export interface ReferenceCoverageReport {
   summary: CoverageSummary;
   clos: CoverageCloResult[];
   generated_at?: string;
+  /** When the SME signed off on this measured coverage (gates Layer 2 approval). */
+  confirmed_at?: string;
   lock_reason?: string;
 }
 
@@ -132,11 +138,15 @@ export interface CoverageStateSummary {
   status: CoverageStatus;
   lock_reason?: string;
   approved_clo_count: number;
+  /** Total CLOs in the course; coverage stays locked until ALL are approved. */
+  total_clo_count: number;
   reference_doc_count: number;
   chunk_count: number;
   thresholds: ReferenceCoverageThresholds;
   summary?: CoverageSummary;
   generated_at?: string;
+  /** Present only when status is 'computed' and the SME has approved coverage. */
+  confirmed_at?: string;
 }
 
 /** Direction a CLO's band moved between two coverage reports. */
@@ -374,16 +384,23 @@ export async function getCoverageState(courseCode: string): Promise<CoverageStat
   const chunkCount = await referenceRepo.countChunks(courseCode);
   const existing = await getCourseArtifact<ReferenceCoverageReport>(courseCode, ARTIFACT_FILE);
 
+  const totalClos = bundle.clos.length;
+  const allClosApproved = totalClos > 0 && approvedClos.length === totalClos;
+
   let status: CoverageStatus;
   let lock_reason: string | undefined;
-  if (approvedClos.length === 0) {
+  if (!allClosApproved) {
     status = 'locked';
-    lock_reason = 'Approve CLO Refinement (Course Architect Layer 2) before measuring reference coverage.';
+    const remaining = Math.max(totalClos - approvedClos.length, 0);
+    lock_reason =
+      totalClos === 0
+        ? 'Approve CLO Refinement (Course Architect Layer 2) before measuring reference coverage.'
+        : `Approve all ${totalClos} CLO refinements before measuring reference coverage (${remaining} still pending).`;
   } else if (referenceDocCount === 0 || chunkCount === 0) {
     status = 'no_references';
     lock_reason =
       'No references uploaded — coverage cannot be measured. Upload reference material to measure how well the corpus teaches each CLO.';
-  } else if (existing && Array.isArray(existing.clos)) {
+  } else if (existing && Array.isArray(existing.clos) && existing.clos.length > 0) {
     status = 'computed';
   } else {
     status = 'available';
@@ -393,17 +410,51 @@ export async function getCoverageState(courseCode: string): Promise<CoverageStat
     status,
     lock_reason,
     approved_clo_count: approvedClos.length,
+    total_clo_count: totalClos,
     reference_doc_count: referenceDocCount,
     chunk_count: chunkCount,
     thresholds,
     summary: existing?.summary,
     generated_at: existing?.generated_at,
+    // Only surface a confirmation when coverage is actually measured; a stale
+    // confirmation from a prior run must never gate approval after CLOs change.
+    confirmed_at: status === 'computed' ? existing?.confirmed_at : undefined,
   };
 }
 
 /** Read the current coverage report artifact (null when none computed). */
 export async function getCoverageReport(courseCode: string): Promise<ReferenceCoverageReport | null> {
   return getCourseArtifact<ReferenceCoverageReport>(courseCode, ARTIFACT_FILE);
+}
+
+/**
+ * SME sign-off on the measured coverage. Stamps `confirmed_at` on the current
+ * report so Layer 2 approval can be gated on it. Only allowed once coverage has
+ * actually been measured (status 'computed'); re-measuring writes a fresh report
+ * WITHOUT confirmed_at, which transparently revokes a stale confirmation.
+ */
+export async function confirmCoverage(courseCode: string): Promise<ReferenceCoverageReport> {
+  const state = await getCoverageState(courseCode);
+  if (state.status !== 'computed') {
+    throw new Error('Measure reference coverage before approving it.');
+  }
+  const report = await getCourseArtifact<ReferenceCoverageReport>(courseCode, ARTIFACT_FILE);
+  if (!report || !Array.isArray(report.clos) || report.clos.length === 0) {
+    throw new Error('No coverage report to approve — measure coverage first.');
+  }
+  const confirmed: ReferenceCoverageReport = { ...report, confirmed_at: new Date().toISOString() };
+  await saveCourseArtifact(courseCode, ARTIFACT_FILE, confirmed);
+  return confirmed;
+}
+
+/**
+ * Discard any persisted coverage report (and its delta snapshot). Called when
+ * Layer 2 is (re)generated: the CLOs the SME reviewed have changed, so the prior
+ * measurement and its confirmation are no longer valid and must be redone.
+ */
+export async function clearCoverage(courseCode: string): Promise<void> {
+  await deleteCourseArtifact(courseCode, ARTIFACT_FILE);
+  await deleteCourseArtifact(courseCode, PREV_ARTIFACT_FILE);
 }
 
 // ===========================================================================

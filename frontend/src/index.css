@@ -26,11 +26,12 @@
     --border: 220 24% 88%;
     --input: 220 24% 88%;
     --ring: 221 90% 50%;
-    --radius-sm: 8px;
-    --radius-md: 10px;
-    --radius-lg: 14px;
-    --radius-xl: 20px;
-    --radius: 10px;
+    /* Clay radius scale — chunkier curvature app-wide */
+    --radius-sm: 12px;
+    --radius-md: 16px;
+    --radius-lg: 20px;
+    --radius-xl: 24px;
+    --radius: 16px;
 
     --surface: 0 0% 100%;
     --surface-hover: 220 30% 97%;
@@ -233,47 +234,58 @@
   @apply text-primary;
 }
 
-/* ---- Apple-style glassmorphism ---------------------------------------- */
-/* Frosted translucent surface with blur, soft inner highlight + drop shadow. */
+/* ---- Claymorphism surfaces (app-wide) --------------------------------- */
+/* Opaque soft-3D surfaces: thick light border + inner/outer double shadow.
+   These keep the legacy .glass* class names so every Card/panel/usage across
+   the app picks up clay with no per-file edits. */
 .glass {
-  background: rgb(var(--glass-bg) / 0.62);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgb(var(--glass-border) / 0.45);
+  background: rgb(var(--glass-bg) / 0.92);
+  border: 2px solid rgb(255 255 255 / 0.75);
   box-shadow:
-    0 1px 0 0 rgb(var(--glass-border) / 0.55) inset,
-    0 10px 30px -12px hsl(222 47% 25% / 0.28);
+    6px 8px 18px -8px hsl(221 90% 30% / 0.16),
+    inset 2px 2px 5px rgb(255 255 255 / 0.8),
+    inset -3px -4px 9px hsl(221 60% 55% / 0.08);
 }
 
-/* Stronger, more opaque variant for content that must stay highly readable. */
 .glass-strong {
-  background: rgb(var(--glass-bg) / 0.82);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  backdrop-filter: blur(24px) saturate(180%);
-  border: 1px solid rgb(var(--glass-border) / 0.5);
+  background: rgb(var(--glass-bg) / 0.97);
+  border: 3px solid rgb(255 255 255 / 0.8);
   box-shadow:
-    0 1px 0 0 rgb(var(--glass-border) / 0.6) inset,
-    0 16px 40px -16px hsl(222 47% 22% / 0.30);
+    8px 10px 22px -8px hsl(221 90% 30% / 0.20),
+    -5px -5px 14px -6px rgb(255 255 255 / 0.85),
+    inset 2px 2px 5px rgb(255 255 255 / 0.85),
+    inset -4px -5px 10px hsl(221 60% 55% / 0.10);
 }
 
-/* Subtle tinted-glass panels for accents/headers. */
 .glass-panel {
-  background: rgb(var(--glass-bg) / 0.7);
-  -webkit-backdrop-filter: blur(18px) saturate(170%);
-  backdrop-filter: blur(18px) saturate(170%);
-  border: 1px solid rgb(var(--glass-border) / 0.4);
+  background: rgb(var(--glass-bg) / 0.88);
+  border: 2px solid rgb(255 255 255 / 0.7);
+  box-shadow:
+    inset 2px 2px 5px rgb(255 255 255 / 0.7),
+    inset -2px -3px 7px hsl(221 50% 50% / 0.07);
 }
 
 .dark .glass {
-  border-color: rgb(var(--glass-border) / 0.1);
+  border-color: rgb(255 255 255 / 0.06);
   box-shadow:
-    0 1px 0 0 rgb(var(--glass-border) / 0.08) inset,
-    0 14px 40px -16px hsl(224 60% 2% / 0.7);
+    6px 8px 20px -8px hsl(224 60% 2% / 0.6),
+    inset 2px 2px 5px rgb(255 255 255 / 0.04),
+    inset -3px -4px 10px hsl(224 60% 2% / 0.45);
 }
 
-.dark .glass-strong,
+.dark .glass-strong {
+  border-color: rgb(255 255 255 / 0.07);
+  box-shadow:
+    8px 10px 24px -8px hsl(224 60% 2% / 0.7),
+    inset 2px 2px 5px rgb(255 255 255 / 0.05),
+    inset -4px -5px 12px hsl(224 60% 2% / 0.5);
+}
+
 .dark .glass-panel {
-  border-color: rgb(var(--glass-border) / 0.12);
+  border-color: rgb(255 255 255 / 0.06);
+  box-shadow:
+    inset 2px 2px 5px rgb(255 255 255 / 0.04),
+    inset -2px -3px 7px hsl(224 60% 2% / 0.4);
 }
 
 /* Gradient buttons + glow (defined here so they don't depend on JIT config
@@ -369,6 +381,27 @@
   @apply transition-colors duration-200 ease-in-out;
 }
 
+/* ============================================================
+   Label typography (application default)
+   - .field-label  : sub-labels / field names (read & edit views)
+   - .label-accent : the few main section headers (soft blue)
+   Pair each with: text-[11px] font-bold uppercase tracking-wider
+   ============================================================ */
+
+/* Sub-label / field name — near-black, easy to read at small sizes. */
+.field-label {
+  color: hsl(var(--foreground));
+}
+
+/* Softer blue for the main section headers — lower saturation than --primary
+   so small uppercase labels read calm instead of vibrating on the eye. */
+.label-accent {
+  color: hsl(221 53% 47%);
+}
+.dark .label-accent {
+  color: hsl(221 60% 72%);
+}
+
 /* Text selection */
 ::selection {
   @apply bg-primary/30 text-foreground;
@@ -376,4 +409,273 @@
 
 .dark ::selection {
   @apply bg-primary/40;
+}
+
+/* ============================================================
+   CLAYMORPHISM — the app-wide design language.
+   Generated via ui-ux-pro-max skill (Claymorphism preset),
+   kept on the HP Electric Blue brand. .clay-scope sets the type
+   ramp; clay primitives (.clay-card/.clay-chip/.clay-pill/.clay-btn)
+   are used directly and via the shared .glass* surfaces.
+   ============================================================ */
+.clay-scope {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+}
+
+.clay-scope h1,
+.clay-scope h2,
+.clay-scope h3,
+.clay-scope h4 {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+/* Chunky toy-like surface: thick light border + double (inner + outer) shadow */
+.clay-card {
+  border-radius: 24px;
+  border: 3px solid rgb(255 255 255 / 0.75);
+  background: rgb(255 255 255 / 0.92);
+  box-shadow:
+    8px 10px 22px -8px hsl(221 90% 30% / 0.22),
+    -6px -6px 16px -6px rgb(255 255 255 / 0.9),
+    inset 2px 2px 5px rgb(255 255 255 / 0.85),
+    inset -4px -5px 10px hsl(221 60% 60% / 0.10);
+  transition: transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 200ms ease-out;
+}
+
+.clay-card-interactive:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    10px 14px 28px -8px hsl(221 90% 30% / 0.28),
+    -6px -6px 16px -6px rgb(255 255 255 / 0.95),
+    inset 2px 2px 5px rgb(255 255 255 / 0.9),
+    inset -4px -5px 10px hsl(221 60% 60% / 0.12);
+}
+
+.clay-card-interactive:active {
+  transform: translateY(1px) scale(0.99);
+  box-shadow:
+    4px 5px 12px -8px hsl(221 90% 30% / 0.24),
+    inset 3px 3px 7px hsl(221 60% 50% / 0.16),
+    inset -3px -3px 7px rgb(255 255 255 / 0.85);
+}
+
+/* Soft squishy icon/value chip */
+.clay-chip {
+  border-radius: 18px;
+  box-shadow:
+    inset 2px 2px 5px rgb(255 255 255 / 0.55),
+    inset -3px -4px 8px hsl(221 70% 30% / 0.18),
+    3px 4px 10px -4px hsl(221 80% 40% / 0.30);
+}
+
+/* Pill badge with subtle clay depth */
+.clay-pill {
+  border-radius: 9999px;
+  box-shadow:
+    inset 1px 1px 3px rgb(255 255 255 / 0.7),
+    inset -2px -2px 5px hsl(221 50% 40% / 0.12);
+}
+
+/* Primary clay button — bouncy press */
+.clay-btn {
+  border-radius: 18px;
+  border: 3px solid rgb(255 255 255 / 0.35);
+  box-shadow:
+    inset 2px 2px 4px rgb(255 255 255 / 0.4),
+    inset -3px -4px 8px hsl(221 90% 25% / 0.35),
+    5px 7px 16px -6px hsl(221 90% 35% / 0.45);
+  transition: transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    filter 180ms ease-out;
+}
+
+.clay-btn:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.06);
+}
+
+.clay-btn:active {
+  transform: translateY(1px) scale(0.97);
+}
+
+/* Dotted clay empty-state frame */
+.clay-dashed {
+  border-radius: 28px;
+  border: 3px dashed hsl(221 70% 60% / 0.4);
+  box-shadow: inset 0 2px 10px hsl(221 60% 60% / 0.08);
+}
+
+/* Dark-mode clay (skill flags clay for light mode; we keep it usable in dark) */
+.dark .clay-card {
+  border-color: rgb(255 255 255 / 0.06);
+  background: hsl(224 24% 15%);
+  box-shadow:
+    8px 10px 24px -8px hsl(224 60% 2% / 0.7),
+    inset 2px 2px 5px rgb(255 255 255 / 0.05),
+    inset -4px -5px 12px hsl(224 60% 2% / 0.5);
+}
+
+.dark .clay-card-interactive:hover {
+  box-shadow:
+    10px 14px 30px -8px hsl(224 60% 2% / 0.8),
+    inset 2px 2px 5px rgb(255 255 255 / 0.06),
+    inset -4px -5px 12px hsl(224 60% 2% / 0.5);
+}
+
+.dark .clay-chip {
+  box-shadow:
+    inset 2px 2px 5px rgb(255 255 255 / 0.06),
+    inset -3px -4px 8px hsl(224 60% 2% / 0.6),
+    3px 4px 10px -4px hsl(224 60% 2% / 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clay-card,
+  .clay-card-interactive,
+  .clay-btn {
+    transition: none;
+  }
+  .clay-card-interactive:hover,
+  .clay-btn:hover,
+  .clay-btn:active,
+  .clay-card-interactive:active {
+    transform: none;
+  }
+}
+
+/* ============================================================
+   MATERIAL (Soft UI / elevation) — scoped via .md-scope and used
+   on the Dashboard page only. Fully additive and independent of
+   the clay primitives above, so the rest of the app is unaffected.
+   Generated via the ui-ux-pro-max skill (Soft UI Evolution /
+   Dimensional Layering), kept on the HP Electric Blue brand.
+   ============================================================ */
+.md-scope {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+}
+
+.md-scope h1,
+.md-scope h2,
+.md-scope h3,
+.md-scope h4 {
+  letter-spacing: -0.01em;
+}
+
+/* Flat white card with subtle two-layer elevation */
+.md-card {
+  border-radius: 16px;
+  border: 1px solid hsl(var(--border) / 0.7);
+  background: hsl(var(--card));
+  box-shadow:
+    0 1px 2px rgb(16 24 40 / 0.04),
+    0 1px 3px rgb(16 24 40 / 0.06);
+  transition: transform 200ms ease-out, box-shadow 200ms ease-out;
+}
+
+.md-card-interactive:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 10px 15px -3px rgb(16 24 40 / 0.10),
+    0 4px 6px -4px rgb(16 24 40 / 0.08);
+}
+
+.md-card-interactive:active {
+  transform: translateY(0);
+  box-shadow:
+    0 1px 2px rgb(16 24 40 / 0.04),
+    0 1px 3px rgb(16 24 40 / 0.06);
+}
+
+/* Gradient icon tile (Material Dashboard 2 style) */
+.md-tile {
+  border-radius: 12px;
+  color: #fff;
+  box-shadow: 0 6px 14px -6px rgb(16 24 40 / 0.30);
+}
+
+/* Pill badge */
+.md-pill {
+  border-radius: 9999px;
+}
+
+/* Subtle squared chip */
+.md-chip {
+  border-radius: 10px;
+}
+
+/* Primary brand button — flat elevation, gentle hover */
+.md-btn {
+  border-radius: 12px;
+  box-shadow: 0 4px 10px -3px hsl(221 90% 35% / 0.35);
+  transition: transform 180ms ease-out, box-shadow 180ms ease-out,
+    filter 180ms ease-out;
+}
+
+.md-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+  box-shadow: 0 8px 16px -4px hsl(221 90% 35% / 0.40);
+}
+
+.md-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px -2px hsl(221 90% 35% / 0.35);
+}
+
+/* Subtle/secondary button */
+.md-btn-soft {
+  border-radius: 12px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  transition: background 160ms ease-out, border-color 160ms ease-out,
+    color 160ms ease-out;
+}
+
+.md-btn-soft:hover {
+  background: hsl(var(--muted));
+}
+
+/* Dashed empty-state frame */
+.md-dashed {
+  border-radius: 16px;
+  border: 1px dashed hsl(var(--border));
+}
+
+/* Dark mode */
+.dark .md-card {
+  border-color: rgb(255 255 255 / 0.08);
+  background: hsl(224 24% 15%);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.4),
+    0 1px 3px rgb(0 0 0 / 0.5);
+}
+
+.dark .md-card-interactive:hover {
+  box-shadow:
+    0 10px 18px -4px rgb(0 0 0 / 0.6),
+    0 4px 8px -4px rgb(0 0 0 / 0.5);
+}
+
+.dark .md-btn-soft {
+  border-color: rgb(255 255 255 / 0.10);
+  background: hsl(224 24% 15%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .md-card,
+  .md-card-interactive,
+  .md-btn,
+  .md-btn-soft {
+    transition: none;
+  }
+  .md-card-interactive:hover,
+  .md-btn:hover,
+  .md-btn:active,
+  .md-card-interactive:active {
+    transform: none;
+  }
 }

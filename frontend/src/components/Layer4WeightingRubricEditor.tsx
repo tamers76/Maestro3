@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Textarea'
 import { Input } from '@/components/ui/Input'
@@ -17,11 +17,12 @@ import {
 } from '@/services/api'
 import { cn } from '@/lib/utils'
 import {
-  Save,
   Loader2,
   AlertCircle,
   ClipboardList,
   Check,
+  CheckCircle2,
+  Clock,
   XCircle,
   Pencil,
   Plus,
@@ -32,6 +33,8 @@ import {
   ChevronDown,
   ChevronRight,
 } from 'lucide-react'
+import { STAT_TILE, StatTile } from '@/components/ui/StatTile'
+import { mdBtn, mdBtnSoft } from '@/components/ui/materialButton'
 
 // ----------------------------------------------------------------------------
 // Helpers
@@ -74,12 +77,17 @@ const AI_DISCLOSURE_PRESETS = [
   'Not required',
 ]
 
-const CARD_COLORS = [
-  { border: 'border-blue-400 dark:border-blue-500', bg: 'bg-blue-100 dark:bg-blue-900/40', text: 'text-blue-700 dark:text-blue-300', badge: 'bg-blue-500 text-white' },
-  { border: 'border-emerald-400 dark:border-emerald-500', bg: 'bg-emerald-100 dark:bg-emerald-900/40', text: 'text-emerald-700 dark:text-emerald-300', badge: 'bg-emerald-500 text-white' },
-  { border: 'border-violet-400 dark:border-violet-500', bg: 'bg-violet-100 dark:bg-violet-900/40', text: 'text-violet-700 dark:text-violet-300', badge: 'bg-violet-500 text-white' },
-  { border: 'border-orange-400 dark:border-orange-500', bg: 'bg-orange-100 dark:bg-orange-900/40', text: 'text-orange-700 dark:text-orange-300', badge: 'bg-orange-500 text-white' },
-  { border: 'border-pink-400 dark:border-pink-500', bg: 'bg-pink-100 dark:bg-pink-900/40', text: 'text-pink-700 dark:text-pink-300', badge: 'bg-pink-500 text-white' },
+/**
+ * Per-assessment accent: reuses the dashboard / StatTile gradient palette (tile +
+ * glow) paired with a matching text color for the assessment id. The card surface
+ * stays neutral grey; only the icon tile and id carry the color (matches Layer 3).
+ */
+const ACCENTS: { key: keyof typeof STAT_TILE; text: string }[] = [
+  { key: 'blue', text: 'text-[#024ad8] dark:text-blue-300' },
+  { key: 'emerald', text: 'text-emerald-600 dark:text-emerald-400' },
+  { key: 'rose', text: 'text-rose-600 dark:text-rose-400' },
+  { key: 'amber', text: 'text-amber-600 dark:text-amber-400' },
+  { key: 'slate', text: 'text-slate-600 dark:text-slate-300' },
 ]
 
 const APPROVAL_LABELS: Record<CloApprovalStatus, string> = {
@@ -99,12 +107,59 @@ function approvalBadgeClass(status: CloApprovalStatus): string {
   }
 }
 
+/**
+ * Per-assessment approval actions follow the page convention: a light tint of the
+ * semantic color at rest (emerald for approve, rose for needs-revision) that turns
+ * solid on hover/click. Matches the amber Edit and light-blue Approve styles.
+ */
+const APPROVE_BTN =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300 transition-colors hover:bg-emerald-500 hover:text-white hover:border-transparent disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const REVISION_BTN =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border border-pink-500/30 bg-pink-500/10 px-4 py-2 text-sm font-semibold text-pink-700 dark:text-pink-300 transition-colors hover:bg-pink-600 hover:text-white hover:border-transparent disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+
+/**
+ * Shared "Edit" button style (app convention: every edit action is amber).
+ * Faded amber at rest, solid amber on hover. Same size/shape as the other
+ * decision buttons. Used for Edit structure / Edit weights / Edit rubric.
+ */
+const EDIT_BTN =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-500 hover:text-white hover:border-transparent disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+
+/**
+ * Idle "Approve rubric" style: a light blue tint (so it stands out from the
+ * neutral soft buttons and won't be missed) that deepens on hover. Same shape
+ * and size as mdBtnSoft. When selected it switches to the full blue gradient.
+ */
+const APPROVE_SOFT_BLUE =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border border-blue-500/30 bg-blue-500/10 px-4 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300 transition-colors hover:bg-blue-600 hover:text-white hover:border-transparent disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+
+/**
+ * "Add criterion" — compact amber button that sits inline on the rubric total
+ * row: faded amber at rest, solid amber on hover. Smaller than the main buttons
+ * so it fits within the footer line.
+ */
+const ADD_CRITERION_BTN =
+  'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-500 hover:text-white hover:border-transparent disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+
+const RUBRIC_DECISION_OPTIONS: {
+  value: 'approve' | 'edit' | 'needs_revision'
+  label: string
+  icon: JSX.Element
+}[] = [
+  { value: 'approve', label: 'Approve rubric', icon: <Check className="h-4 w-4" /> },
+  { value: 'edit', label: 'Edit rubric', icon: <Pencil className="h-4 w-4" /> },
+  { value: 'needs_revision', label: 'Needs revision', icon: <XCircle className="h-4 w-4" /> },
+]
+
+const WEIGHT_DECISION_OPTIONS: { value: WeightDecision; label: string; icon: JSX.Element }[] = [
+  { value: 'approve_proposed', label: 'Approve proposed weights', icon: <Check className="h-4 w-4" /> },
+  { value: 'custom_weights', label: 'Edit weights', icon: <Pencil className="h-4 w-4" /> },
+  { value: 'keep_current', label: 'Keep current weights', icon: <Minus className="h-4 w-4" /> },
+]
+
 function FieldLabel({ label }: { label: string }) {
   return (
-    <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-primary">
-      <span className="h-3 w-1 shrink-0 rounded-full bg-primary/70" />
-      {label}
-    </p>
+    <p className="text-[11px] font-bold uppercase tracking-wider field-label">{label}</p>
   )
 }
 
@@ -113,7 +168,7 @@ function TextField({ label, value }: { label: string; value?: string }) {
   return (
     <div className="space-y-1">
       <FieldLabel label={label} />
-      <Markdown className="pl-2.5 text-foreground">{value}</Markdown>
+      <Markdown className="text-sm leading-relaxed text-foreground/90">{value}</Markdown>
     </div>
   )
 }
@@ -123,7 +178,7 @@ function ListBlock({ label, items }: { label: string; items?: string[] }) {
   return (
     <div className="space-y-1">
       <FieldLabel label={label} />
-      <ul className="ml-2.5 list-disc space-y-1 pl-4 text-sm leading-relaxed text-foreground/90 marker:text-primary">
+      <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-foreground/90">
         {items.map((it, i) => (
           <li key={i}>
             <Markdown className="[&_p]:my-0 text-foreground/90">{it}</Markdown>
@@ -177,7 +232,10 @@ function computeSummary(
     needs_revision_count,
     all_approved: reviews.length > 0 && approved_count === reviews.length && weighting_decided,
     weighting_decided,
-    assessment_cards_unlocked: weighting_decided,
+    // Once Step 1 has been approved, keep Step 2 visible while the SME tweaks weights
+    // inline — even if the live total momentarily drifts off 100% — so the rubric cards
+    // don't flicker out. Final Layer 4 approval still requires `weighting_decided`.
+    assessment_cards_unlocked: weighting.step_1_approved === true,
     selected_weight_total: Math.round(selectedTotal * 100) / 100,
     weights_balanced,
   }
@@ -200,14 +258,12 @@ function WeightingStep({
   saving,
   onChange,
   onApproveStep1,
-  onEditStep1,
 }: {
   weighting: CourseLevelWeightingSummary
   readOnly: boolean
   saving?: boolean
   onChange: (next: CourseLevelWeightingSummary) => void
   onApproveStep1: () => void | Promise<void>
-  onEditStep1: () => void | Promise<void>
 }) {
   const [editing, setEditing] = useState(weighting.weight_decision === 'custom_weights')
   const step1Approved = weighting.step_1_approved
@@ -268,7 +324,7 @@ function WeightingStep({
 
   return (
     <div className="space-y-5">
-      <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-900/20 p-4">
+      <div className="rounded-[6px] border border-blue-200/70 dark:border-blue-800/70 bg-blue-50/50 dark:bg-blue-900/20 p-4">
         <p className="text-sm text-muted-foreground leading-relaxed">{STEP1_EXPLANATION}</p>
       </div>
 
@@ -278,7 +334,7 @@ function WeightingStep({
           <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-2">
             Assessment Progression Overview
           </h4>
-          <div className="overflow-x-auto rounded-md border">
+          <div className="overflow-x-auto rounded-[6px] border border-border/50">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-muted/50 text-left">
@@ -304,7 +360,7 @@ function WeightingStep({
         <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-2">
           Course-Level Weight Comparison
         </h4>
-        <div className="overflow-x-auto rounded-md border">
+        <div className="overflow-x-auto rounded-[6px] border border-border/50">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-muted/50 text-left">
@@ -325,12 +381,12 @@ function WeightingStep({
                     <td className="px-3 py-2 text-right tabular-nums">{w.current_weight}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{w.proposed_weight}</td>
                     <td className="px-3 py-2 text-right tabular-nums">
-                      {editing && !readOnly && !step1Approved ? (
+                      {editing && !readOnly ? (
                         <Input
                           type="number"
                           min={0}
                           max={100}
-                          className="h-8 w-20 text-right ml-auto"
+                          className="h-8 w-20 px-2 py-1 text-right ml-auto"
                           value={selected || ''}
                           onChange={(e) => setSelected(w.assessment_id, e.target.value)}
                         />
@@ -384,32 +440,39 @@ function WeightingStep({
             <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-2">
               Weight Decision
             </h4>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant={weighting.weight_decision === 'keep_current' ? 'default' : 'outline'}
-                disabled={step1Approved}
-                onClick={() => setDecision('keep_current')}
-              >
-                Keep current weights
-              </Button>
-              <Button
-                size="sm"
-                variant={weighting.weight_decision === 'approve_proposed' ? 'default' : 'outline'}
-                disabled={step1Approved}
-                onClick={() => setDecision('approve_proposed')}
-              >
-                Approve proposed weights
-              </Button>
-              <Button
-                size="sm"
-                variant={weighting.weight_decision === 'custom_weights' ? 'default' : 'outline'}
-                disabled={step1Approved}
-                onClick={() => setDecision('custom_weights')}
-              >
-                <Pencil className="mr-1.5 h-3.5 w-3.5" />
-                Edit weights
-              </Button>
+            <div
+              className="flex flex-wrap gap-2"
+              role="group"
+              aria-label="Course-level weight decision"
+            >
+              {WEIGHT_DECISION_OPTIONS.map((opt) => {
+                const selected = weighting.weight_decision === opt.value
+                // "Edit weights" is amber; "Approve proposed weights" is light blue →
+                // solid blue when chosen (matching Approve rubric); "Keep current weights"
+                // is neutral soft → solid blue when chosen.
+                const className =
+                  opt.value === 'custom_weights'
+                    ? EDIT_BTN
+                    : opt.value === 'approve_proposed'
+                      ? selected
+                        ? mdBtn
+                        : APPROVE_SOFT_BLUE
+                      : selected
+                        ? mdBtn
+                        : mdBtnSoft
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setDecision(opt.value)}
+                    className={className}
+                  >
+                    {opt.icon}
+                    {opt.label}
+                  </button>
+                )
+              })}
             </div>
           </div>
 
@@ -438,23 +501,15 @@ function WeightingStep({
               ) : null}
             </div>
           ) : (
-            <div className="space-y-2 border-t border-border pt-3">
+            <div className="space-y-1.5 border-t border-border pt-3">
               <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium text-sm">
                 <Check className="h-4 w-4" />
-                Step 1 approved — assessment rubric cards are now unlocked below.
+                Step 1 approved — assessment rubric cards are unlocked below.
               </span>
-              <div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onEditStep1()}
-                  disabled={saving}
-                  className="gap-1.5"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                  Edit Weight Structure
-                </Button>
-              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                You can still adjust the weights above at any time — changes save automatically as
+                long as the selected weights total 100%.
+              </p>
             </div>
           )}
         </section>
@@ -512,6 +567,45 @@ function emptyCriterion(): AnalyticRubricCriterion {
   }
 }
 
+/**
+ * Textarea that grows to fit its content so the full text is visible (no inner
+ * scrollbar, no wasted empty rows). Table cells in a row align to the tallest
+ * cell, so columns stay aligned while each field shows all its text.
+ */
+function AutoTextarea({
+  value,
+  onChange,
+  className,
+  placeholder,
+}: {
+  value: string
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
+  className?: string
+  placeholder?: string
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const fit = useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [])
+  useLayoutEffect(() => {
+    fit()
+  }, [value, fit])
+  return (
+    <Textarea
+      ref={ref}
+      rows={1}
+      value={value}
+      onChange={onChange}
+      onInput={fit}
+      placeholder={placeholder}
+      className={cn('min-h-0 resize-none overflow-hidden leading-relaxed', className)}
+    />
+  )
+}
+
 function RubricTable({
   rubric,
   editable,
@@ -538,21 +632,18 @@ function RubricTable({
 
   return (
     <div className="min-w-0 space-y-2">
-      <div className="min-w-0 overflow-x-auto rounded-lg border border-border">
-        <table className="w-full text-xs min-w-[1100px] border-collapse">
+      <div className="min-w-0 overflow-x-auto rounded-[6px] border border-border/50">
+        <table className="w-full text-xs min-w-[820px] border-collapse">
           <thead>
             <tr className="text-left align-top">
-              <th className="border-b border-border bg-muted/60 px-2.5 py-2.5 font-bold uppercase tracking-wide text-foreground w-40">
+              <th className="border-b border-border bg-muted/60 px-2.5 py-2.5 font-bold uppercase tracking-wide text-foreground w-36">
                 Rubric Criterion
-              </th>
-              <th className="border-b border-l border-border bg-muted/60 px-2.5 py-2.5 font-bold uppercase tracking-wide text-foreground w-16 text-right">
-                Weight
               </th>
               {RUBRIC_LEVELS.map((l) => (
                 <th
                   key={l.key}
                   className={cn(
-                    'border-b border-l border-border px-2.5 py-2.5 font-bold uppercase tracking-wide w-44',
+                    'border-b border-l border-border px-2.5 py-2.5 font-bold uppercase tracking-wide w-32',
                     l.headClass
                   )}
                 >
@@ -562,10 +653,10 @@ function RubricTable({
                   </span>
                 </th>
               ))}
-              <th className="border-b border-l border-border bg-muted/60 px-2.5 py-2.5 font-bold uppercase tracking-wide text-foreground w-44">
+              <th className="border-b border-l border-border bg-muted/60 px-2.5 py-2.5 font-bold uppercase tracking-wide text-foreground w-32">
                 Evidence Required
               </th>
-              <th className="border-b border-l border-border bg-muted/60 px-2.5 py-2.5 font-bold uppercase tracking-wide text-foreground w-44">
+              <th className="border-b border-l border-border bg-muted/60 px-2.5 py-2.5 font-bold uppercase tracking-wide text-foreground w-32">
                 AI Scoring Guidance
               </th>
               {editable && <th className="border-b border-l border-border bg-muted/60 px-2 py-2.5 w-8" />}
@@ -574,40 +665,43 @@ function RubricTable({
           <tbody>
             {rubric.map((c, i) => (
               <tr key={i} className="border-t border-border align-top even:bg-muted/20">
-                <td className="border-l-2 border-l-primary/50 px-2.5 py-2.5">
+                <td className="border-l-2 border-l-blue-400/40 px-2.5 py-2.5 align-top">
                   {editable ? (
-                    <Textarea
-                      rows={2}
-                      className="text-xs min-h-0"
-                      value={c.rubric_criterion}
-                      onChange={(e) => updateRow(i, { rubric_criterion: e.target.value })}
-                    />
+                    <div className="space-y-2">
+                      <AutoTextarea
+                        className="text-xs"
+                        value={c.rubric_criterion}
+                        onChange={(e) => updateRow(i, { rubric_criterion: e.target.value })}
+                      />
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Weight
+                        </span>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={100}
+                          className="h-8 w-16 px-2 py-1 text-right text-xs"
+                          value={parsePct(c.criterion_weight) || ''}
+                          onChange={(e) => updateRow(i, { criterion_weight: e.target.value })}
+                        />
+                        <span className="text-xs text-muted-foreground">%</span>
+                      </div>
+                    </div>
                   ) : (
-                    <span className="font-semibold text-foreground">{c.rubric_criterion}</span>
-                  )}
-                </td>
-                <td className="border-l border-border px-2.5 py-2.5 text-right">
-                  {editable ? (
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      className="h-8 w-16 text-right text-xs"
-                      value={parsePct(c.criterion_weight) || ''}
-                      onChange={(e) => updateRow(i, { criterion_weight: e.target.value })}
-                    />
-                  ) : (
-                    <span className="inline-block rounded-full bg-primary/10 px-2 py-0.5 font-semibold tabular-nums text-primary">
-                      {c.criterion_weight}
-                    </span>
+                    <div className="space-y-1.5">
+                      <span className="block font-semibold text-foreground">{c.rubric_criterion}</span>
+                      <span className="inline-block rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-primary">
+                        Weight: {c.criterion_weight}
+                      </span>
+                    </div>
                   )}
                 </td>
                 {RUBRIC_LEVELS.map((l) => (
                   <td key={l.key} className="border-l border-border px-2.5 py-2.5">
                     {editable ? (
-                      <Textarea
-                        rows={3}
-                        className="text-xs min-h-0"
+                      <AutoTextarea
+                        className="text-xs"
                         value={(c[l.key] as string) || ''}
                         onChange={(e) => updateRow(i, { [l.key]: e.target.value })}
                       />
@@ -620,9 +714,8 @@ function RubricTable({
                 ))}
                 <td className="border-l border-border px-2.5 py-2.5">
                   {editable ? (
-                    <Textarea
-                      rows={3}
-                      className="text-xs min-h-0"
+                    <AutoTextarea
+                      className="text-xs"
                       value={c.evidence_required}
                       onChange={(e) => updateRow(i, { evidence_required: e.target.value })}
                     />
@@ -634,14 +727,13 @@ function RubricTable({
                 </td>
                 <td className="border-l border-border px-2.5 py-2.5">
                   {editable ? (
-                    <Textarea
-                      rows={3}
-                      className="text-xs min-h-0"
+                    <AutoTextarea
+                      className="text-xs"
                       value={c.ai_scoring_guidance}
                       onChange={(e) => updateRow(i, { ai_scoring_guidance: e.target.value })}
                     />
                   ) : (
-                    <span className="leading-relaxed whitespace-pre-line text-muted-foreground">
+                    <span className="leading-relaxed whitespace-pre-line text-foreground/90">
                       {c.ai_scoring_guidance}
                     </span>
                   )}
@@ -661,34 +753,44 @@ function RubricTable({
               </tr>
             ))}
             <tr className="border-t-2 border-border bg-muted/40 font-bold">
-              <td className="px-2.5 py-2.5 uppercase tracking-wide text-foreground">Total</td>
-              <td
-                className={cn(
-                  'border-l border-border px-2.5 py-2.5 text-right tabular-nums',
-                  balanced ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
-                )}
-              >
-                {formatPct(total)}
+              <td className="px-2.5 py-2.5">
+                <span className="uppercase tracking-wide text-foreground">Total </span>
+                <span
+                  className={cn(
+                    'tabular-nums',
+                    balanced ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
+                  )}
+                >
+                  {formatPct(total)}
+                </span>
               </td>
               <td
-                className={cn(
-                  'border-l border-border px-2.5 py-2.5 text-xs font-medium',
-                  balanced ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
-                )}
+                className="border-l border-border px-2.5 py-2.5"
                 colSpan={editable ? 7 : 6}
               >
-                {balanced ? 'Criterion weights total 100%' : 'Criterion weights must total 100%'}
+                <div className="flex items-center justify-between gap-3">
+                  <span
+                    className={cn(
+                      'text-xs font-medium',
+                      balanced
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-red-600 dark:text-red-400'
+                    )}
+                  >
+                    {balanced ? 'Criterion weights total 100%' : 'Criterion weights must total 100%'}
+                  </span>
+                  {editable && (
+                    <button type="button" onClick={addRow} className={ADD_CRITERION_BTN}>
+                      <Plus className="h-3.5 w-3.5" />
+                      Add criterion
+                    </button>
+                  )}
+                </div>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
-      {editable && (
-        <Button size="sm" variant="outline" onClick={addRow} className="gap-1.5">
-          <Plus className="h-3.5 w-3.5" />
-          Add criterion
-        </Button>
-      )}
     </div>
   )
 }
@@ -704,10 +806,8 @@ function AssessmentStructureCard({
   currentWeight,
   readOnly,
   saving,
-  noteChanged,
   onUpdate,
   onApprove,
-  onSaveNote,
   expanded,
   onToggle,
 }: {
@@ -717,14 +817,13 @@ function AssessmentStructureCard({
   currentWeight: string
   readOnly: boolean
   saving?: boolean
-  noteChanged?: boolean
   onUpdate: (next: AssessmentStructureReview) => void
   onApprove: (next: AssessmentStructureReview) => void | Promise<void>
-  onSaveNote: () => void | Promise<void>
   expanded: boolean
   onToggle: () => void
 }) {
-  const colors = CARD_COLORS[colorIndex % CARD_COLORS.length]
+  const accent = ACCENTS[colorIndex % ACCENTS.length]
+  const accentTile = STAT_TILE[accent.key]
   const ref = review.final_assessment_from_layer_3
   const rubricEditable = !readOnly && review.rubric_decision === 'edit'
   const structureEditable = !readOnly && review.assessment_structure_decision === 'edit'
@@ -781,19 +880,25 @@ function AssessmentStructureCard({
   }
 
   return (
-    <div className={cn('min-w-0 rounded-xl border-2 overflow-hidden', colors.border)}>
+    <div className="min-w-0 rounded-[6px] border border-border/40 bg-muted/40 dark:bg-slate-800/30 overflow-hidden">
       {/* Header */}
       <div
-        className={cn('px-5 py-4 border-b cursor-pointer', colors.border, colors.bg)}
+        className={cn('px-5 py-4 cursor-pointer', expanded && 'border-b border-border/60')}
         onClick={onToggle}
       >
         <div className="flex items-start gap-3">
-          <div className={cn('p-2.5 rounded-lg', colors.badge)}>
+          <div
+            className={cn(
+              'md-tile inline-flex h-10 w-10 items-center justify-center text-white',
+              accentTile.tile,
+              accentTile.glow
+            )}
+          >
             <ClipboardList className="h-5 w-5" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <span className={cn('text-base font-bold', colors.text)}>{review.assessment_id}</span>
+              <span className={cn('text-base font-bold', accent.text)}>{review.assessment_id}</span>
               <span
                 className={cn(
                   'text-xs px-2 py-0.5 rounded font-medium ml-auto',
@@ -808,10 +913,10 @@ function AssessmentStructureCard({
                 <ChevronRight className="h-5 w-5 text-black/40" />
               )}
             </div>
-            <p className={cn('text-sm font-semibold', colors.text)}>{ref.title}</p>
-            <div className="flex items-center gap-3 mt-1 text-xs text-black/70 dark:text-slate-400">
+            <p className="text-sm text-black/70 dark:text-slate-400 line-clamp-2">{ref.title}</p>
+            <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
               <span>Original weight: {currentWeight}</span>
-              <span>Selected weight: <strong>{selectedWeight}</strong></span>
+              <span>Selected weight: <strong className="text-foreground">{selectedWeight}</strong></span>
               <ChangeBadge current={parsePct(currentWeight)} selected={parsePct(selectedWeight)} />
             </div>
           </div>
@@ -819,15 +924,15 @@ function AssessmentStructureCard({
       </div>
 
       {expanded && (
-      <div className="p-4 space-y-5">
+      <div className="p-5 space-y-5">
         {/* Approved assessment from Layer 3 (reference only, collapsed by default) */}
-        <details className="group rounded-lg border border-border bg-card overflow-hidden">
-          <summary className="flex cursor-pointer list-none items-center gap-2 bg-primary/5 px-4 py-2.5 text-sm font-bold uppercase tracking-wide text-primary hover:bg-primary/10 [&::-webkit-details-marker]:hidden">
-            <ChevronRight className="h-4 w-4 shrink-0 transition-transform duration-200 group-[[open]]:rotate-90" />
-            <ClipboardList className="h-4 w-4 shrink-0" />
+        <details className="group">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-[11px] font-bold uppercase tracking-wider label-accent hover:opacity-80 [&::-webkit-details-marker]:hidden">
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-[[open]]:rotate-90" />
+            <ClipboardList className="h-3.5 w-3.5 shrink-0" />
             Approved Assessment from Layer 3 (reference only)
           </summary>
-          <div className="px-4 pb-4 space-y-3.5 border-t border-border pt-3">
+          <div className="space-y-3.5 pt-3">
             <TextField label="Final assessment title" value={ref.title} />
             <TextField label="Short description" value={ref.description} />
             <TextField label="Required artifact" value={ref.required_artifact} />
@@ -840,56 +945,58 @@ function AssessmentStructureCard({
         </details>
 
         {/* AI-Assisted Analytic Rubric */}
-        <section className="space-y-2">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <h4 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-primary">
-              <ClipboardList className="h-4 w-4" />
-              AI-Assisted Analytic Rubric
-            </h4>
-            {!readOnly && (
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant={review.rubric_decision === 'approve' ? 'default' : 'outline'}
-                  onClick={() => setRubricDecision('approve')}
-                  disabled={!rubricBalanced}
-                  title={rubricBalanced ? undefined : 'Criterion weights must total 100%'}
-                >
-                  <Check className="mr-1.5 h-3.5 w-3.5" />
-                  Approve rubric
-                </Button>
-                <Button
-                  size="sm"
-                  variant={review.rubric_decision === 'edit' ? 'default' : 'outline'}
-                  onClick={() => setRubricDecision('edit')}
-                >
-                  <Pencil className="mr-1.5 h-3.5 w-3.5" />
-                  Edit rubric
-                </Button>
-                <Button
-                  size="sm"
-                  variant={review.rubric_decision === 'needs_revision' ? 'default' : 'outline'}
-                  onClick={() => setRubricDecision('needs_revision')}
-                >
-                  <XCircle className="mr-1.5 h-3.5 w-3.5" />
-                  Needs revision
-                </Button>
-              </div>
-            )}
-          </div>
+        <section className="space-y-3 border-t border-border/60 pt-4">
+          <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide label-accent">
+            <ClipboardList className="h-4 w-4" />
+            AI-Assisted Analytic Rubric
+          </h4>
           <RubricTable
             rubric={review.ai_assisted_analytic_rubric}
             editable={rubricEditable}
             onChange={(next) => onUpdate({ ...review, ai_assisted_analytic_rubric: next })}
           />
+          {!readOnly && (
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Rubric decision">
+              {RUBRIC_DECISION_OPTIONS.map((opt) => {
+                const selected = review.rubric_decision === opt.value
+                const disabled = opt.value === 'approve' && !rubricBalanced
+                // "Edit rubric" stays light (soft) even when active, matching the
+                // weight-decision trio; Approve/Needs-revision show the gradient when chosen.
+                // "Edit rubric" is amber, "Needs revision" is magenta/pink (both light
+                // until hover), and "Approve rubric" is light blue → solid blue when chosen.
+                const className =
+                  opt.value === 'edit'
+                    ? EDIT_BTN
+                    : opt.value === 'needs_revision'
+                      ? REVISION_BTN
+                      : selected
+                        ? mdBtn
+                        : APPROVE_SOFT_BLUE
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    aria-pressed={selected}
+                    disabled={disabled}
+                    title={disabled ? 'Criterion weights must total 100%' : undefined}
+                    onClick={() => setRubricDecision(opt.value)}
+                    className={className}
+                  >
+                    {opt.icon}
+                    {opt.label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </section>
 
         {/* Process evidence requirements */}
         <section className="space-y-2">
-          <h4 className="text-xs font-bold uppercase tracking-wide text-foreground">
+          <h4 className="text-xs font-bold uppercase tracking-wide label-accent">
             Process Evidence Requirements
           </h4>
-          <div className="overflow-x-auto rounded-md border">
+          <div className="overflow-x-auto rounded-[6px] border border-border/50">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-muted/50 text-left">
@@ -911,7 +1018,7 @@ function AssessmentStructureCard({
                     <td className="px-3 py-2">
                       {structureEditable ? (
                         <Input
-                          className="h-8 text-sm"
+                          className="h-8 px-3 py-1 text-sm"
                           value={e.evidence_item}
                           onChange={(ev) => updateEvidenceItem(i, ev.target.value)}
                         />
@@ -965,13 +1072,12 @@ function AssessmentStructureCard({
 
         {/* AI-use disclosure rule */}
         <section className="space-y-1.5">
-          <h4 className="text-xs font-bold uppercase tracking-wide text-foreground">
+          <h4 className="text-xs font-bold uppercase tracking-wide label-accent">
             AI-Use Disclosure Rule
           </h4>
           {structureEditable ? (
             <>
-              <Textarea
-                rows={2}
+              <AutoTextarea
                 className="text-sm"
                 value={review.ai_use_disclosure_rule}
                 onChange={(e) => onUpdate({ ...review, ai_use_disclosure_rule: e.target.value })}
@@ -998,11 +1104,10 @@ function AssessmentStructureCard({
 
         {/* Revision policy */}
         <section className="space-y-1.5">
-          <h4 className="text-xs font-bold uppercase tracking-wide text-foreground">Revision Policy</h4>
+          <h4 className="text-xs font-bold uppercase tracking-wide label-accent">Revision Policy</h4>
           {structureEditable ? (
             <>
-              <Textarea
-                rows={2}
+              <AutoTextarea
                 className="text-sm"
                 value={review.revision_policy}
                 onChange={(e) => onUpdate({ ...review, revision_policy: e.target.value })}
@@ -1029,10 +1134,9 @@ function AssessmentStructureCard({
 
         {/* Grading policy */}
         <section className="space-y-1.5">
-          <h4 className="text-xs font-bold uppercase tracking-wide text-foreground">Grading Policy</h4>
+          <h4 className="text-xs font-bold uppercase tracking-wide label-accent">Grading Policy</h4>
           {structureEditable ? (
-            <Textarea
-              rows={2}
+            <AutoTextarea
               className="text-sm"
               value={review.grading_policy}
               onChange={(e) => onUpdate({ ...review, grading_policy: e.target.value })}
@@ -1046,32 +1150,23 @@ function AssessmentStructureCard({
 
         {/* SME internal note */}
         <section>
-          <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-1">
+          <h4 className="text-xs font-bold uppercase tracking-wide label-accent mb-1">
             SME Internal Note
           </h4>
-          <Textarea
+          <AutoTextarea
             className="text-sm"
-            rows={2}
             placeholder="Optional note for yourself or your team..."
             value={review.sme_internal_note || ''}
             onChange={(e) => onUpdate({ ...review, sme_internal_note: e.target.value })}
           />
-          {readOnly && noteChanged && (
-            <div className="mt-2 flex justify-end">
-              <Button size="sm" onClick={() => onSaveNote()} disabled={saving} className="gap-2">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                Save note
-              </Button>
-            </div>
-          )}
         </section>
 
         {/* Assessment-level decision */}
         {!readOnly && (
-          <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
-            <Button
-              size="sm"
-              variant="default"
+          <div className="flex flex-wrap gap-2 pt-3 border-t border-border/60">
+            <button
+              type="button"
+              className={APPROVE_BTN}
               disabled={review.approval_status === 'approved' || saving}
               onClick={() => {
                 if (!review.ai_assisted_analytic_rubric.length) {
@@ -1098,12 +1193,13 @@ function AssessmentStructureCard({
                 })
               }}
             >
-              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
               Approve assessment structure
-            </Button>
-            <Button
-              size="sm"
-              variant={review.assessment_structure_decision === 'edit' ? 'default' : 'outline'}
+            </button>
+            <button
+              type="button"
+              aria-pressed={review.assessment_structure_decision === 'edit'}
+              className={EDIT_BTN}
               onClick={() =>
                 onUpdate({
                   ...review,
@@ -1113,12 +1209,12 @@ function AssessmentStructureCard({
                 })
               }
             >
-              <Pencil className="mr-2 h-4 w-4" />
+              <Pencil className="h-4 w-4" />
               Edit structure
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
+            </button>
+            <button
+              type="button"
+              className={REVISION_BTN}
               onClick={() =>
                 onUpdate({
                   ...review,
@@ -1127,9 +1223,9 @@ function AssessmentStructureCard({
                 })
               }
             >
-              <XCircle className="mr-2 h-4 w-4" />
+              <XCircle className="h-4 w-4" />
               Needs revision
-            </Button>
+            </button>
           </div>
         )}
       </div>
@@ -1166,7 +1262,6 @@ export default function Layer4WeightingRubricEditor({
   const [continuing, setContinuing] = useState(false)
   const [weighting, setWeighting] = useState<CourseLevelWeightingSummary | null>(null)
   const [reviews, setReviews] = useState<AssessmentStructureReview[]>([])
-  const [initialReviews, setInitialReviews] = useState<AssessmentStructureReview[]>([])
   const [fullReport, setFullReport] = useState<string | undefined>()
   const [initialSnapshot, setInitialSnapshot] = useState<string>('')
 
@@ -1176,7 +1271,6 @@ export default function Layer4WeightingRubricEditor({
       const data = await fetchWeightingRubric(courseCode)
       setWeighting(data.course_level_weighting_summary)
       setReviews(data.assessment_structure_reviews)
-      setInitialReviews(data.assessment_structure_reviews)
       setFullReport(data.full_assessment_structure_report)
       setInitialSnapshot(
         JSON.stringify({
@@ -1220,7 +1314,8 @@ export default function Layer4WeightingRubricEditor({
   const persist = useCallback(
     async (
       w: CourseLevelWeightingSummary,
-      r: AssessmentStructureReview[]
+      r: AssessmentStructureReview[],
+      opts?: { silent?: boolean }
     ): Promise<boolean> => {
       try {
         setSaving(true)
@@ -1231,7 +1326,6 @@ export default function Layer4WeightingRubricEditor({
         })
         setWeighting(result.course_level_weighting_summary)
         setReviews(result.assessment_structure_reviews)
-        setInitialReviews(result.assessment_structure_reviews)
         setInitialSnapshot(
           JSON.stringify({
             w: result.course_level_weighting_summary,
@@ -1239,11 +1333,13 @@ export default function Layer4WeightingRubricEditor({
           })
         )
         onSaved?.()
-        showToast({
-          title: 'Saved',
-          description: layerApproved ? 'Personal notes saved' : 'Weighting & rubric saved',
-          variant: 'success',
-        })
+        if (!opts?.silent) {
+          showToast({
+            title: 'Saved',
+            description: layerApproved ? 'Personal notes saved' : 'Weighting & rubric saved',
+            variant: 'success',
+          })
+        }
         return true
       } catch (error) {
         showToast({
@@ -1264,16 +1360,19 @@ export default function Layer4WeightingRubricEditor({
     return persist(weighting, reviews)
   }
 
+  // Blur-based autosave: silently persist edits as the SME tabs between fields.
+  // Skips an unbalanced weight structure (≠ 100%) because the backend would
+  // otherwise un-approve Step 1, collapsing the rubric cards.
+  const handleAutoSave = useCallback(() => {
+    if (!weighting || saving || !hasChanges) return
+    const selectedTotal = weighting.weights.reduce((s, w) => s + parsePct(w.selected_weight), 0)
+    if (Math.round(selectedTotal) !== 100) return
+    void persist(weighting, reviews, { silent: true })
+  }, [weighting, reviews, saving, hasChanges, persist])
+
   const approveStep1 = async () => {
     if (!weighting) return
     const next = { ...weighting, step_1_approved: true }
-    setWeighting(next)
-    await persist(next, reviews)
-  }
-
-  const editStep1 = async () => {
-    if (!weighting) return
-    const next = { ...weighting, step_1_approved: false }
     setWeighting(next)
     await persist(next, reviews)
   }
@@ -1365,29 +1464,53 @@ export default function Layer4WeightingRubricEditor({
   const selectedById = new Map(weighting.weights.map((w) => [w.assessment_id, w]))
 
   return (
-    <div className="flex flex-col rounded-xl border bg-card shadow-sm overflow-hidden mt-4">
+    <div className="flex flex-col rounded-[6px] border border-border/50 bg-card shadow-sm overflow-hidden mt-4">
       <div className="flex items-center justify-between px-6 py-4 border-b bg-muted/30">
         <div className="flex items-center gap-3">
           <h3 className="font-bold text-base">Weighting &amp; Rubric Editor</h3>
           <span className="text-sm text-muted-foreground">{reviews.length} assessments</span>
         </div>
-        <div className="flex items-center gap-2">
-          {!layerApproved && hasChanges && (
-            <span className="text-sm text-amber-600 flex items-center gap-1">
-              <AlertCircle className="h-4 w-4" />
-              Unsaved
+        <div className="flex items-center gap-2 text-sm">
+          {saving ? (
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Saving…
             </span>
-          )}
-          {!layerApproved && (
-            <Button size="sm" onClick={handleSave} disabled={saving || !hasChanges} className="gap-2">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save
-            </Button>
+          ) : hasChanges ? (
+            <span className="flex items-center gap-1.5 text-amber-600">
+              <AlertCircle className="h-4 w-4" />
+              Unsaved changes
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <Check className="h-4 w-4" />
+              All changes saved
+            </span>
           )}
         </div>
       </div>
 
-      <div className="p-6 space-y-8">
+      <div className="p-6 space-y-8" onBlur={handleAutoSave}>
+        {summary && (
+          <div className="md-scope grid grid-cols-2 gap-4 md:grid-cols-4">
+            <StatTile icon={ClipboardList} label="Total assessments" value={reviews.length} color="slate" />
+            <StatTile
+              icon={CheckCircle2}
+              label="Approved"
+              value={summary.approved_count}
+              color="emerald"
+            />
+            <StatTile icon={Clock} label="Pending" value={summary.pending_count} color="blue" />
+            <StatTile
+              icon={AlertCircle}
+              label="Needs Revision"
+              value={summary.needs_revision_count}
+              color="rose"
+              tone={summary.needs_revision_count > 0 ? 'warning' : 'default'}
+            />
+          </div>
+        )}
+
         {/* Step 1 */}
         <WeightingStep
           weighting={weighting}
@@ -1395,7 +1518,6 @@ export default function Layer4WeightingRubricEditor({
           saving={saving}
           onChange={(next) => setWeighting(next)}
           onApproveStep1={approveStep1}
-          onEditStep1={editStep1}
         />
 
         {/* Step 2 — shown only after Step 1 is approved */}
@@ -1407,18 +1529,13 @@ export default function Layer4WeightingRubricEditor({
             <div className="grid min-w-0 grid-cols-1 gap-5">
               {reviews.map((review, index) => {
                 const w = selectedById.get(review.assessment_id)
-                const initial = initialReviews.find(
-                  (r) => r.assessment_id === review.assessment_id
-                )
-                const noteChanged =
-                  (review.sme_internal_note || '') !== (initial?.sme_internal_note || '')
                 return (
                   <div
                     key={review.assessment_id}
                     ref={(el) => {
                       zoneRefs.current[review.assessment_id] = el
                     }}
-                    style={{ scrollMarginTop: 16 }}
+                    style={{ scrollMarginTop: 100 }}
                     className="min-w-0"
                   >
                     <AssessmentStructureCard
@@ -1428,12 +1545,8 @@ export default function Layer4WeightingRubricEditor({
                       currentWeight={w?.current_weight || ''}
                       readOnly={layerApproved}
                       saving={saving}
-                      noteChanged={noteChanged}
                       onUpdate={(next) => updateReview(review.assessment_id, next)}
                       onApprove={(next) => approveReview(review.assessment_id, next)}
-                      onSaveNote={async () => {
-                        await handleSave()
-                      }}
                       expanded={expandedIds.has(review.assessment_id)}
                       onToggle={() => toggleExpanded(review.assessment_id)}
                     />
@@ -1446,7 +1559,7 @@ export default function Layer4WeightingRubricEditor({
 
         {/* Full report */}
         {fullReport?.trim() && (
-          <details className="rounded-lg border border-dashed border-border">
+          <details className="rounded-[6px] border border-dashed border-border/50">
             <summary className="cursor-pointer px-4 py-2.5 text-sm font-medium text-primary hover:underline">
               View Full Assessment Structure Report
             </summary>

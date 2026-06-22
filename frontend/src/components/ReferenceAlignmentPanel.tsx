@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookMarked, Check, ChevronDown, ChevronRight, Loader2, Lock, Search, Sparkles, Upload, AlertTriangle } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { showToast } from '@/components/ui/Toaster'
@@ -22,6 +21,21 @@ const COURSE_LEVEL = '__course_level__'
 const DEFAULT_PROPOSE_THRESHOLD = 0.42
 const MIN_PROPOSE_THRESHOLD = 0.2
 const MAX_PROPOSE_THRESHOLD = 0.9
+
+/**
+ * Material button styles shared with Layers 3-6 (app convention): each colored
+ * button shows a light tint at rest and turns solid on hover. Preview = brand
+ * blue, Activate = emerald, neutral presets = slate.
+ */
+const PREVIEW_BTN =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border border-blue-500/30 bg-blue-500/10 px-4 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300 transition-colors hover:bg-blue-600 hover:text-white hover:border-transparent disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const ACTIVATE_BTN =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300 transition-colors hover:bg-emerald-500 hover:text-white hover:border-transparent disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const PRESET_BTN =
+  'inline-flex items-center justify-center gap-2 rounded-[10px] border border-slate-400/30 bg-slate-400/10 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 transition-colors hover:bg-slate-600 hover:text-white hover:border-transparent disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+
+/** Edit fields use a slightly tighter corner than the card, matching Layers 5/6. */
+const FIELD_RADIUS = 'rounded-[4px]'
 
 function clampProposeThreshold(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_PROPOSE_THRESHOLD
@@ -152,7 +166,7 @@ function MappingRow({
           value={decided}
           disabled={disabled}
           onChange={(e) => onReassign(mapping.chunk_id, e.target.value === COURSE_LEVEL ? null : e.target.value)}
-          className="max-w-[16rem] rounded-md border border-input bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="max-w-[16rem] rounded-[4px] border border-input bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <option value={COURSE_LEVEL}>Course-level (no tag)</option>
           {options.map((c) => (
@@ -371,7 +385,7 @@ export default function ReferenceAlignmentPanel({
   const header = (
     <div className="flex items-start justify-between gap-3">
       <div>
-        <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <p className="mb-1 text-[11px] font-bold uppercase tracking-wider label-accent">
           Layer 6 — Step B · Course Architect exit gate
         </p>
         <h3 className={cn('flex items-center gap-2 font-semibold', embedded ? 'text-base' : 'text-lg')}>
@@ -401,36 +415,36 @@ export default function ReferenceAlignmentPanel({
 
             {/* Dependency / counts */}
             {state && (
-              <div className="grid grid-cols-2 gap-2 rounded-md border border-border bg-muted/30 p-3 text-xs sm:grid-cols-6">
+              <div className="grid grid-cols-2 gap-2 rounded-[6px] border border-border/50 bg-muted/40 p-3 text-xs sm:grid-cols-6">
                 <div>
-                  <p className="text-muted-foreground">Approved subtopics</p>
-                  <p className="font-medium text-foreground">{state.subtopic_count}</p>
+                  <p className="text-[11px] font-bold uppercase tracking-wider field-label">Approved subtopics</p>
+                  <p className="mt-0.5 text-base font-bold text-foreground">{state.subtopic_count}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Reference docs</p>
-                  <p className="font-medium text-foreground">{state.reference_doc_count}</p>
+                  <p className="text-[11px] font-bold uppercase tracking-wider field-label">Reference docs</p>
+                  <p className="mt-0.5 text-base font-bold text-foreground">{state.reference_doc_count}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Chunks</p>
-                  <p className="font-medium text-foreground">{state.chunk_count}</p>
+                  <p className="text-[11px] font-bold uppercase tracking-wider field-label">Chunks</p>
+                  <p className="mt-0.5 text-base font-bold text-foreground">{state.chunk_count}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Active tags (DB)</p>
-                  <p className="font-medium text-foreground">
+                  <p className="text-[11px] font-bold uppercase tracking-wider field-label">Active tags (DB)</p>
+                  <p className="mt-0.5 text-base font-bold text-foreground">
                     {state.active_tagged_chunk_count}
                     {activePct !== null ? ` (${activePct}%)` : ''}
                   </p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Preview tags</p>
-                  <p className="font-medium text-foreground">
+                  <p className="text-[11px] font-bold uppercase tracking-wider field-label">Preview tags</p>
+                  <p className="mt-0.5 text-base font-bold text-foreground">
                     {state.proposed_tagged_chunk_count ?? '—'}
                     {proposedPct !== null ? ` (${proposedPct}%)` : ''}
                   </p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Preview threshold</p>
-                  <p className="font-medium text-foreground">
+                  <p className="text-[11px] font-bold uppercase tracking-wider field-label">Preview threshold</p>
+                  <p className="mt-0.5 text-base font-bold text-foreground">
                     {activeProposalThreshold != null ? activeProposalThreshold.toFixed(2) : '—'}
                   </p>
                 </div>
@@ -438,8 +452,8 @@ export default function ReferenceAlignmentPanel({
             )}
 
             {state?.per_document_tag_summary && state.per_document_tag_summary.length > 0 && (
-              <div className="rounded-md border border-border bg-muted/20 p-3">
-                <h3 className="text-sm font-semibold text-foreground">Tags by source</h3>
+              <div className="rounded-[6px] border border-border/50 bg-muted/40 p-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider label-accent">Tags by source</h3>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Spot-check each reference — e.g. UbD should show preview tags before you activate.
                 </p>
@@ -472,9 +486,65 @@ export default function ReferenceAlignmentPanel({
             )}
 
             {/* Alignment threshold — used on the next preview run */}
+            {/* Actions — Preview/Activate sit above the threshold controls */}
+            {!locked && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className={PREVIEW_BTN}
+                  onClick={() => void handlePropose()}
+                  disabled={proposing || approving}
+                >
+                  {proposing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )}
+                  {proposal ? 'Preview tag changes' : 'Preview alignment tags'}
+                </button>
+                {proposal && proposal.mappings.length > 0 && !state?.node_gen_ready && (
+                  <button
+                    type="button"
+                    className={ACTIVATE_BTN}
+                    onClick={handleApprove}
+                    disabled={approving || proposing}
+                  >
+                    {approving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Check className="h-4 w-4" />
+                    )}
+                    Activate alignment tags
+                  </button>
+                )}
+                {state?.node_gen_ready && (
+                  <>
+                    <span className="inline-flex items-center gap-1 text-sm text-emerald-600 dark:text-emerald-400">
+                      <Check className="h-4 w-4" /> Tags active
+                      {proposal?.approved_by ? ` · ${proposal.approved_by}` : ''}
+                    </span>
+                    {onAlignmentApproved && (
+                      <button type="button" className={PREVIEW_BTN} onClick={() => onAlignmentApproved()}>
+                        Continue to Node Engine
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    )}
+                  </>
+                )}
+                {state?.status === 'approved' && !state?.node_gen_ready && (
+                  <span className="inline-flex items-center gap-1 text-sm text-emerald-600 dark:text-emerald-400">
+                    <Check className="h-4 w-4" /> Tags active
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Alignment threshold — used on the next preview run */}
             {!locked && !state?.node_gen_ready && (
-              <div className="rounded-md border border-border bg-muted/20 p-3">
-                <h3 className="text-sm font-semibold text-foreground">Alignment threshold</h3>
+              <div className="rounded-[6px] border border-border/50 bg-muted/40 p-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider label-accent">
+                  Alignment threshold
+                </h3>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Cosine similarity a passage must clear to be tagged to a subtopic. Lower values tag
                   more passages (multi-source corpora often over-tag at 0.34). Spot-check an existing
@@ -482,7 +552,10 @@ export default function ReferenceAlignmentPanel({
                 </p>
                 <div className="mt-3 flex flex-wrap items-end gap-3">
                   <div className="min-w-[8rem] space-y-1.5">
-                    <label htmlFor="alignment-threshold" className="text-sm font-medium text-foreground">
+                    <label
+                      htmlFor="alignment-threshold"
+                      className="block text-[11px] font-bold uppercase tracking-wider field-label"
+                    >
                       Threshold for next propose
                     </label>
                     <Input
@@ -496,31 +569,29 @@ export default function ReferenceAlignmentPanel({
                       onChange={(e) =>
                         setProposeThreshold(clampProposeThreshold(Number(e.target.value)))
                       }
-                      className="h-8 text-sm"
+                      className={cn('h-8 px-2 py-1 text-sm', FIELD_RADIUS)}
                     />
                     <p className="text-[11px] text-muted-foreground">
                       Typical range 0.40–0.48 for multi-source courses.
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button
+                    <button
                       type="button"
-                      size="sm"
-                      variant="outline"
+                      className={PRESET_BTN}
                       disabled={proposing || approving}
                       onClick={() => setProposeThreshold(0.34)}
                     >
                       Calibration (0.34)
-                    </Button>
-                    <Button
+                    </button>
+                    <button
                       type="button"
-                      size="sm"
-                      variant="outline"
+                      className={PRESET_BTN}
                       disabled={proposing || approving}
                       onClick={() => setProposeThreshold(DEFAULT_PROPOSE_THRESHOLD)}
                     >
                       Recommended (0.42)
-                    </Button>
+                    </button>
                   </div>
                 </div>
                 {activeProposalThreshold != null && activeProposalThreshold !== proposeThreshold && (
@@ -535,52 +606,9 @@ export default function ReferenceAlignmentPanel({
               </div>
             )}
 
-            {/* Actions */}
-            {!locked && (
-              <div className="flex flex-wrap items-center gap-2">
-                <Button size="sm" onClick={() => void handlePropose()} disabled={proposing || approving}>
-                  {proposing ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Sparkles className="mr-2 h-4 w-4" />
-                  )}
-                  {proposal ? 'Preview tag changes' : 'Preview alignment tags'}
-                </Button>
-                {proposal && proposal.mappings.length > 0 && !state?.node_gen_ready && (
-                  <Button size="sm" variant="default" onClick={handleApprove} disabled={approving || proposing}>
-                    {approving ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Check className="mr-2 h-4 w-4" />
-                    )}
-                    Activate alignment tags
-                  </Button>
-                )}
-                {state?.node_gen_ready && (
-                  <>
-                    <span className="inline-flex items-center gap-1 text-sm text-emerald-600 dark:text-emerald-400">
-                      <Check className="h-4 w-4" /> Tags active
-                      {proposal?.approved_by ? ` · ${proposal.approved_by}` : ''}
-                    </span>
-                    {onAlignmentApproved && (
-                      <Button size="sm" variant="default" onClick={() => onAlignmentApproved()}>
-                        Continue to Node Engine
-                        <ChevronRight className="ml-2 h-4 w-4" />
-                      </Button>
-                    )}
-                  </>
-                )}
-                {state?.status === 'approved' && !state?.node_gen_ready && (
-                  <span className="inline-flex items-center gap-1 text-sm text-emerald-600 dark:text-emerald-400">
-                    <Check className="h-4 w-4" /> Tags active
-                  </span>
-                )}
-              </div>
-            )}
-
             {/* Review & spot-check — approve all in one click, then verify under each subtopic */}
             {proposal && proposal.mappings.length > 0 && (
-              <div className="rounded-md border border-border">
+              <div className="rounded-[6px] border border-border/50">
                 <button
                   type="button"
                   onClick={() => setOpen((v) => !v)}
@@ -617,7 +645,7 @@ export default function ReferenceAlignmentPanel({
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         placeholder="Search passages by citation or text to spot-check…"
-                        className="w-full rounded-md border border-input bg-background py-1.5 pl-7 pr-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="w-full rounded-[4px] border border-input bg-background py-1.5 pl-7 pr-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       />
                     </div>
 
@@ -652,7 +680,7 @@ export default function ReferenceAlignmentPanel({
                       // Grouped under each subtopic (collapsed by default).
                       <div className="space-y-2">
                         {groupedBySubtopic.map((g) => (
-                          <details key={g.id} className="rounded-md border border-border">
+                          <details key={g.id} className="rounded-[6px] border border-border/50">
                             <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-xs font-medium">
                               <span className="truncate">{g.label}</span>
                               <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
@@ -681,7 +709,7 @@ export default function ReferenceAlignmentPanel({
 
                         {/* Course-level (untagged) group */}
                         {untaggedMappings.length > 0 && (
-                          <details className="rounded-md border border-dashed border-border">
+                          <details className="rounded-[6px] border border-dashed border-border/50">
                             <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-muted-foreground">
                               <span>Course-level (untagged)</span>
                               <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px]">

@@ -18,7 +18,25 @@ import {
 } from '@/services/api'
 import IngestionProgressCard from '@/components/IngestionProgressCard'
 import LibraryPicker from '@/components/LibraryPicker'
-import { Loader2, Upload, Trash2, BookOpen, Library, Sparkles, Link as LinkIcon, AlertTriangle } from 'lucide-react'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/Select'
+import { cn } from '@/lib/utils'
+import {
+  Loader2,
+  Upload,
+  UploadCloud,
+  Trash2,
+  BookOpen,
+  Library,
+  Sparkles,
+  Link as LinkIcon,
+  AlertTriangle,
+} from 'lucide-react'
 
 /** True while a professor-uploaded book is still being auto-enriched in the background. */
 function isEnriching(library?: ReferenceLibraryInfo | null): boolean {
@@ -135,6 +153,7 @@ export default function ReferenceMaterialsPanel({
   )
   const [linkUrl, setLinkUrl] = useState(initialLinkUrl ?? '')
   const [linking, setLinking] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
   // Live per-job ingestion progress (one card per in-flight upload/link).
   const [ingestJobs, setIngestJobs] = useState<IngestionProgress[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -193,17 +212,47 @@ export default function ReferenceMaterialsPanel({
     return () => clearTimeout(timer)
   }, [docs, load])
 
-  // Auto-capture a sensible title from the file name (without extension) when
-  // exactly one file is selected, unless the SME has manually edited the title.
+  // Stable identity for de-duping across separate selections.
+  const fileKey = (f: File) => `${f.name}::${f.size}::${f.lastModified}`
+
+  // Accumulate files across multiple picks (one-by-one OR multi-select) instead of
+  // replacing the list, so the SME can build up a batch and ingest it in one click.
+  // The title is auto-captured only when the batch is exactly one file.
   const handleFileChange = (selected: FileList | null) => {
     const picked = selected ? Array.from(selected) : []
-    setFiles(picked)
-    if (picked.length === 1 && !titleEdited) {
-      setTitle(picked[0].name.replace(/\.[^.]+$/, ''))
+    // Reset the native input so re-picking the same file still fires onChange and
+    // the input value never competes with our accumulated state.
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    if (picked.length === 0) return
+
+    const seen = new Set(files.map(fileKey))
+    const merged = [...files]
+    for (const f of picked) {
+      const key = fileKey(f)
+      if (!seen.has(key)) {
+        seen.add(key)
+        merged.push(f)
+      }
     }
-    if (picked.length !== 1 && !titleEdited) {
-      setTitle('')
+    setFiles(merged)
+    if (!titleEdited) {
+      setTitle(merged.length === 1 ? merged[0].name.replace(/\.[^.]+$/, '') : '')
     }
+  }
+
+  // Drop a single file from the pending batch before ingesting.
+  const removeSelectedFile = (index: number) => {
+    const next = files.filter((_, i) => i !== index)
+    setFiles(next)
+    if (!titleEdited) {
+      setTitle(next.length === 1 ? next[0].name.replace(/\.[^.]+$/, '') : '')
+    }
+  }
+
+  const clearSelectedFiles = () => {
+    setFiles([])
+    if (!titleEdited) setTitle('')
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   const resetForm = () => {
@@ -446,23 +495,86 @@ export default function ReferenceMaterialsPanel({
 
       {/* Upload / link form */}
       <div className="rounded-xl border bg-card p-4 space-y-3">
+        {/* Full-width dropzone — the file picker reads as an input region, so the
+            only buttons on the card are the right-aligned commit actions. */}
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="Choose files to upload, or drag and drop"
+          onClick={() => fileInputRef.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              fileInputRef.current?.click()
+            }
+          }}
+          onDragOver={(e) => {
+            e.preventDefault()
+            setDragActive(true)
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault()
+            setDragActive(false)
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            setDragActive(false)
+            handleFileChange(e.dataTransfer.files)
+          }}
+          className={cn(
+            'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-input bg-muted/20 px-4 py-7 text-center transition-colors',
+            'hover:border-primary/50 hover:bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+            dragActive && 'border-primary bg-primary/5'
+          )}
+        >
+          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <UploadCloud className="h-5 w-5" />
+          </span>
+          <p className="text-sm font-medium text-foreground">
+            <span className="text-primary">Click to choose files</span> or drag &amp; drop
+          </p>
+          <p className="text-xs text-muted-foreground">PDF or DOCX · you can select multiple</p>
+        </div>
         <input
           ref={fileInputRef}
           type="file"
           multiple
           accept=".pdf,.doc,.docx,application/pdf"
           onChange={(e) => handleFileChange(e.target.files)}
-          className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground hover:file:opacity-90"
+          className="hidden"
         />
         {files.length > 0 && (
           <div className="space-y-2 rounded-md border border-border bg-muted/20 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Selected files ({files.length})
-            </p>
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Selected files ({files.length})
+              </p>
+              <button
+                type="button"
+                onClick={clearSelectedFiles}
+                disabled={uploading}
+                className="text-xs font-medium text-muted-foreground hover:text-red-600 disabled:opacity-50"
+              >
+                Clear all
+              </button>
+            </div>
             <ul className="space-y-1">
               {files.map((selectedFile, idx) => (
-                <li key={`${selectedFile.name}-${idx}`} className="text-sm text-foreground">
-                  {idx + 1}. {selectedFile.name}
+                <li
+                  key={fileKey(selectedFile)}
+                  className="group flex items-center gap-2 text-sm text-foreground"
+                >
+                  <span className="text-muted-foreground">{idx + 1}.</span>
+                  <span className="min-w-0 flex-1 truncate">{selectedFile.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeSelectedFile(idx)}
+                    disabled={uploading}
+                    aria-label={`Remove ${selectedFile.name}`}
+                    className="text-muted-foreground opacity-0 transition-opacity hover:text-red-600 group-hover:opacity-100 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
                 </li>
               ))}
             </ul>
@@ -474,7 +586,7 @@ export default function ReferenceMaterialsPanel({
               Title (used only when one file is selected)
             </label>
             <Input
-              className="h-8 text-sm"
+              className="text-sm"
               placeholder={
                 files.length === 1
                   ? 'Captured from the uploaded file name'
@@ -492,17 +604,21 @@ export default function ReferenceMaterialsPanel({
             <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1 block">
               Source type
             </label>
-            <select
-              className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+            <Select
               value={sourceType}
-              onChange={(e) => setSourceType(e.target.value as ReferenceSourceType)}
+              onValueChange={(v) => setSourceType(v as ReferenceSourceType)}
             >
-              {SOURCE_TYPE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="h-11 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SOURCE_TYPE_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
         <div className="flex justify-end">
@@ -639,14 +755,11 @@ export default function ReferenceMaterialsPanel({
 
   if (embedded) {
     return (
-      <div className="mt-4 border-t border-border pt-4">
-        <div className="flex items-center gap-2 mb-3">
-          <BookOpen className="h-4 w-4 text-primary" />
-          <h4 className="font-semibold text-sm">Grounding materials (textbook / readings)</h4>
-        </div>
+      <div>
         <p className="text-xs text-muted-foreground mb-3">
-          Upload or link licensed readings (PDF/DOCX). Their actual text is chunked and indexed so
-          Course Architect generation can be grounded in the source material.
+          Upload or link licensed readings (PDF/DOCX), or reuse an approved library book. Their
+          actual text is chunked and indexed so Course Architect generation can be grounded in the
+          source material.
         </p>
         {body}
       </div>

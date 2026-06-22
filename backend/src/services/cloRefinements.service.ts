@@ -238,36 +238,57 @@ function migrateLegacyItem(raw: Record<string, unknown>, clo: CLO): CloRefinemen
   };
 }
 
+/**
+ * Options that control how a saved SME item is merged with a fresh suggestion.
+ * `resetReview` is set only when (re)generating Layer 2: a fresh council run means
+ * the prior SME decisions/approvals were made against now-replaced content, so the
+ * review must restart (decisions back to pending, approvals cleared) and the SME
+ * approves each CLO again. On a normal page load it stays false so SME work is kept.
+ */
+interface MergeOptions {
+  resetReview?: boolean;
+}
+
 function suggestionToItem(
   clo: CLO,
   suggestion: SuggestedCloRefinement,
-  saved?: CloRefinementItem
+  saved?: CloRefinementItem,
+  opts: MergeOptions = {}
 ): CloRefinementItem {
-  if (saved) {
+  const ai = suggestion.ai_suggested_refined_clo.trim() || clo.clo_text;
+
+  if (saved && !opts.resetReview) {
+    // Council-generated fields ALWAYS refresh from the latest run. They are produced
+    // by the AI (not SME-editable), so a regenerate must not be masked by previously
+    // seeded values — including the "No AI review returned" placeholder written when a
+    // prior run failed to parse. Only the SME's own inputs are preserved: decision,
+    // internal note, approval status, and any custom final wording.
+    const decision = saved.sme_decision ?? 'pending';
+    let finalText: string;
+    if (decision === 'custom_wording') {
+      finalText = saved.final_clo_for_adaptive_design?.trim() || ai;
+    } else if (decision === 'keep_official') {
+      finalText = clo.clo_text;
+    } else {
+      // accept_ai_refinement or pending → follow the refreshed suggestion
+      finalText = ai;
+    }
     return {
-      ...saved,
+      clo_id: clo.clo_id,
       official_clo: clo.clo_text,
-      council_feedback_summary: {
-        ...suggestion.council_feedback_summary,
-        ...Object.fromEntries(
-          Object.entries(saved.council_feedback_summary).filter(([, v]) => v?.trim())
-        ),
-      },
-      full_council_analysis: {
-        ...suggestion.full_council_analysis,
-        ...Object.fromEntries(
-          Object.entries(saved.full_council_analysis).filter(([, v]) => v?.trim())
-        ),
-      },
-      ai_suggested_refined_clo: suggestion.ai_suggested_refined_clo,
-      refinement_rationale:
-        saved.refinement_rationale?.length > 0
-          ? saved.refinement_rationale
-          : suggestion.refinement_rationale,
+      council_feedback_summary: suggestion.council_feedback_summary,
+      full_council_analysis: suggestion.full_council_analysis,
+      ai_suggested_refined_clo: ai,
+      refinement_rationale: suggestion.refinement_rationale,
+      sme_decision: decision,
+      final_clo_for_adaptive_design: finalText,
+      sme_internal_note: saved.sme_internal_note,
+      approval_status: saved.approval_status ?? 'pending',
     };
   }
 
-  const ai = suggestion.ai_suggested_refined_clo.trim() || clo.clo_text;
+  // Fresh seed OR a regenerate reset: start the SME review over. A personal internal
+  // note is the SME's own content (not tied to the AI output), so it is kept.
   return {
     clo_id: clo.clo_id,
     official_clo: clo.clo_text,
@@ -277,7 +298,7 @@ function suggestionToItem(
     refinement_rationale: suggestion.refinement_rationale,
     sme_decision: 'pending',
     final_clo_for_adaptive_design: ai,
-    sme_internal_note: undefined,
+    sme_internal_note: opts.resetReview ? saved?.sme_internal_note : undefined,
     approval_status: 'pending',
   };
 }
@@ -304,10 +325,25 @@ async function loadSavedItems(courseCode: string, clos: CLO[]): Promise<Map<stri
 function mergeItem(
   clo: CLO,
   saved: CloRefinementItem | undefined,
-  suggestion: SuggestedCloRefinement | undefined
+  suggestion: SuggestedCloRefinement | undefined,
+  opts: MergeOptions = {}
 ): CloRefinementItem {
   if (!suggestion) {
-    if (saved) return { ...saved, official_clo: clo.clo_text };
+    if (saved) {
+      // On a regenerate reset, drop the prior decision/approval even when no fresh
+      // suggestion exists for this CLO, so nothing stays "approved" after a re-run.
+      if (opts.resetReview) {
+        return {
+          ...saved,
+          official_clo: clo.clo_text,
+          sme_decision: 'pending',
+          final_clo_for_adaptive_design:
+            saved.ai_suggested_refined_clo?.trim() || clo.clo_text,
+          approval_status: 'pending',
+        };
+      }
+      return { ...saved, official_clo: clo.clo_text };
+    }
     return {
       clo_id: clo.clo_id,
       official_clo: clo.clo_text,
@@ -320,7 +356,7 @@ function mergeItem(
       approval_status: 'pending',
     };
   }
-  return suggestionToItem(clo, suggestion, saved);
+  return suggestionToItem(clo, suggestion, saved, opts);
 }
 
 export async function getCloRefinementContext(courseCode: string): Promise<{
@@ -460,11 +496,13 @@ export async function seedRefinementsFromSuggestions(courseCode: string): Promis
     : [];
   const savedMap = await loadSavedItems(courseCode, clos);
 
+  // Seeding only happens when Layer 2 is (re)generated. A fresh council run replaces
+  // the content the SME previously reviewed, so restart the review: decisions go back
+  // to pending and approvals are cleared, forcing the SME to approve each CLO again.
   const items = clos.map((clo) => {
     const s = suggestions.find((x) => x.clo_id === clo.clo_id);
     const saved = savedMap.get(clo.clo_id);
-    if (!s) return mergeItem(clo, saved, undefined);
-    return mergeItem(clo, saved, s);
+    return mergeItem(clo, saved, s, { resetReview: true });
   });
 
   await saveCloRefinements(courseCode, items);

@@ -1,7 +1,15 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import { Markdown } from '@/components/ui/Markdown'
-import { Button } from '@/components/ui/Button'
+import { mdBtn, mdBtnSoft } from '@/components/ui/materialButton'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/Dialog'
 import { showToast } from '@/components/ui/Toaster'
 import {
   fetchStage1Layers,
@@ -69,9 +77,31 @@ function statusColor(status: string): string {
   }
 }
 
+/**
+ * Snapshot of a solo (wizard) layer's primary actions, lifted to the shell so
+ * the sticky WizardActionBar can render Approve / Regenerate alongside the
+ * existing "Next layer" navigation. Currently published only for Layer 2.
+ */
+export interface SoloLayerActions {
+  layerId: string
+  approved: boolean
+  canApprove: boolean
+  approve: () => void
+  canRegenerate: boolean
+  isRunning: boolean
+  hasOutput: boolean
+  regenerate: () => void
+  /** Layer 2 only: whether the SME has approved reference coverage. */
+  coverageConfirmed: boolean
+  /** Layer 2 only: why Approve is disabled (CLOs pending, unsaved, or coverage). */
+  approveHint?: string
+}
+
 interface Stage1LayersProps {
   courseCode: string
   onAllApproved?: (allApproved: boolean) => void
+  /** Wizard mode: publishes the solo layer's Approve/Regenerate actions to the shell. */
+  onSoloActionsChange?: (actions: SoloLayerActions | null) => void
   /** Called after Layer 6 approval to auto-preview alignment tags. */
   onAlignmentAutoPropose?: () => void
   /** Called when a reference document is uploaded (any layer). */
@@ -94,6 +124,7 @@ interface Stage1LayersProps {
 export default function Stage1Layers({
   courseCode,
   onAllApproved,
+  onSoloActionsChange,
   onAlignmentAutoPropose,
   onReferenceUploaded,
   alignmentFetchSignal = 0,
@@ -111,6 +142,8 @@ export default function Stage1Layers({
   const [viewingReportId, setViewingReportId] = useState<string | null>(null)
   const [layer2HasChanges, setLayer2HasChanges] = useState(false)
   const [layer2Summary, setLayer2Summary] = useState<CloRefinementReviewSummary | null>(null)
+  // SME has measured + signed off on reference coverage (gates Layer 2 approval).
+  const [layer2CoverageConfirmed, setLayer2CoverageConfirmed] = useState(false)
   const [layer3HasChanges, setLayer3HasChanges] = useState(false)
   const [layer3Summary, setLayer3Summary] = useState<AssessmentRedesignReviewSummary | null>(null)
   const [layer4HasChanges, setLayer4HasChanges] = useState(false)
@@ -128,6 +161,10 @@ export default function Stage1Layers({
   // Reference Coverage panel auto-re-runs and surfaces before/after deltas.
   const [coverageRefreshSignal, setCoverageRefreshSignal] = useState(0)
   const [referenceDocsCount, setReferenceDocsCount] = useState(0)
+  // Layer 2 regenerate is triggered from inside the CLO editor; this confirms it.
+  const [confirmRegenLayer2, setConfirmRegenLayer2] = useState(false)
+  // Layer 3 regenerate is triggered from inside the assessment editor; this confirms it.
+  const [confirmRegenLayer3, setConfirmRegenLayer3] = useState(false)
 
   const refreshReferenceDocsCount = useCallback(async () => {
     try {
@@ -144,7 +181,10 @@ export default function Stage1Layers({
   // Defer until after the layout settles (e.g. when approving a layer collapses a
   // large editor above the target) so the scroll lands on the correct layer.
   useEffect(() => {
-    if (!expandedId) return
+    // In wizard (solo) mode each layer is its own full page, so the shell scrolls
+    // to the very top on navigation. The per-layer scroll below is only for the
+    // legacy stacked-list view where expanding one layer should bring it into view.
+    if (!expandedId || soloLayerId) return
     const scrollToLayer = () => {
       const el = layerRefs.current[expandedId]
       if (el) {
@@ -159,7 +199,7 @@ export default function Stage1Layers({
       cancelAnimationFrame(raf)
       timers.forEach(clearTimeout)
     }
-  }, [expandedId])
+  }, [expandedId, soloLayerId])
 
   // Auto-run a layer the first time it is opened and has no output yet.
   // Manual Run/Regenerate still handles every later run. Remove this whole
@@ -312,6 +352,14 @@ export default function Stage1Layers({
         showToast({
           title: 'CLO approvals required',
           description: `Approve each CLO before approving Layer 2 (${layer2Summary.pending_count} pending, ${layer2Summary.needs_revision_count} need revision).`,
+          variant: 'destructive',
+        })
+        return false
+      }
+      if (!layer2CoverageConfirmed) {
+        showToast({
+          title: 'Coverage approval required',
+          description: 'Measure and approve reference coverage before approving Layer 2.',
           variant: 'destructive',
         })
         return false
@@ -480,6 +528,132 @@ export default function Stage1Layers({
     }
   }
 
+  // Keep the latest handler closures reachable from the published solo actions
+  // so the publish effect can depend on primitive state only (no re-publish loop).
+  const handleApproveRef = useRef(handleApprove)
+  const handleRunRef = useRef(handleRun)
+  const handleApproveLayer2AndContinueRef = useRef(handleApproveLayer2AndContinue)
+  const handleApproveLayer3AndContinueRef = useRef(handleApproveLayer3AndContinue)
+  const handleApproveLayer6AndContinueRef = useRef(handleApproveLayer6AndContinue)
+  handleApproveLayer2AndContinueRef.current = handleApproveLayer2AndContinue
+  handleApproveLayer3AndContinueRef.current = handleApproveLayer3AndContinue
+  handleApproveLayer6AndContinueRef.current = handleApproveLayer6AndContinue
+  handleApproveRef.current = handleApprove
+  handleRunRef.current = handleRun
+
+  // Publish Layer 2's Approve/Regenerate state to the wizard shell so the sticky
+  // WizardActionBar can own them, mirroring the "Next layer" placement.
+  useEffect(() => {
+    if (!onSoloActionsChange) return
+    if (soloLayerId === 'layer2-clo-review') {
+      const layer = layers.find((l) => l.layerId === 'layer2-clo-review')
+      if (!layer) {
+        onSoloActionsChange(null)
+        return
+      }
+      const running = runningId === 'layer2-clo-review'
+      const staleRunning = layer.status === 'running' && !running
+      const allClosApproved = !!layer2Summary?.all_approved
+      // Approve requires: all CLOs approved + saved + SME signed off on coverage.
+      const canApprove =
+        !!layer.canApprove && allClosApproved && !layer2HasChanges && layer2CoverageConfirmed
+      let approveHint: string | undefined
+      if (!canApprove && layer.status !== 'approved') {
+        if (layer2HasChanges) approveHint = 'Save CLO refinements before approving.'
+        else if (!allClosApproved) approveHint = 'Approve every CLO refinement below to enable approval.'
+        else if (!layer2CoverageConfirmed)
+          approveHint = 'Measure and approve reference coverage below to enable approval.'
+      }
+      onSoloActionsChange({
+        layerId: 'layer2-clo-review',
+        approved: layer.status === 'approved',
+        canApprove,
+        approve: () => void handleApproveLayer2AndContinueRef.current(),
+        canRegenerate: layer.canRun || staleRunning,
+        isRunning: running,
+        hasOutput: !!layer.reportMarkdown,
+        regenerate: () => void handleRunRef.current('layer2-clo-review'),
+        coverageConfirmed: layer2CoverageConfirmed,
+        approveHint,
+      })
+      return
+    }
+    if (soloLayerId === 'layer3-assessment-redesign') {
+      const layer = layers.find((l) => l.layerId === 'layer3-assessment-redesign')
+      if (!layer) {
+        onSoloActionsChange(null)
+        return
+      }
+      const running = runningId === 'layer3-assessment-redesign'
+      const staleRunning = layer.status === 'running' && !running
+      const allApproved = !!layer3Summary?.all_approved
+      const canApprove = !!layer.canApprove && allApproved && !layer3HasChanges
+      let approveHint: string | undefined
+      if (!canApprove && layer.status !== 'approved') {
+        if (layer3HasChanges) approveHint = 'Save assessment redesigns before approving.'
+        else if (!allApproved) approveHint = 'Approve every assessment below to enable approval.'
+      }
+      onSoloActionsChange({
+        layerId: 'layer3-assessment-redesign',
+        approved: layer.status === 'approved',
+        canApprove,
+        approve: () => void handleApproveLayer3AndContinueRef.current(),
+        canRegenerate: layer.canRun || staleRunning,
+        isRunning: running,
+        hasOutput: !!layer.reportMarkdown,
+        regenerate: () => void handleRunRef.current('layer3-assessment-redesign'),
+        coverageConfirmed: true,
+        approveHint,
+      })
+      return
+    }
+    if (soloLayerId === 'layer6-subtopic-architecture') {
+      const layer = layers.find((l) => l.layerId === 'layer6-subtopic-architecture')
+      if (!layer) {
+        onSoloActionsChange(null)
+        return
+      }
+      const running = runningId === 'layer6-subtopic-architecture'
+      const staleRunning = layer.status === 'running' && !running
+      const allApproved = !!layer6Summary?.all_approved
+      const canApprove = !!layer.canApprove && allApproved && !layer6HasChanges
+      let approveHint: string | undefined
+      if (!canApprove && layer.status !== 'approved') {
+        if (layer6HasChanges) approveHint = 'Save subtopic changes before approving.'
+        else if (!allApproved) approveHint = 'Approve every subtopic below to enable approval.'
+      }
+      onSoloActionsChange({
+        layerId: 'layer6-subtopic-architecture',
+        approved: layer.status === 'approved',
+        canApprove,
+        approve: () => void handleApproveLayer6AndContinueRef.current(),
+        canRegenerate: layer.canRun || staleRunning,
+        isRunning: running,
+        hasOutput: !!layer.reportMarkdown,
+        regenerate: () => void handleRunRef.current('layer6-subtopic-architecture'),
+        coverageConfirmed: true,
+        approveHint,
+      })
+      return
+    }
+    onSoloActionsChange(null)
+  }, [
+    onSoloActionsChange,
+    soloLayerId,
+    layers,
+    layer2Summary,
+    layer2HasChanges,
+    layer2CoverageConfirmed,
+    layer3Summary,
+    layer3HasChanges,
+    layer6Summary,
+    layer6HasChanges,
+    runningId,
+  ])
+
+  // Clear published actions when the layers view unmounts.
+  useEffect(() => () => onSoloActionsChange?.(null), [onSoloActionsChange])
+
   if (loading && layers.length === 0) {
     return (
       <div className="flex justify-center py-8">
@@ -494,7 +668,7 @@ export default function Stage1Layers({
   const visibleLayers = solo ? layers.filter((l) => l.layerId === soloLayerId) : layers
 
   const layersList = (
-    <div className="space-y-3">
+    <div className="md-scope space-y-3">
         {visibleLayers.map((layer) => {
           const open = solo ? layer.layerId === soloLayerId : expandedId === layer.layerId
           const clientRunning = runningId === layer.layerId
@@ -522,15 +696,15 @@ export default function Stage1Layers({
           const actionButtons = (
             <div className="flex flex-wrap gap-2">
               {showContinueToNext && nextLayer && (
-                <Button
-                  size="default"
+                <button
+                  type="button"
                   onClick={() => goToLayer(nextLayer.layerId)}
                   disabled={layer1BlockedByMissingReferences}
-                  className="group order-first shadow-glow ring-2 ring-primary/25 ring-offset-2 ring-offset-background"
+                  className={cn(mdBtn, 'group order-first')}
                 >
                   Continue to Layer {nextLayer.config.order}
-                  <ChevronRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
-                </Button>
+                  <ChevronRight className="ml-1 h-4 w-4 transition-transform group-hover:translate-x-1" />
+                </button>
               )}
               {layer1BlockedByMissingReferences && (
                 <p className="w-full rounded-md bg-red-500/10 p-2 text-xs text-red-600 dark:text-red-400">
@@ -543,42 +717,46 @@ export default function Stage1Layers({
                   regenerate it.
                 </p>
               )}
-              {showRunButton && (
-                <Button
-                  size="sm"
-                  variant={layer.status === 'approved' ? 'secondary' : 'default'}
+              {layer.canApprove &&
+                layer.layerId !== 'layer4-weighting-rubric' &&
+                layer.layerId !== 'layer5-integrity-ai' &&
+                layer.layerId !== 'layer6-subtopic-architecture' &&
+                !(solo && layer.layerId === 'layer2-clo-review') &&
+                !(solo && layer.layerId === 'layer3-assessment-redesign') && (
+                  <button
+                    type="button"
+                    className={mdBtn}
+                    disabled={layer1BlockedByMissingReferences}
+                    onClick={() => handleApprove(layer.layerId)}
+                  >
+                    <Check className="h-4 w-4" />
+                    Approve
+                  </button>
+                )}
+              {showRunButton &&
+                !(solo && layer.layerId === 'layer2-clo-review') &&
+                !(solo && layer.layerId === 'layer3-assessment-redesign') && (
+                <button
+                  type="button"
+                  className={layer.status === 'approved' ? mdBtnSoft : mdBtn}
                   disabled={isRunning}
                   onClick={() => handleRun(layer.layerId)}
                 >
                   {isRunning ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" />
                   ) : layer.reportMarkdown ? (
-                    <RefreshCw className="mr-2 h-4 w-4" />
+                    <RefreshCw className="h-4 w-4" />
                   ) : (
-                    <Play className="mr-2 h-4 w-4" />
+                    <Play className="h-4 w-4" />
                   )}
                   {layer.reportMarkdown ? 'Regenerate' : 'Run'}
-                </Button>
+                </button>
               )}
-              {layer.canApprove &&
-                layer.layerId !== 'layer4-weighting-rubric' &&
-                layer.layerId !== 'layer5-integrity-ai' &&
-                layer.layerId !== 'layer6-subtopic-architecture' && (
-                  <Button
-                    size="sm"
-                    variant="default"
-                    disabled={layer1BlockedByMissingReferences}
-                    onClick={() => handleApprove(layer.layerId)}
-                  >
-                    <Check className="mr-2 h-4 w-4" />
-                    Approve
-                  </Button>
-                )}
               {(layer.status === 'needs_review' || layer.status === 'generated') && (
-                <Button size="sm" variant="outline" onClick={() => handleReject(layer.layerId)}>
-                  <XCircle className="mr-2 h-4 w-4" />
+                <button type="button" className={mdBtnSoft} onClick={() => handleReject(layer.layerId)}>
+                  <XCircle className="h-4 w-4" />
                   Request revision
-                </Button>
+                </button>
               )}
               {(layer.layerId === 'layer2-clo-review' ||
                 layer.layerId === 'layer3-assessment-redesign' ||
@@ -586,46 +764,46 @@ export default function Stage1Layers({
                 layer.layerId === 'layer5-integrity-ai' ||
                 layer.layerId === 'layer6-subtopic-architecture') &&
                 layer.reportMarkdown && (
-                  <Button
-                    size="sm"
-                    variant="outline"
+                  <button
+                    type="button"
+                    className={mdBtnSoft}
                     onClick={() =>
                       setViewingReportId((prev) => (prev === layer.layerId ? null : layer.layerId))
                     }
                   >
                     {viewingReportId === layer.layerId ? (
                       <>
-                        <EyeOff className="mr-2 h-4 w-4" />
+                        <EyeOff className="h-4 w-4" />
                         Hide council report
                       </>
                     ) : (
                       <>
-                        <Eye className="mr-2 h-4 w-4" />
+                        <Eye className="h-4 w-4" />
                         View council report
                       </>
                     )}
-                  </Button>
+                  </button>
                 )}
               {layer.layerId === 'layer1-intake' && intake && layer.reportMarkdown && (
-                <Button
-                  size="sm"
-                  variant="outline"
+                <button
+                  type="button"
+                  className={mdBtnSoft}
                   onClick={() =>
                     setViewingReportId((prev) => (prev === layer.layerId ? null : layer.layerId))
                   }
                 >
                   {viewingReportId === layer.layerId ? (
                     <>
-                      <EyeOff className="mr-2 h-4 w-4" />
+                      <EyeOff className="h-4 w-4" />
                       Hide raw summary
                     </>
                   ) : (
                     <>
-                      <Eye className="mr-2 h-4 w-4" />
+                      <Eye className="h-4 w-4" />
                       View raw extraction summary
                     </>
                   )}
-                </Button>
+                </button>
               )}
             </div>
           )
@@ -637,56 +815,70 @@ export default function Stage1Layers({
                 layerRefs.current[layer.layerId] = el
               }}
               className={cn(
-                'scroll-mt-4 glass-strong rounded-xl',
-                layer.status === 'approved' && '!border-emerald-500/50'
+                'scroll-mt-4 md-card',
+                layer.status === 'approved' && 'border-emerald-500/40'
               )}
             >
-              <button
-                type="button"
-                className="flex w-full items-start justify-between gap-3 p-4 text-left"
-                onClick={() => {
-                  if (solo) return
-                  setExpandedId(open ? null : layer.layerId)
-                }}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">
-                      {layer.config.order}. {layer.config.name}
-                    </span>
-                    <span
-                      className={cn(
-                        'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
-                        statusColor(showRunning ? 'running' : layer.status),
-                        showRunning && 'animate-pulse'
-                      )}
-                    >
-                      {showRunning ? (
-                        <>
-                          <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
-                          Running…
-                        </>
-                      ) : (
-                        <>
-                          {layer.status === 'locked' && <Lock className="mr-1 inline h-3 w-3" />}
-                          {STATUS_LABELS[layer.status] || layer.status}
-                        </>
-                      )}
-                    </span>
-                    <span className="text-xs text-muted-foreground capitalize">
-                      {layer.config.mode === 'council' ? 'LLM Council' : 'Single Agent'}
-                    </span>
+              {/* In-card header. Hidden in wizard (solo) mode because the
+                  WizardStepShell already shows the layer title/status above. */}
+              {!solo && (
+                <button
+                  type="button"
+                  className="flex w-full items-start justify-between gap-3 p-4 text-left"
+                  onClick={() => {
+                    setExpandedId(open ? null : layer.layerId)
+                  }}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">
+                        {layer.config.order}. {layer.config.name}
+                      </span>
+                      <span
+                        className={cn(
+                          'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
+                          statusColor(showRunning ? 'running' : layer.status),
+                          showRunning && 'animate-pulse'
+                        )}
+                      >
+                        {showRunning ? (
+                          <>
+                            <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+                            Running…
+                          </>
+                        ) : (
+                          <>
+                            {layer.status === 'locked' && <Lock className="mr-1 inline h-3 w-3" />}
+                            {STATUS_LABELS[layer.status] || layer.status}
+                          </>
+                        )}
+                      </span>
+                      <span className="text-xs text-muted-foreground capitalize">
+                        {layer.config.mode === 'council' ? 'LLM Council' : 'Single Agent'}
+                      </span>
+                    </div>
+                    {layer.layerId !== 'layer6-subtopic-architecture' && layer.config.description && (
+                      <p className="mt-1 text-sm text-muted-foreground">{layer.config.description}</p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Output: {layer.config.productOutput}
+                    </p>
                   </div>
-                  {layer.layerId !== 'layer6-subtopic-architecture' && layer.config.description && (
-                    <p className="mt-1 text-sm text-muted-foreground">{layer.config.description}</p>
+                  {open ? (
+                    <ChevronDown className="h-5 w-5 shrink-0" />
+                  ) : (
+                    <ChevronRight className="h-5 w-5 shrink-0" />
                   )}
-                  <p className="text-xs text-muted-foreground">Output: {layer.config.productOutput}</p>
-                </div>
-                {open ? <ChevronDown className="h-5 w-5 shrink-0" /> : <ChevronRight className="h-5 w-5 shrink-0" />}
-              </button>
+                </button>
+              )}
 
               {open && (
-                <div className="space-y-4 border-t border-border px-4 pb-4">
+                <div
+                  className={cn(
+                    'space-y-4 px-4 pb-4',
+                    solo ? 'pt-4' : 'border-t border-border'
+                  )}
+                >
                   {layer.error && (
                     <p className="rounded-md bg-red-500/10 p-2 text-sm text-red-600">{layer.error}</p>
                   )}
@@ -730,10 +922,13 @@ export default function Stage1Layers({
                           layer.status === 'needs_review' ||
                           layer.status === 'approved'
                         }
+                        reloadSignal={layer.generatedAt}
+                        onRegenerate={() => setConfirmRegenLayer2(true)}
+                        isRegenerating={runningId === 'layer2-clo-review'}
+                        canRegenerate={layer.canRun || (layer.status === 'running' && runningId !== 'layer2-clo-review')}
                         onHasChanges={setLayer2HasChanges}
                         onSummaryChange={setLayer2Summary}
                         onSaved={() => loadLayers()}
-                        onApproveAndContinue={handleApproveLayer2AndContinue}
                       />
                     </>
                   ) : layer.layerId === 'layer3-assessment-redesign' &&
@@ -754,10 +949,13 @@ export default function Stage1Layers({
                           layer.status === 'needs_review' ||
                           layer.status === 'approved'
                         }
+                        reloadSignal={layer.generatedAt}
+                        onRegenerate={() => setConfirmRegenLayer3(true)}
+                        isRegenerating={runningId === 'layer3-assessment-redesign'}
+                        canRegenerate={layer.canRun || (layer.status === 'running' && runningId !== 'layer3-assessment-redesign')}
                         onHasChanges={setLayer3HasChanges}
                         onSummaryChange={setLayer3Summary}
                         onSaved={() => loadLayers()}
-                        onApproveAndContinue={handleApproveLayer3AndContinue}
                       />
                     </>
                   ) : layer.layerId === 'layer4-weighting-rubric' &&
@@ -829,7 +1027,6 @@ export default function Stage1Layers({
                         onHasChanges={setLayer6HasChanges}
                         onSummaryChange={setLayer6Summary}
                         onSaved={() => loadLayers()}
-                        onApproveAndContinue={handleApproveLayer6AndContinue}
                       />
                       {layer.status === 'approved' && (
                         <div ref={referenceAlignmentRef} className="scroll-mt-4 border-t border-border pt-4">
@@ -886,14 +1083,88 @@ export default function Stage1Layers({
             {/* Reference Coverage Check — read-only corpus-adequacy measurement
                 that appears once CLO Refinement (Layer 2) is approved. It does
                 NOT tag references or alter Reference Alignment. */}
-            {layer.layerId === 'layer2-clo-review' && layer.status === 'approved' && (
-              <div ref={coverageRef} className="scroll-mt-4">
-                <ReferenceCoveragePanel courseCode={courseCode} refreshSignal={coverageRefreshSignal} />
-              </div>
-            )}
+            {layer.layerId === 'layer2-clo-review' &&
+              (!!layer.reportMarkdown ||
+                layer.status === 'needs_review' ||
+                layer.status === 'generated' ||
+                layer.status === 'needs_revision' ||
+                layer.status === 'approved') && (
+                <div ref={coverageRef} className="scroll-mt-4">
+                  <ReferenceCoveragePanel
+                    courseCode={courseCode}
+                    refreshSignal={coverageRefreshSignal}
+                    closApproved={!!layer2Summary?.all_approved}
+                    onGateChange={setLayer2CoverageConfirmed}
+                  />
+                </div>
+              )}
             </Fragment>
           )
         })}
+
+      <Dialog open={confirmRegenLayer2} onOpenChange={setConfirmRegenLayer2}>
+        <DialogContent className="md-scope">
+          <DialogHeader>
+            <DialogTitle>Regenerate CLO refinement?</DialogTitle>
+            <DialogDescription>
+              This re-runs the AI council and replaces the current CLO review, including any unsaved
+              refinements. Approved CLOs reset to pending for re-review. Are you sure?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <button
+              type="button"
+              className={cn(mdBtnSoft, 'px-4 py-2 text-sm')}
+              onClick={() => setConfirmRegenLayer2(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={cn(mdBtn, 'px-4 py-2 text-sm')}
+              onClick={() => {
+                setConfirmRegenLayer2(false)
+                void handleRun('layer2-clo-review')
+              }}
+            >
+              <RefreshCw className="h-4 w-4" />
+              Regenerate
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmRegenLayer3} onOpenChange={setConfirmRegenLayer3}>
+        <DialogContent className="md-scope">
+          <DialogHeader>
+            <DialogTitle>Regenerate assessment redesign?</DialogTitle>
+            <DialogDescription>
+              This re-runs the AI council and replaces the current assessment redesigns, including any
+              unsaved edits. Approved assessments reset to pending for re-review. Are you sure?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <button
+              type="button"
+              className={cn(mdBtnSoft, 'px-4 py-2 text-sm')}
+              onClick={() => setConfirmRegenLayer3(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={cn(mdBtn, 'px-4 py-2 text-sm')}
+              onClick={() => {
+                setConfirmRegenLayer3(false)
+                void handleRun('layer3-assessment-redesign')
+              }}
+            >
+              <RefreshCw className="h-4 w-4" />
+              Regenerate
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 

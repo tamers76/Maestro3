@@ -3246,6 +3246,8 @@ export interface ReferenceCoverageReport {
   summary: CoverageSummary;
   clos: CoverageCloResult[];
   generated_at?: string;
+  /** When the SME signed off on this measured coverage (gates Layer 2 approval). */
+  confirmed_at?: string;
   lock_reason?: string;
 }
 
@@ -3253,11 +3255,15 @@ export interface CoverageStateSummary {
   status: CoverageStatus;
   lock_reason?: string;
   approved_clo_count: number;
+  /** Total CLOs in the course; coverage stays locked until ALL are approved. */
+  total_clo_count: number;
   reference_doc_count: number;
   chunk_count: number;
   thresholds: ReferenceCoverageThresholds;
   summary?: CoverageSummary;
   generated_at?: string;
+  /** Present only when status is 'computed' and the SME has approved coverage. */
+  confirmed_at?: string;
 }
 
 export type CoverageDirection = 'improved' | 'regressed' | 'unchanged';
@@ -3299,6 +3305,17 @@ export async function computeCoverage(
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || 'Failed to compute reference coverage');
   return { report: data.report, delta: data.delta ?? null };
+}
+
+/** SME sign-off on the measured coverage; gates Layer 2 approval. */
+export async function confirmCoverage(code: string): Promise<{ report: ReferenceCoverageReport }> {
+  const response = await fetch(
+    `${API_BASE}/courses/${encodeURIComponent(code)}/references/coverage/confirm`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to approve reference coverage');
+  return { report: data.report };
 }
 
 // ----------------------------------------------------------------------------

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Textarea'
 import { Input } from '@/components/ui/Input'
 import { Markdown } from '@/components/ui/Markdown'
 import { showToast } from '@/components/ui/Toaster'
+import { STAT_TILE, StatTile } from '@/components/ui/StatTile'
 import {
   fetchSubtopicArchitecture,
   saveSubtopicArchitecture,
@@ -18,15 +19,18 @@ import {
 } from '@/services/api'
 import { cn } from '@/lib/utils'
 import {
-  Save,
   Loader2,
   AlertCircle,
   Network,
   Check,
+  CheckCircle2,
+  Clock,
   XCircle,
   Pencil,
   RefreshCw,
   BookOpen,
+  ChevronRight,
+  ChevronDown,
 } from 'lucide-react'
 
 // ----------------------------------------------------------------------------
@@ -39,12 +43,6 @@ const LEARNING_FUNCTION_OPTIONS: { value: SubtopicLearningFunction; label: strin
   { value: 'integrative', label: 'Integrative' },
   { value: 'bridge', label: 'Bridge' },
   { value: 'assessment_preparation', label: 'Assessment preparation' },
-]
-
-const EFFORT_OPTIONS: { value: SubtopicEffort; label: string }[] = [
-  { value: 'low', label: 'Low' },
-  { value: 'moderate', label: 'Moderate' },
-  { value: 'high', label: 'High' },
 ]
 
 const RECOMMENDATION_OPTIONS: { value: SubtopicRecommendation; label: string }[] = [
@@ -76,16 +74,38 @@ const STATUS_BADGE: Record<string, string> = {
   pending: 'bg-muted text-muted-foreground',
 }
 
-const CARD_COLORS = [
-  'border-blue-400 dark:border-blue-500',
-  'border-emerald-400 dark:border-emerald-500',
-  'border-violet-400 dark:border-violet-500',
-  'border-orange-400 dark:border-orange-500',
-  'border-pink-400 dark:border-pink-500',
+/**
+ * Per-subtopic accent: reuses the StatTile gradient palette (tile + glow) with a
+ * matching text color for the id. Card surface stays neutral grey; only the icon
+ * tile and id carry color (matches Layers 3/4/5).
+ */
+const ACCENTS: { key: keyof typeof STAT_TILE; text: string }[] = [
+  { key: 'blue', text: 'text-[#024ad8] dark:text-blue-300' },
+  { key: 'emerald', text: 'text-emerald-600 dark:text-emerald-400' },
+  { key: 'rose', text: 'text-rose-600 dark:text-rose-400' },
+  { key: 'amber', text: 'text-amber-600 dark:text-amber-400' },
+  { key: 'slate', text: 'text-slate-600 dark:text-slate-300' },
 ]
 
+/**
+ * Decision-button styles shared with Layers 3/4/5 (app convention): each colored
+ * button shows a light tint at rest and turns solid on hover/selection. Edit = amber,
+ * approve = emerald, needs-revision = magenta/pink, regenerate = neutral slate.
+ */
+const EDIT_BTN =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-500 hover:text-white hover:border-transparent disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const APPROVE_BTN =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300 transition-colors hover:bg-emerald-500 hover:text-white hover:border-transparent disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const REVISION_BTN =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border border-pink-500/30 bg-pink-500/10 px-4 py-2 text-sm font-semibold text-pink-700 dark:text-pink-300 transition-colors hover:bg-pink-600 hover:text-white hover:border-transparent disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const REGEN_BTN =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border border-slate-400/30 bg-slate-400/10 px-4 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300 transition-colors hover:bg-slate-600 hover:text-white hover:border-transparent disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+
+// Edit fields use a slightly tighter corner than the card (rounded-[6px]).
+const FIELD_RADIUS = 'rounded-[4px]'
+
 function selectClass() {
-  return 'h-8 w-full rounded-md border border-input bg-background px-2 text-sm disabled:opacity-70'
+  return 'h-8 w-full rounded-[4px] border border-input bg-background px-2 text-sm disabled:opacity-70'
 }
 
 function joinList(items: string[]): string {
@@ -122,9 +142,63 @@ function parseCrossLinks(value: string): SubtopicCrossCloLink[] {
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return (
-    <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1 block">
+    <label className="text-[11px] font-bold uppercase tracking-wider field-label mb-1 block">
       {children}
     </label>
+  )
+}
+
+/** Read-only value paragraph that aligns with its FieldLabel. */
+function ReadValue({ children }: { children: React.ReactNode }) {
+  return <p className="text-sm leading-relaxed text-foreground/90 break-words">{children}</p>
+}
+
+/** Look up the display label for a select value (used in read-only view). */
+function optionLabel(options: { value: string; label: string }[], value: string): string {
+  return options.find((o) => o.value === value)?.label ?? value
+}
+
+/**
+ * Textarea that grows to fit its content so the full text is visible (no inner
+ * scrollbar, no wasted empty rows). Matches Layers 3/4/5.
+ */
+function AutoTextarea({
+  value,
+  onChange,
+  onBlur,
+  className,
+  placeholder,
+  disabled,
+}: {
+  value: string
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
+  onBlur?: () => void
+  className?: string
+  placeholder?: string
+  disabled?: boolean
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const fit = useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [])
+  useLayoutEffect(() => {
+    fit()
+  }, [value, fit])
+  return (
+    <Textarea
+      ref={ref}
+      rows={1}
+      value={value}
+      onChange={onChange}
+      onInput={fit}
+      onBlur={onBlur}
+      placeholder={placeholder}
+      disabled={disabled}
+      className={cn('min-h-0 resize-none overflow-hidden leading-relaxed', FIELD_RADIUS, className)}
+    />
   )
 }
 
@@ -140,6 +214,7 @@ function SubtopicCard({
   bloomLevel,
   onUpdate,
   onApprove,
+  onAutoSave,
 }: {
   subtopic: ArchitectureSubtopic
   colorIndex: number
@@ -148,36 +223,51 @@ function SubtopicCard({
   bloomLevel?: string
   onUpdate: (next: ArchitectureSubtopic) => void
   onApprove: (next: ArchitectureSubtopic) => void
+  onAutoSave?: () => void
 }) {
-  const editable = !readOnly && subtopic.approval_status !== 'approved'
+  const canEdit = !readOnly && subtopic.approval_status !== 'approved'
+  // Cards open in read-only text mode; fields only become editable after the SME
+  // clicks "Edit subtopic" (or if a prior edit decision was saved).
+  const [editingState, setEditingState] = useState(subtopic.sme_decision === 'edited')
+  const editing = canEdit && editingState
+  const accent = ACCENTS[colorIndex % ACCENTS.length]
+  const accentTile = STAT_TILE[accent.key]
   const update = (patch: Partial<ArchitectureSubtopic>) => onUpdate({ ...subtopic, ...patch })
 
   return (
-    <div
-      className={cn(
-        'rounded-xl border-2 bg-card overflow-hidden',
-        CARD_COLORS[colorIndex % CARD_COLORS.length]
-      )}
-    >
+    <div className="rounded-[6px] border border-border/40 bg-muted/40 dark:bg-slate-800/30 overflow-hidden">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b bg-muted/30">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="font-bold text-sm">{subtopic.subtopic_id}</span>
-          <span className="text-sm text-muted-foreground truncate">
-            — {subtopic.proposed_subtopic || 'Untitled subtopic'}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            {functionLabel(subtopic.learning_function)}
-          </span>
-          <span
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-border/60">
+        <div className="flex items-center gap-3 min-w-0">
+          <div
             className={cn(
-              'rounded-full px-2 py-0.5 text-xs font-medium capitalize',
-              effortBadgeClass(subtopic.estimated_learning_effort)
+              'md-tile inline-flex h-10 w-10 shrink-0 items-center justify-center text-white',
+              accentTile.tile,
+              accentTile.glow
             )}
           >
-            Effort: {subtopic.estimated_learning_effort}
+            <Network className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={cn('text-base font-bold', accent.text)}>{subtopic.subtopic_id}</span>
+              <span
+                className={cn(
+                  'rounded-full px-2 py-0.5 text-xs font-medium capitalize',
+                  effortBadgeClass(subtopic.estimated_learning_effort)
+                )}
+              >
+                Effort: {subtopic.estimated_learning_effort}
+              </span>
+            </div>
+            <p className="text-sm text-black/70 dark:text-slate-400 truncate">
+              {subtopic.proposed_subtopic || 'Untitled subtopic'}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+            {functionLabel(subtopic.learning_function)}
           </span>
           {bloomLevel && (
             <span className="rounded-full bg-purple-500/10 px-2 py-0.5 text-xs font-medium text-purple-600 dark:text-purple-400">
@@ -198,54 +288,51 @@ function SubtopicCard({
       <div className="p-4 space-y-3">
         <div>
           <FieldLabel>Proposed subtopic</FieldLabel>
-          <Input
-            className="h-8 text-sm"
-            disabled={!editable}
-            value={subtopic.proposed_subtopic}
-            onChange={(e) => update({ proposed_subtopic: e.target.value })}
-          />
+          {editing ? (
+            <Input
+              className={cn('h-8 px-2 py-1 text-sm', FIELD_RADIUS)}
+              value={subtopic.proposed_subtopic}
+              onBlur={onAutoSave}
+              onChange={(e) => update({ proposed_subtopic: e.target.value })}
+            />
+          ) : (
+            <ReadValue>{subtopic.proposed_subtopic || '—'}</ReadValue>
+          )}
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <FieldLabel>Purpose</FieldLabel>
-            <Textarea
+        <div>
+          <FieldLabel>Purpose</FieldLabel>
+          {editing ? (
+            <AutoTextarea
               className="text-sm"
-              rows={2}
-              disabled={!editable}
               value={subtopic.purpose}
+              onBlur={onAutoSave}
               onChange={(e) => update({ purpose: e.target.value })}
             />
-          </div>
-          <div>
-            <FieldLabel>CLO alignment</FieldLabel>
-            <Textarea
-              className="text-sm"
-              rows={2}
-              disabled={!editable}
-              value={subtopic.clo_alignment}
-              onChange={(e) => update({ clo_alignment: e.target.value })}
-            />
-          </div>
+          ) : (
+            <ReadValue>{subtopic.purpose || '—'}</ReadValue>
+          )}
         </div>
 
         <div>
           <FieldLabel>Expected learning</FieldLabel>
-          <Textarea
-            className="text-sm"
-            rows={2}
-            disabled={!editable}
-            value={subtopic.expected_learning}
-            onChange={(e) => update({ expected_learning: e.target.value })}
-          />
+          {editing ? (
+            <AutoTextarea
+              className="text-sm"
+              value={subtopic.expected_learning}
+              onBlur={onAutoSave}
+              onChange={(e) => update({ expected_learning: e.target.value })}
+            />
+          ) : (
+            <ReadValue>{subtopic.expected_learning || '—'}</ReadValue>
+          )}
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div>
-            <FieldLabel>Learning function</FieldLabel>
+        <div>
+          <FieldLabel>Learning function</FieldLabel>
+          {editing ? (
             <select
               className={selectClass()}
-              disabled={!editable}
               value={subtopic.learning_function}
               onChange={(e) =>
                 update({ learning_function: e.target.value as SubtopicLearningFunction })
@@ -257,29 +344,16 @@ function SubtopicCard({
                 </option>
               ))}
             </select>
-          </div>
-          <div>
-            <FieldLabel>Estimated effort</FieldLabel>
+          ) : (
+            <ReadValue>{functionLabel(subtopic.learning_function)}</ReadValue>
+          )}
+        </div>
+
+        <div>
+          <FieldLabel>Recommendation</FieldLabel>
+          {editing ? (
             <select
               className={selectClass()}
-              disabled={!editable}
-              value={subtopic.estimated_learning_effort}
-              onChange={(e) =>
-                update({ estimated_learning_effort: e.target.value as SubtopicEffort })
-              }
-            >
-              {EFFORT_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <FieldLabel>Recommendation</FieldLabel>
-            <select
-              className={selectClass()}
-              disabled={!editable}
               value={subtopic.recommendation}
               onChange={(e) =>
                 update({ recommendation: e.target.value as SubtopicRecommendation })
@@ -291,73 +365,107 @@ function SubtopicCard({
                 </option>
               ))}
             </select>
-          </div>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <FieldLabel>Assessment connection (comma separated)</FieldLabel>
-            <Input
-              className="h-8 text-sm"
-              disabled={!editable}
-              value={joinList(subtopic.assessment_connection)}
-              onChange={(e) => update({ assessment_connection: parseList(e.target.value) })}
-            />
-          </div>
-          <div>
-            <FieldLabel>Source evidence (comma separated)</FieldLabel>
-            <Input
-              className="h-8 text-sm"
-              disabled={!editable}
-              value={joinList(subtopic.source_evidence)}
-              onChange={(e) => update({ source_evidence: parseList(e.target.value) })}
-            />
-          </div>
+          ) : (
+            <ReadValue>{optionLabel(RECOMMENDATION_OPTIONS, subtopic.recommendation)}</ReadValue>
+          )}
         </div>
 
         <div>
-          <FieldLabel>Possible node families (comma separated)</FieldLabel>
-          <Input
-            className="h-8 text-sm"
-            disabled={!editable}
-            value={joinList(subtopic.possible_node_families)}
-            onChange={(e) => update({ possible_node_families: parseList(e.target.value) })}
-          />
+          <FieldLabel>Assessment connection</FieldLabel>
+          {editing ? (
+            <Input
+              className={cn('h-8 px-2 py-1 text-sm', FIELD_RADIUS)}
+              placeholder="Comma separated"
+              value={joinList(subtopic.assessment_connection)}
+              onBlur={onAutoSave}
+              onChange={(e) => update({ assessment_connection: parseList(e.target.value) })}
+            />
+          ) : (
+            <ReadValue>{joinList(subtopic.assessment_connection) || '—'}</ReadValue>
+          )}
+        </div>
+
+        <div>
+          <FieldLabel>Source evidence</FieldLabel>
+          {editing ? (
+            <Input
+              className={cn('h-8 px-2 py-1 text-sm', FIELD_RADIUS)}
+              placeholder="Comma separated"
+              value={joinList(subtopic.source_evidence)}
+              onBlur={onAutoSave}
+              onChange={(e) => update({ source_evidence: parseList(e.target.value) })}
+            />
+          ) : (
+            <ReadValue>{joinList(subtopic.source_evidence) || '—'}</ReadValue>
+          )}
+        </div>
+
+        <div>
+          <FieldLabel>Possible node families</FieldLabel>
+          {editing ? (
+            <Input
+              className={cn('h-8 px-2 py-1 text-sm', FIELD_RADIUS)}
+              placeholder="Comma separated"
+              value={joinList(subtopic.possible_node_families)}
+              onBlur={onAutoSave}
+              onChange={(e) => update({ possible_node_families: parseList(e.target.value) })}
+            />
+          ) : (
+            <ReadValue>{joinList(subtopic.possible_node_families) || '—'}</ReadValue>
+          )}
         </div>
 
         <div>
           <FieldLabel>Adaptive value</FieldLabel>
-          <Textarea
-            className="text-sm"
-            rows={2}
-            disabled={!editable}
-            value={subtopic.adaptive_value}
-            onChange={(e) => update({ adaptive_value: e.target.value })}
-          />
+          {editing ? (
+            <AutoTextarea
+              className="text-sm"
+              value={subtopic.adaptive_value}
+              onBlur={onAutoSave}
+              onChange={(e) => update({ adaptive_value: e.target.value })}
+            />
+          ) : (
+            <ReadValue>{subtopic.adaptive_value || '—'}</ReadValue>
+          )}
         </div>
 
         <div>
-          <FieldLabel>Cross-CLO links (one per line: CLO-id: reason)</FieldLabel>
-          <Textarea
-            className="text-sm"
-            rows={2}
-            disabled={!editable}
-            placeholder="CLO-4: builds on change-readiness analysis"
-            value={crossLinksToText(subtopic.cross_clo_links)}
-            onChange={(e) => update({ cross_clo_links: parseCrossLinks(e.target.value) })}
-          />
+          <FieldLabel>Cross-CLO links</FieldLabel>
+          {editing ? (
+            <AutoTextarea
+              className="text-sm"
+              placeholder="One per line: CLO-4: builds on change-readiness analysis"
+              value={crossLinksToText(subtopic.cross_clo_links)}
+              onBlur={onAutoSave}
+              onChange={(e) => update({ cross_clo_links: parseCrossLinks(e.target.value) })}
+            />
+          ) : subtopic.cross_clo_links.length === 0 ? (
+            <ReadValue>—</ReadValue>
+          ) : (
+            <ul className="list-disc pl-5 space-y-0.5 text-sm leading-relaxed text-foreground/90">
+              {subtopic.cross_clo_links.map((l, i) => (
+                <li key={i}>
+                  <span className="font-medium">{l.linked_clo_id}</span>
+                  {l.reason ? `: ${l.reason}` : ''}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <div>
           <FieldLabel>SME internal note</FieldLabel>
-          <Textarea
-            className="text-sm"
-            rows={2}
-            disabled={readOnly}
-            placeholder="Optional note for yourself or your team."
-            value={subtopic.sme_internal_note || ''}
-            onChange={(e) => update({ sme_internal_note: e.target.value })}
-          />
+          {editing ? (
+            <AutoTextarea
+              className="text-sm"
+              placeholder="Optional note for yourself or your team."
+              value={subtopic.sme_internal_note || ''}
+              onBlur={onAutoSave}
+              onChange={(e) => update({ sme_internal_note: e.target.value })}
+            />
+          ) : (
+            <ReadValue>{subtopic.sme_internal_note?.trim() || 'No note yet.'}</ReadValue>
+          )}
         </div>
 
         {/* SME decision for this subtopic */}
@@ -369,47 +477,65 @@ function SubtopicCard({
               next run.
             </p>
             <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="default"
+              <button
+                type="button"
+                className={APPROVE_BTN}
                 disabled={subtopic.approval_status === 'approved' || saving}
-                onClick={() =>
+                onClick={() => {
+                  setEditingState(false)
                   onApprove({ ...subtopic, sme_decision: 'approved', approval_status: 'approved' })
-                }
+                }}
               >
-                {saving ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Check className="mr-2 h-4 w-4" />
-                )}
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                 Approve subtopic
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => update({ sme_decision: 'edited', approval_status: 'pending' })}
+              </button>
+              {editing ? (
+                <button
+                  type="button"
+                  className={EDIT_BTN}
+                  onClick={() => {
+                    setEditingState(false)
+                    onAutoSave?.()
+                  }}
+                >
+                  <Check className="h-4 w-4" />
+                  Done editing
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={EDIT_BTN}
+                  onClick={() => {
+                    setEditingState(true)
+                    update({ sme_decision: 'edited', approval_status: 'pending' })
+                  }}
+                >
+                  <Pencil className="h-4 w-4" />
+                  Edit subtopic
+                </button>
+              )}
+              <button
+                type="button"
+                className={REVISION_BTN}
+                onClick={() => {
+                  setEditingState(false)
+                  update({ sme_decision: 'rejected', approval_status: 'needs_revision' })
+                }}
               >
-                <Pencil className="mr-2 h-4 w-4" />
-                Edit subtopic
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => update({ sme_decision: 'rejected', approval_status: 'needs_revision' })}
-              >
-                <XCircle className="mr-2 h-4 w-4" />
+                <XCircle className="h-4 w-4" />
                 Needs revision
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
+              </button>
+              <button
+                type="button"
+                className={REGEN_BTN}
+                onClick={() => {
+                  setEditingState(false)
                   update({ sme_decision: 'needs_regeneration', approval_status: 'needs_revision' })
-                }
+                }}
               >
-                <RefreshCw className="mr-2 h-4 w-4" />
+                <RefreshCw className="h-4 w-4" />
                 Regenerate
-              </Button>
+              </button>
             </div>
           </div>
         )}
@@ -429,6 +555,9 @@ function CloSectionView({
   saving,
   onUpdateSubtopic,
   onApproveSubtopic,
+  onAutoSave,
+  expanded,
+  onToggle,
 }: {
   section: SubtopicCloSection
   baseColorIndex: number
@@ -436,46 +565,70 @@ function CloSectionView({
   saving?: boolean
   onUpdateSubtopic: (subtopicId: string, next: ArchitectureSubtopic) => void
   onApproveSubtopic: (subtopicId: string, next: ArchitectureSubtopic) => void
+  onAutoSave?: () => void
+  expanded: boolean
+  onToggle: () => void
 }) {
   const approved = section.subtopics.filter((s) => s.approval_status === 'approved').length
   return (
-    <section className="rounded-xl border bg-card overflow-hidden">
-      <div className="px-4 py-3 border-b bg-muted/30 space-y-1.5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h4 className="font-bold text-sm">{section.clo_id}</h4>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="rounded-full bg-muted px-2 py-0.5 font-medium">
-              {section.subtopics.length} subtopics
-            </span>
-            <span className="rounded-full bg-muted px-2 py-0.5 font-medium">
-              {approved}/{section.subtopics.length} approved
-            </span>
-          </div>
+    <section className="rounded-[6px] border border-border/50 bg-card overflow-hidden">
+      <div
+        className={cn(
+          'flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-muted/30 cursor-pointer',
+          expanded && 'border-b border-border/60'
+        )}
+        onClick={onToggle}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          {expanded ? (
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          )}
+          <h4 className="font-bold text-sm shrink-0">{section.clo_id}</h4>
+          <span className={cn('min-w-0 flex-1 text-sm text-muted-foreground', !expanded && 'truncate')}>
+            {section.refined_clo || 'No refined CLO wording.'}
+          </span>
         </div>
-        <p className="text-sm leading-relaxed">{section.refined_clo || 'No refined CLO wording.'}</p>
-        {section.related_assessments.length > 0 && (
-          <p className="text-xs text-muted-foreground">
-            Related assessments: {section.related_assessments.join(', ')}
-          </p>
-        )}
-        {section.clo_learning_journey_summary && (
-          <p className="text-xs text-muted-foreground leading-relaxed border-t border-border pt-1.5">
-            {section.clo_learning_journey_summary}
-          </p>
-        )}
+        <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground shrink-0">
+          <span className="rounded-full bg-muted px-2 py-0.5 font-medium">
+            {section.subtopics.length} subtopics
+          </span>
+          <span className="rounded-full bg-muted px-2 py-0.5 font-medium">
+            {approved}/{section.subtopics.length} approved
+          </span>
+        </div>
       </div>
 
-      <div className="p-4 space-y-4">
-        {section.reference_readings.length > 0 && (
-          <details className="rounded-lg border border-dashed border-border">
-            <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-primary hover:underline flex items-center gap-1.5">
+      {expanded && (
+        <>
+          {(section.related_assessments.length > 0 || section.clo_learning_journey_summary) && (
+            <div className="px-4 py-2 border-b border-border/60 bg-muted/20 space-y-1.5">
+              {section.related_assessments.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Related assessments: {section.related_assessments.join(', ')}
+                </p>
+              )}
+              {section.clo_learning_journey_summary && (
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  {section.clo_learning_journey_summary}
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="p-4 space-y-4">
+            {section.reference_readings.length > 0 && (
+          <details className="group">
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-bold uppercase tracking-wide label-accent hover:opacity-80">
               <BookOpen className="h-3.5 w-3.5" /> Suggested readings — preview ({section.reference_readings.length})
+              <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
             </summary>
-            <p className="px-3 pt-1 text-[11px] italic text-muted-foreground">
+            <p className="pt-2 text-[11px] italic text-muted-foreground">
               A preview of likely readings for this CLO. Confirm which passages actually ground each
               subtopic in Reference Alignment (below) after approving Layer 6.
             </p>
-            <ul className="list-disc pl-8 pr-3 pb-3 pt-1 space-y-1 text-xs text-muted-foreground leading-relaxed">
+            <ul className="list-disc pl-5 pt-1 space-y-1 text-xs text-muted-foreground leading-relaxed">
               {section.reference_readings.map((r, i) => (
                 <li key={i}>{r}</li>
               ))}
@@ -497,11 +650,14 @@ function CloSectionView({
                 bloomLevel={section.bloom_level}
                 onUpdate={(next) => onUpdateSubtopic(s.subtopic_id, next)}
                 onApprove={(next) => onApproveSubtopic(s.subtopic_id, next)}
+                onAutoSave={onAutoSave}
               />
             ))}
           </div>
         )}
-      </div>
+          </div>
+        </>
+      )}
     </section>
   )
 }
@@ -519,16 +675,16 @@ function ApprovedSubtopicsOverview({ sections }: { sections: SubtopicCloSection[
     .filter((r) => r.approved.length > 0)
   if (rows.length === 0) return null
   return (
-    <section className="rounded-xl border bg-card overflow-hidden">
-      <div className="px-4 py-3 border-b bg-muted/30">
+    <section className="rounded-[6px] border border-border/50 bg-card overflow-hidden">
+      <div className="px-4 py-3 border-b border-border/60 bg-muted/30">
         <h4 className="font-bold text-sm">Approved Subtopics Overview</h4>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b bg-muted/20 text-left text-xs uppercase tracking-wide text-muted-foreground">
-              <th className="px-4 py-2 w-1/3 font-semibold">Refined CLO</th>
-              <th className="px-4 py-2 font-semibold">Approved subtopics</th>
+            <tr className="border-b border-border/60 bg-muted/20 text-left">
+              <th className="px-4 py-2 w-1/3 text-[11px] font-bold uppercase tracking-wider field-label">Refined CLO</th>
+              <th className="px-4 py-2 text-[11px] font-bold uppercase tracking-wider field-label">Approved subtopics</th>
             </tr>
           </thead>
           <tbody>
@@ -625,6 +781,16 @@ export default function Layer6SubtopicEditor({
   const [sections, setSections] = useState<SubtopicCloSection[]>([])
   const [initialSnapshot, setInitialSnapshot] = useState('')
   const [generatedAt, setGeneratedAt] = useState<string | undefined>()
+  const [expandedClos, setExpandedClos] = useState<Set<string>>(new Set())
+
+  const toggleClo = (cloId: string) => {
+    setExpandedClos((prev) => {
+      const next = new Set(prev)
+      if (next.has(cloId)) next.delete(cloId)
+      else next.add(cloId)
+      return next
+    })
+  }
 
   const load = useCallback(async () => {
     try {
@@ -665,7 +831,11 @@ export default function Layer6SubtopicEditor({
   }, [summary, onSummaryChange])
 
   const persist = useCallback(
-    async (c: SubtopicArchitectureCourseSummary, s: SubtopicCloSection[]): Promise<boolean> => {
+    async (
+      c: SubtopicArchitectureCourseSummary,
+      s: SubtopicCloSection[],
+      opts?: { silent?: boolean }
+    ): Promise<boolean> => {
       try {
         setSaving(true)
         const result = await saveSubtopicArchitecture(courseCode, {
@@ -676,11 +846,13 @@ export default function Layer6SubtopicEditor({
         setSections(result.clo_sections)
         setInitialSnapshot(JSON.stringify({ c: result.course_summary, s: result.clo_sections }))
         onSaved?.()
-        showToast({
-          title: 'Saved',
-          description: layerApproved ? 'Personal notes saved' : 'Subtopic decisions saved',
-          variant: 'success',
-        })
+        if (!opts?.silent) {
+          showToast({
+            title: 'Saved',
+            description: layerApproved ? 'Personal notes saved' : 'Subtopic decisions saved',
+            variant: 'success',
+          })
+        }
         return true
       } catch (error) {
         showToast({
@@ -700,6 +872,13 @@ export default function Layer6SubtopicEditor({
     if (!course) return Promise.resolve(false)
     return persist(course, sections)
   }
+
+  // Silent autosave fired from field onBlur — only persists when there are pending
+  // changes, so tabbing through untouched fields doesn't spam the server.
+  const handleAutoSave = useCallback(() => {
+    if (!course || saving || !hasChanges) return
+    void persist(course, sections, { silent: true })
+  }, [course, sections, saving, hasChanges, persist])
 
   const updateSubtopic = (cloId: string, subtopicId: string, next: ArchitectureSubtopic) => {
     setSections((prev) =>
@@ -771,38 +950,45 @@ export default function Layer6SubtopicEditor({
         saving={saving}
         onUpdateSubtopic={(subtopicId, next) => updateSubtopic(section.clo_id, subtopicId, next)}
         onApproveSubtopic={(subtopicId, next) => approveSubtopic(section.clo_id, subtopicId, next)}
+        onAutoSave={handleAutoSave}
+        expanded={expandedClos.has(section.clo_id)}
+        onToggle={() => toggleClo(section.clo_id)}
       />
     )
   })
 
   return (
-    <div className="flex flex-col rounded-xl border bg-card shadow-sm overflow-hidden mt-4">
-      <div className="flex items-center justify-between px-6 py-4 border-b bg-muted/30">
+    <div className="flex flex-col rounded-[6px] border border-border/50 bg-card shadow-sm overflow-hidden mt-4">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border/60 bg-muted/30">
         <div className="flex items-center gap-3">
           <h3 className="font-bold text-base">Self-Paced Subtopic Architecture</h3>
           <span className="text-sm text-muted-foreground">
             {course.total_subtopics} subtopics · {course.total_refined_clos} CLOs
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          {!layerApproved && hasChanges && (
-            <span className="text-sm text-amber-600 flex items-center gap-1">
-              <AlertCircle className="h-4 w-4" />
-              Unsaved
+        <div className="flex items-center gap-2 text-sm">
+          {saving ? (
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Saving…
             </span>
-          )}
-          {!layerApproved && (
-            <Button size="sm" onClick={handleSave} disabled={saving || !hasChanges} className="gap-2">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save
-            </Button>
+          ) : hasChanges ? (
+            <span className="flex items-center gap-1.5 text-amber-600">
+              <AlertCircle className="h-4 w-4" />
+              Unsaved changes
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-emerald-600">
+              <Check className="h-4 w-4" />
+              All changes saved
+            </span>
           )}
         </div>
       </div>
 
       <div className="p-6 space-y-6">
         {/* Short layer explanation */}
-        <div className="rounded-xl border-2 border-purple-300 dark:border-purple-600 bg-purple-50/50 dark:bg-purple-900/20 p-4 space-y-2">
+        <div className="rounded-[6px] border border-purple-300/70 dark:border-purple-600/70 bg-purple-50/50 dark:bg-purple-900/20 p-4 space-y-2">
           <div className="flex items-center gap-2">
             <Network className="h-5 w-5 text-purple-500" />
             <h4 className="font-bold text-sm">Layer 6 — Self-Paced Subtopic Architecture</h4>
@@ -815,29 +1001,44 @@ export default function Layer6SubtopicEditor({
           )}
         </div>
 
-        {/* Course-level summary */}
-        <section className="rounded-xl border bg-card p-4 space-y-3">
-          <h4 className="font-bold text-sm">Course-Level Subtopic Architecture Summary</h4>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-lg bg-muted/40 px-3 py-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Refined CLOs covered
-              </p>
-              <p className="text-lg font-bold">{course.total_refined_clos}</p>
-            </div>
-            <div className="rounded-lg bg-muted/40 px-3 py-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Total proposed subtopics
-              </p>
-              <p className="text-lg font-bold">{course.total_subtopics}</p>
-            </div>
+        {summary && (
+          <div className="md-scope grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
+            <StatTile
+              icon={BookOpen}
+              label="Refined CLOs covered"
+              value={course.total_refined_clos}
+              color="slate"
+            />
+            <StatTile
+              icon={Network}
+              label="Total subtopics"
+              value={course.total_subtopics}
+              color="blue"
+            />
+            <StatTile
+              icon={CheckCircle2}
+              label="Approved"
+              value={summary.approved_count}
+              color="emerald"
+            />
+            <StatTile icon={Clock} label="Pending" value={summary.pending_count} color="amber" />
+            <StatTile
+              icon={AlertCircle}
+              label="Needs Revision"
+              value={summary.needs_revision_count}
+              color="rose"
+              tone={summary.needs_revision_count > 0 ? 'warning' : 'default'}
+            />
           </div>
+        )}
+
+        {/* Course-level summary */}
+        <section className="rounded-[6px] border border-border/50 bg-card p-4 space-y-3">
+          <h4 className="font-bold text-sm">Course-Level Subtopic Architecture Summary</h4>
           {course.architecture_summary && (
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                How this supports self-paced learning
-              </p>
-              <p className="text-sm mt-0.5 leading-relaxed">{course.architecture_summary}</p>
+              <FieldLabel>How this supports self-paced learning</FieldLabel>
+              <p className="text-sm mt-0.5 leading-relaxed text-foreground/90">{course.architecture_summary}</p>
             </div>
           )}
           <div className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400 flex items-start gap-1.5">
@@ -848,11 +1049,12 @@ export default function Layer6SubtopicEditor({
 
         {/* CLO sections — collapsed behind a toggle once everything is approved */}
         {summary?.all_approved ? (
-          <details className="rounded-lg border border-dashed border-border">
-            <summary className="cursor-pointer px-4 py-2.5 text-sm font-medium text-primary hover:underline">
+          <details className="group">
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-bold uppercase tracking-wide label-accent hover:opacity-80">
               View / edit all {summary.total_subtopics} subtopics
+              <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
             </summary>
-            <div className="px-4 pb-4 border-t border-border pt-3 space-y-5">{cloSectionViews}</div>
+            <div className="pt-3 space-y-5">{cloSectionViews}</div>
           </details>
         ) : (
           <div className="space-y-5">{cloSectionViews}</div>
@@ -863,11 +1065,12 @@ export default function Layer6SubtopicEditor({
 
         {/* Collapsible full report */}
         {course.full_report?.trim() && (
-          <details className="rounded-lg border border-dashed border-border">
-            <summary className="cursor-pointer px-4 py-2.5 text-sm font-medium text-primary hover:underline">
+          <details className="group">
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-bold uppercase tracking-wide label-accent hover:opacity-80">
               View Full Subtopic Architecture Report
+              <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
             </summary>
-            <div className="px-4 pb-4 border-t border-border pt-3">
+            <div className="pt-3">
               <Markdown>{course.full_report}</Markdown>
             </div>
           </details>

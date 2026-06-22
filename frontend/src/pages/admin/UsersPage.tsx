@@ -19,7 +19,7 @@ const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
 ]
 
 const inputClass =
-  'flex h-11 w-full rounded-md border border-input bg-white/55 dark:bg-white/5 backdrop-blur-md px-4 py-3 text-body text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+  'flex h-11 w-full rounded-md border-2 border-input bg-white/70 dark:bg-white/5 px-4 py-3 text-body text-foreground shadow-[inset_2px_2px_5px_rgb(2_74_216_/_0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
 
 export default function UsersPage() {
   const [users, setUsers] = useState<ManagedUser[]>([])

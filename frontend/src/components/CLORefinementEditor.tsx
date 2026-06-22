@@ -14,7 +14,6 @@ import {
   type SmeRefinementDecision,
 } from '@/services/api'
 import { cn } from '@/lib/utils'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
   Save,
   Loader2,
@@ -22,20 +21,49 @@ import {
   Target,
   Sparkles,
   Check,
+  CheckCircle2,
+  Clock,
   ChevronDown,
   ChevronRight,
   XCircle,
-  Lock,
+  Ban,
   Pencil,
+  RefreshCw,
 } from 'lucide-react'
+import { StatTile, STAT_TILE } from '@/components/ui/StatTile'
 
-const CLO_COLORS = [
-  { bg: 'bg-blue-100 dark:bg-blue-900/40', border: 'border-blue-400 dark:border-blue-500', text: 'text-blue-700 dark:text-blue-300', badge: 'bg-blue-500 text-white' },
-  { bg: 'bg-emerald-100 dark:bg-emerald-900/40', border: 'border-emerald-400 dark:border-emerald-500', text: 'text-emerald-700 dark:text-emerald-300', badge: 'bg-emerald-500 text-white' },
-  { bg: 'bg-violet-100 dark:bg-violet-900/40', border: 'border-violet-400 dark:border-violet-500', text: 'text-violet-700 dark:text-violet-300', badge: 'bg-violet-500 text-white' },
-  { bg: 'bg-orange-100 dark:bg-orange-900/40', border: 'border-orange-400 dark:border-orange-500', text: 'text-orange-700 dark:text-orange-300', badge: 'bg-orange-500 text-white' },
-  { bg: 'bg-pink-100 dark:bg-pink-900/40', border: 'border-pink-400 dark:border-pink-500', text: 'text-pink-700 dark:text-pink-300', badge: 'bg-pink-500 text-white' },
+/**
+ * Per-CLO accent: reuses the dashboard / StatTile gradient palette (tile + glow)
+ * and pairs it with a matching text color for the CLO id. The card surface stays
+ * neutral grey; only the icon tile and id carry the color.
+ */
+const CLO_ACCENTS: { key: keyof typeof STAT_TILE; text: string }[] = [
+  { key: 'blue', text: 'text-[#024ad8] dark:text-blue-300' },
+  { key: 'emerald', text: 'text-emerald-600 dark:text-emerald-400' },
+  { key: 'rose', text: 'text-rose-600 dark:text-rose-400' },
+  { key: 'amber', text: 'text-amber-600 dark:text-amber-400' },
+  { key: 'slate', text: 'text-slate-600 dark:text-slate-300' },
 ]
+
+/**
+ * Semantic Bloom-level pill colors — consistent for the same level across every
+ * card (unlike the old per-card rotation).
+ */
+const BLOOM_BADGE: Record<string, string> = {
+  remember: 'bg-slate-500/10 text-slate-600 dark:text-slate-300',
+  understand: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
+  apply: 'bg-teal-500/10 text-teal-600 dark:text-teal-400',
+  analyze: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
+  evaluate: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+  create: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+}
+
+function bloomBadgeClass(level?: string): string {
+  return (
+    BLOOM_BADGE[(level || '').toLowerCase()] ||
+    'bg-muted text-muted-foreground'
+  )
+}
 
 const DECISION_LABELS: Record<SmeRefinementDecision, string> = {
   pending: 'Pending',
@@ -48,31 +76,57 @@ const DECISION_OPTIONS: {
   value: Exclude<SmeRefinementDecision, 'pending'>
   label: string
   icon: JSX.Element
-  selectedClass: string
-  iconClass: string
 }[] = [
-  {
-    value: 'keep_official',
-    label: DECISION_LABELS.keep_official,
-    icon: <Lock className="h-4 w-4" />,
-    selectedClass: 'border-slate-500 bg-slate-500/10',
-    iconClass: 'text-slate-600 dark:text-slate-300',
-  },
   {
     value: 'accept_ai_refinement',
     label: DECISION_LABELS.accept_ai_refinement,
     icon: <Sparkles className="h-4 w-4" />,
-    selectedClass: 'border-purple-500 bg-purple-500/10',
-    iconClass: 'text-purple-600 dark:text-purple-400',
   },
   {
     value: 'custom_wording',
     label: DECISION_LABELS.custom_wording,
     icon: <Pencil className="h-4 w-4" />,
-    selectedClass: 'border-blue-500 bg-blue-500/10',
-    iconClass: 'text-blue-600 dark:text-blue-400',
+  },
+  {
+    value: 'keep_official',
+    label: DECISION_LABELS.keep_official,
+    icon: <Ban className="h-4 w-4" />,
   },
 ]
+
+/**
+ * Per-CLO approval actions reuse the dashboard Material button shape (`md-btn`)
+ * but swap in the page's semantic gradients: emerald for approve, rose for
+ * needs-revision (matching the Approved / Needs Revision stat tiles).
+ */
+const ACTION_BTN_BASE =
+  'md-btn inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-white disabled:pointer-events-none disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const APPROVE_BTN = cn(ACTION_BTN_BASE, STAT_TILE.emerald.tile, 'focus-visible:ring-emerald-500/40')
+const REVISION_BTN = cn(ACTION_BTN_BASE, STAT_TILE.rose.tile, 'focus-visible:ring-rose-500/40')
+
+/**
+ * SME decision buttons share a single blue family: a light blue tint at rest
+ * that darkens to solid blue on hover, and the full blue gradient once selected
+ * so the chosen option stays clearly distinct.
+ */
+const SME_BTN_BASE =
+  'inline-flex w-full items-center justify-center gap-2 rounded-[12px] px-4 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const SME_BTN_IDLE = cn(
+  SME_BTN_BASE,
+  'border border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300 hover:bg-blue-600 hover:text-white hover:border-transparent'
+)
+const SME_BTN_SELECTED = cn(
+  SME_BTN_BASE,
+  'md-btn border border-transparent bg-gradient-to-br from-[#296ef9] to-[#024ad8] text-white'
+)
+
+/**
+ * Regenerate button: amber so it stands out as a distinct, destructive-ish action
+ * (re-runs the council and resets approvals) — a light amber tint that darkens to
+ * solid amber on hover.
+ */
+const REGEN_BTN =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border border-amber-500/40 bg-amber-500/15 font-semibold text-amber-700 transition-colors hover:border-transparent hover:bg-amber-600 hover:text-white dark:text-amber-300 disabled:pointer-events-none disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
 
 const APPROVAL_LABELS: Record<CloApprovalStatus, string> = {
   pending: 'Pending approval',
@@ -94,9 +148,9 @@ function approvalBadgeClass(status: CloApprovalStatus): string {
 function FeedbackField({ label, value }: { label: string; value?: string }) {
   if (!value?.trim()) return null
   return (
-    <div>
-      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</p>
-      <p className="text-sm mt-0.5 leading-relaxed">{value}</p>
+    <div className="space-y-1">
+      <p className="text-[11px] font-bold uppercase tracking-wider text-foreground">{label}</p>
+      <p className="text-sm leading-relaxed text-foreground/90">{value}</p>
     </div>
   )
 }
@@ -104,11 +158,12 @@ function FeedbackField({ label, value }: { label: string; value?: string }) {
 function CouncilFeedbackBlock({ summary }: { summary: CouncilFeedbackSummary }) {
   const hasContent = Object.values(summary).some((v) => v?.trim())
   return (
-    <details className="rounded-lg border border-dashed border-border">
-      <summary className="cursor-pointer px-4 py-2.5 text-sm font-medium text-primary hover:underline">
+    <details className="group">
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-[11px] font-bold uppercase tracking-wider label-accent hover:opacity-80 [&::-webkit-details-marker]:hidden">
+        <Sparkles className="h-3.5 w-3.5" />
         Council Feedback Summary
       </summary>
-      <div className="px-4 pb-4 space-y-3 border-t border-border pt-3">
+      <div className="space-y-3.5 pt-3">
         {hasContent ? (
           <>
             <FeedbackField label="Strengths" value={summary.strengths} />
@@ -138,11 +193,12 @@ function FullAnalysisDisclosure({ analysis }: { analysis: FullCouncilAnalysis })
   if (!hasAny) return null
 
   return (
-    <details className="rounded-lg border border-dashed border-border">
-      <summary className="cursor-pointer px-4 py-2.5 text-sm font-medium text-primary hover:underline">
+    <details className="group">
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-[11px] font-bold uppercase tracking-wider label-accent hover:opacity-80 [&::-webkit-details-marker]:hidden">
+        <Sparkles className="h-3.5 w-3.5" />
         View full council analysis
       </summary>
-      <div className="px-4 pb-4 space-y-3 border-t border-border pt-3">
+      <div className="space-y-3.5 pt-3">
         {fields.map(({ label, key }) => (
           <FeedbackField key={key} label={label} value={analysis[key]} />
         ))}
@@ -176,7 +232,8 @@ function CLORefinementZone({
   expanded: boolean
   onToggle: () => void
 }) {
-  const colors = CLO_COLORS[colorIndex % CLO_COLORS.length]
+  const accent = CLO_ACCENTS[colorIndex % CLO_ACCENTS.length]
+  const accentTile = STAT_TILE[accent.key]
 
   const applyDecision = (decision: SmeRefinementDecision) => {
     let finalText = item.final_clo_for_adaptive_design
@@ -193,19 +250,31 @@ function CLORefinementZone({
   const finalEditable = !readOnlyRefinement && item.sme_decision === 'custom_wording'
 
   return (
-    <div className={cn('rounded-xl border-2 overflow-hidden', colors.border)}>
+    <div className="space-y-4">
+      <div className="rounded-[8px] border border-border/60 bg-muted/40 dark:bg-slate-800/30 overflow-hidden">
       <div
-        className={cn('px-5 py-4 border-b cursor-pointer', colors.border, colors.bg)}
+        className={cn('px-5 py-4 cursor-pointer', expanded && 'border-b border-border/60')}
         onClick={onToggle}
       >
         <div className="flex items-start gap-3">
-          <div className={cn('p-2.5 rounded-lg', colors.badge)}>
+          <div
+            className={cn(
+              'md-tile inline-flex h-10 w-10 items-center justify-center text-white',
+              accentTile.tile,
+              accentTile.glow
+            )}
+          >
             <Target className="h-5 w-5" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <span className={cn('text-base font-bold', colors.text)}>{clo.clo_id}</span>
-              <span className={cn('text-xs px-2 py-0.5 rounded font-semibold', colors.badge)}>
+              <span className={cn('text-base font-bold', accent.text)}>{clo.clo_id}</span>
+              <span
+                className={cn(
+                  'text-xs px-2 py-0.5 rounded font-semibold',
+                  bloomBadgeClass(clo.bloom_level)
+                )}
+              >
                 {clo.bloom_level}
               </span>
               <span
@@ -228,11 +297,13 @@ function CLORefinementZone({
       </div>
 
       {expanded && (
-        <div className="p-4 space-y-5">
-          {/* 1. Official CLO */}
-          <section>
-            <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-2">Official CLO</h4>
-            <p className="text-sm p-3 rounded-md bg-muted/50 border leading-relaxed">{item.official_clo}</p>
+        <div className="p-5 space-y-5">
+          {/* 1. Official CLO — flat */}
+          <section className="space-y-2">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-foreground">
+              Official CLO
+            </p>
+            <p className="text-sm leading-relaxed text-foreground/90">{item.official_clo}</p>
           </section>
 
           {/* 2. Council Feedback Summary + full analysis */}
@@ -241,16 +312,16 @@ function CLORefinementZone({
             <FullAnalysisDisclosure analysis={item.full_council_analysis} />
           </section>
 
-          {/* 3. AI Suggested Refinement */}
-          <section>
-            <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-2">
+          {/* 3. AI Suggested Refinement — inline, flat */}
+          <section className="space-y-3 border-t border-border/60 pt-4">
+            <h4 className="text-xs font-bold uppercase tracking-wide label-accent">
               AI Suggested Refinement
             </h4>
-            <p className="text-sm p-3 rounded-md border border-purple-200 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-900/20 leading-relaxed">
+            <p className="text-sm leading-relaxed text-foreground/90">
               {item.ai_suggested_refined_clo}
             </p>
             {item.refinement_rationale.length > 0 && (
-              <div className="mt-3">
+              <div className="pt-1">
                 <p className="text-xs font-semibold text-muted-foreground mb-1.5">
                   Why Maestro suggests this refinement
                 </p>
@@ -262,45 +333,82 @@ function CLORefinementZone({
               </div>
             )}
           </section>
+        </div>
+      )}
+      </div>
 
-          {/* 4. Final CLO for Adaptive Design */}
-          <section>
-            <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-1">
-              Final CLO for Adaptive Design
-            </h4>
-            <p className="text-xs text-muted-foreground mb-2 leading-relaxed">
-              This wording will be used by later Maestro layers, including assessment redesign, subtopic
-              architecture, mastery nodes, evidence criteria, and adaptive logic.
-            </p>
-            {finalEditable ? (
-              <Textarea
-                className="text-sm"
-                rows={3}
-                value={item.final_clo_for_adaptive_design}
-                onChange={(e) => {
-                  const text = e.target.value
-                  onUpdate({
-                    ...item,
-                    final_clo_for_adaptive_design: text,
-                    sme_decision: 'custom_wording',
-                    approval_status:
-                      item.approval_status === 'approved' ? 'pending' : item.approval_status,
-                  })
-                }}
-              />
-            ) : (
-              <p className="text-sm p-3 rounded-md border border-emerald-500/30 bg-emerald-500/5 leading-relaxed">
-                {item.final_clo_for_adaptive_design}
-              </p>
-            )}
-            {!readOnlyRefinement && item.sme_decision !== 'custom_wording' && (
-              <p className="text-xs text-muted-foreground mt-1">
-                Select &quot;Edit wording&quot; to customize this text.
-              </p>
-            )}
-          </section>
+      {expanded && (
+        <>
+          {/* SME Decision — segmented Material buttons on one line (unchanged) */}
+          {!readOnlyRefinement && (
+            <section>
+              <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-2">SME Decision</h4>
+              <div
+                className="grid grid-cols-1 gap-2 sm:grid-cols-3"
+                role="group"
+                aria-label={`Decision for ${clo.clo_id}`}
+              >
+                {DECISION_OPTIONS.map((opt) => {
+                  const selected = item.sme_decision === opt.value
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => applyDecision(opt.value)}
+                      className={selected ? SME_BTN_SELECTED : SME_BTN_IDLE}
+                    >
+                      {opt.icon}
+                      {opt.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+          )}
 
-          {/* 5. SME Internal Note */}
+          {/* Final CLO for Adaptive Design — its own card, always expanded */}
+          <div className="rounded-[8px] border border-border/60 bg-card overflow-hidden">
+            <div className="border-b border-border/60 px-5 py-3">
+              <h4 className="text-xs font-bold uppercase tracking-wide label-accent">
+                Final CLO for Adaptive Design
+              </h4>
+              <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                This wording will be used by later Maestro layers, including assessment redesign, subtopic
+                architecture, mastery nodes, evidence criteria, and adaptive logic.
+              </p>
+            </div>
+            <div className="p-5 space-y-3">
+              {finalEditable ? (
+                <Textarea
+                  className="text-sm"
+                  rows={3}
+                  value={item.final_clo_for_adaptive_design}
+                  onChange={(e) => {
+                    const text = e.target.value
+                    onUpdate({
+                      ...item,
+                      final_clo_for_adaptive_design: text,
+                      sme_decision: 'custom_wording',
+                      approval_status:
+                        item.approval_status === 'approved' ? 'pending' : item.approval_status,
+                    })
+                  }}
+                />
+              ) : (
+                <p className="text-sm leading-relaxed text-foreground/90">
+                  {item.final_clo_for_adaptive_design}
+                </p>
+              )}
+              {!readOnlyRefinement && item.sme_decision !== 'custom_wording' && (
+                <p className="text-xs text-muted-foreground">
+                  Select &quot;Edit wording&quot; to customize this text.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* SME Internal Note */}
           <section>
             <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-1">
               SME Internal Note
@@ -327,49 +435,22 @@ function CLORefinementZone({
             )}
           </section>
 
-          {/* 6. SME Decision — radio buttons, directly above approval */}
-          {!readOnlyRefinement && (
-            <section className="pt-2 border-t border-border">
-              <h4 className="text-xs font-bold uppercase tracking-wide text-foreground mb-2">SME Decision</h4>
-              <RadioGroup
-                value={item.sme_decision === 'pending' ? '' : item.sme_decision}
-                onValueChange={(d) => applyDecision(d as SmeRefinementDecision)}
-                aria-label={`Decision for ${clo.clo_id}`}
-                className="gap-2"
-              >
-                {DECISION_OPTIONS.map((opt) => {
-                  const selected = item.sme_decision === opt.value
-                  const itemId = `${clo.clo_id}-${opt.value}`
-                  return (
-                    <label
-                      key={opt.value}
-                      htmlFor={itemId}
-                      className={cn(
-                        'flex items-center gap-3 rounded-lg border-2 px-4 py-3 cursor-pointer transition-colors',
-                        selected
-                          ? opt.selectedClass
-                          : 'border-border bg-card hover:bg-muted/50'
-                      )}
-                    >
-                      <RadioGroupItem id={itemId} value={opt.value} className="size-5" />
-                      <span className={cn('flex items-center justify-center', selected ? opt.iconClass : 'text-muted-foreground')}>
-                        {opt.icon}
-                      </span>
-                      <span className="text-sm font-semibold">{opt.label}</span>
-                    </label>
-                  )
-                })}
-              </RadioGroup>
-            </section>
-          )}
-
           {/* Per-CLO approval */}
           {!readOnlyRefinement && (
-            <div className="flex flex-wrap gap-3 pt-2">
-              <Button
-                size="sm"
-                disabled={item.approval_status === 'approved' || saving}
-                className="bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm disabled:opacity-60"
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                disabled={
+                  item.approval_status === 'approved' ||
+                  saving ||
+                  item.sme_decision === 'pending'
+                }
+                className={APPROVE_BTN}
+                title={
+                  item.sme_decision === 'pending'
+                    ? 'Select an SME decision first'
+                    : undefined
+                }
                 onClick={() => {
                   if (!item.final_clo_for_adaptive_design?.trim()) {
                     showToast({
@@ -379,35 +460,27 @@ function CLORefinementZone({
                     })
                     return
                   }
-                  if (item.sme_decision === 'pending') {
-                    showToast({
-                      title: 'Decision required',
-                      description: 'Select Keep official, Accept AI, or Edit wording first.',
-                      variant: 'destructive',
-                    })
-                    return
-                  }
                   onApproveClo?.({ ...item, approval_status: 'approved' })
                 }}
               >
                 {saving ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Check className="mr-2 h-4 w-4" />
+                  <Check className="h-4 w-4" />
                 )}
                 Approve CLO
-              </Button>
-              <Button
-                size="sm"
-                className="bg-red-600 text-white hover:bg-red-700 shadow-sm"
+              </button>
+              <button
+                type="button"
+                className={REVISION_BTN}
                 onClick={() => onUpdate({ ...item, approval_status: 'needs_revision' })}
               >
-                <XCircle className="mr-2 h-4 w-4" />
+                <XCircle className="h-4 w-4" />
                 Needs revision
-              </Button>
+              </button>
             </div>
           )}
-        </div>
+        </>
       )}
     </div>
   )
@@ -431,20 +504,34 @@ interface CLORefinementEditorProps {
   courseCode: string
   layerHasOutput: boolean
   layerApproved?: boolean
+  /**
+   * Changes whenever Layer 2 is (re)generated (the layer's generatedAt). Used to
+   * force a re-fetch so a regenerate clears the previously approved draft instead
+   * of leaving the stale approved counter/badges on screen.
+   */
+  reloadSignal?: string
+  /** Opens the regenerate confirmation; regenerating re-runs the council for these CLOs. */
+  onRegenerate?: () => void
+  /** True while the Layer 2 council is (re)running, to show a spinner and disable the button. */
+  isRegenerating?: boolean
+  /** Whether regenerate is currently allowed (e.g. not already running). */
+  canRegenerate?: boolean
   onSaved?: () => void
   onHasChanges?: (hasChanges: boolean) => void
   onSummaryChange?: (summary: CloRefinementReviewSummary) => void
-  onApproveAndContinue?: () => void | Promise<void>
 }
 
 export default function CLORefinementEditor({
   courseCode,
   layerHasOutput,
   layerApproved = false,
+  reloadSignal,
+  onRegenerate,
+  isRegenerating = false,
+  canRegenerate = false,
   onSaved,
   onHasChanges,
   onSummaryChange,
-  onApproveAndContinue,
 }: CLORefinementEditorProps) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -476,7 +563,7 @@ export default function CLORefinementEditor({
 
   useEffect(() => {
     if (layerHasOutput) load()
-  }, [layerHasOutput, load])
+  }, [layerHasOutput, load, reloadSignal])
 
   const hasChanges = useMemo(
     () => JSON.stringify(draft) !== JSON.stringify(initialDraft),
@@ -557,22 +644,6 @@ export default function CLORefinementEditor({
     await handleSave(next)
   }
 
-  const [continuing, setContinuing] = useState(false)
-
-  const handleReadyForNextLayer = async () => {
-    if (!onApproveAndContinue) return
-    setContinuing(true)
-    try {
-      if (hasChanges) {
-        const saved = await handleSave()
-        if (!saved) return
-      }
-      await onApproveAndContinue()
-    } finally {
-      setContinuing(false)
-    }
-  }
-
   if (!layerHasOutput) {
     return (
       <p className="text-sm text-muted-foreground py-2">
@@ -613,17 +684,39 @@ export default function CLORefinementEditor({
       </div>
 
       <div className="flex flex-col gap-6 p-6">
-        <div className="rounded-xl border-2 border-purple-300 dark:border-purple-600 bg-purple-50/50 dark:bg-purple-900/20 p-4 space-y-2">
+        <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-purple-500" />
               <h4 className="font-bold text-sm">Layer 2 Council</h4>
             </div>
-            {generatedAt && (
-              <p className="text-xs text-muted-foreground">
-                Generated {new Date(generatedAt).toLocaleString()}
-              </p>
-            )}
+            <div className="flex items-center gap-3">
+              {generatedAt && (
+                <p className="text-xs text-muted-foreground">
+                  Generated {new Date(generatedAt).toLocaleString()}
+                </p>
+              )}
+              {onRegenerate && (
+                <button
+                  type="button"
+                  className={cn(REGEN_BTN, 'h-8 px-3 text-xs')}
+                  onClick={onRegenerate}
+                  disabled={isRegenerating || !canRegenerate}
+                >
+                  {isRegenerating ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Regenerating…
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Regenerate
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
           <p className="text-xs text-muted-foreground leading-relaxed">
             {layerApproved
@@ -631,6 +724,31 @@ export default function CLORefinementEditor({
               : 'For each CLO: review council feedback, choose a decision, set the final CLO, then Approve CLO. Save before approving the layer.'}
           </p>
         </div>
+
+        {draftSummary && (
+          <div className="md-scope grid grid-cols-2 gap-4 md:grid-cols-4">
+            <StatTile icon={Target} label="Total CLOs" value={clos.length} color="slate" />
+            <StatTile
+              icon={CheckCircle2}
+              label="Approved"
+              value={draftSummary.approved_count}
+              color="emerald"
+            />
+            <StatTile
+              icon={Clock}
+              label="Pending"
+              value={draftSummary.pending_count}
+              color="blue"
+            />
+            <StatTile
+              icon={AlertCircle}
+              label="Needs Revision"
+              value={draftSummary.needs_revision_count}
+              color="rose"
+              tone={draftSummary.needs_revision_count > 0 ? 'warning' : 'default'}
+            />
+          </div>
+        )}
 
         <div className="grid gap-5">
           {clos.map((clo, index) => {
@@ -668,26 +786,10 @@ export default function CLORefinementEditor({
             {draftSummary.needs_revision_count} need revision
           </span>
           {draftSummary.all_approved ? (
-            layerApproved || !onApproveAndContinue ? (
-              <span className="flex items-center gap-2 px-3 py-1.5 rounded-md font-medium bg-green-500/10 text-green-600">
-                <Check className="h-4 w-4" />
-                {layerApproved ? 'Layer 2 approved' : 'All CLOs approved'}
-              </span>
-            ) : (
-              <Button
-                size="sm"
-                onClick={handleReadyForNextLayer}
-                disabled={saving || continuing}
-                className="gap-2"
-              >
-                {saving || continuing ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Check className="h-4 w-4" />
-                )}
-                Approve Layer 2
-              </Button>
-            )
+            <span className="flex items-center gap-2 px-3 py-1.5 rounded-md font-medium bg-green-500/10 text-green-600">
+              <Check className="h-4 w-4" />
+              {layerApproved ? 'Layer 2 approved' : 'All CLOs approved'}
+            </span>
           ) : (
             <span className="flex items-center gap-2 px-3 py-1.5 rounded-md font-medium bg-amber-500/10 text-amber-600">
               <AlertCircle className="h-4 w-4" />

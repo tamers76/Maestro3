@@ -40,12 +40,16 @@ export interface ButtonProps
   asChild?: boolean
 }
 
+/** Solid variants that get the chunky clay treatment. */
+const CLAY_SOLID_VARIANTS = ['default', 'destructive', 'secondary', 'outline', 'glass']
+
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : 'button'
+    const isClay = CLAY_SOLID_VARIANTS.includes(variant ?? 'default')
     return (
       <Comp
-        className={cn(buttonVariants({ variant, size, className }))}
+        className={cn(buttonVariants({ variant, size }), isClay && 'clay-btn', className)}
         ref={ref}
         {...props}
       />

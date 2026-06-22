@@ -18,7 +18,7 @@ import { Loader2, RefreshCw, Filter, X } from 'lucide-react'
 const PAGE_SIZE = 50
 
 const inputClass =
-  'flex h-10 w-full rounded-md border border-input bg-white/55 dark:bg-white/5 backdrop-blur-md px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+  'flex h-10 w-full rounded-md border-2 border-input bg-white/70 dark:bg-white/5 px-3 py-2 text-sm text-foreground shadow-[inset_2px_2px_5px_rgb(2_74_216_/_0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
 
 const CATEGORY_BADGES: Record<string, string> = {
   user: 'bg-blue-500/15 text-blue-500',
