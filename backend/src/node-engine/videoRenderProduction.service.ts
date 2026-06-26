@@ -22,15 +22,18 @@ function extractScriptAndTitle(produced: ProducedObjectRecord): {
   renderStyle: 'studio_direct' | 'video_agent_produced';
   agentPrompt: string;
 } {
-  const ms = produced.envelope.modality_specific ?? {};
+  const ms = (produced.envelope.modality_specific ?? {}) as Record<string, unknown>;
+  const videoBrief = ms.video_brief as Record<string, unknown> | undefined;
+  const narration = videoBrief?.narration as Record<string, unknown> | undefined;
+  const heygenPromptPayload = videoBrief?.heygen_prompt_payload as Record<string, unknown> | undefined;
   const script = String(
-    ms.transcript ?? ms.video_brief?.narration?.full_script ?? ''
+    ms.transcript ?? narration?.full_script ?? ''
   ).trim();
   if (!script) {
     throw new VideoRenderError('Video brief has no transcript/script.');
   }
   const title = String(
-    ms.video_brief?.narration?.video_title ??
+    narration?.video_title ??
       produced.envelope.accessibility?.alt_text ??
       produced.object_id
   );
@@ -38,11 +41,11 @@ function extractScriptAndTitle(produced: ProducedObjectRecord): {
     ms.video_render_style === 'video_agent_produced' ||
     ms.video_render_style === 'studio_direct'
       ? ms.video_render_style
-      : ms.video_brief?.video_render_style === 'video_agent_produced'
+      : videoBrief?.video_render_style === 'video_agent_produced'
         ? 'video_agent_produced'
         : 'studio_direct';
   const agentPrompt = String(
-    ms.heygen_prompt ?? ms.video_brief?.heygen_prompt_payload?.prompt ?? ''
+    ms.heygen_prompt ?? heygenPromptPayload?.prompt ?? ''
   );
   return { script, title, renderStyle, agentPrompt };
 }

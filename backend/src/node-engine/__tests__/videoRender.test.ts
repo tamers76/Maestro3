@@ -144,8 +144,9 @@ test('executeVideoRender resolves avatar from rotation pool per objectId', async
       },
     });
     assert.ok(capturedBody);
-    assert.ok(['look_a', 'look_b'].includes(String(capturedBody!.avatar_id)));
-    assert.equal(capturedBody!.voice_id, capturedBody!.avatar_id === 'look_a' ? 'voice_a' : 'voice_main');
+    const body = capturedBody as Record<string, unknown>;
+    assert.ok(['look_a', 'look_b'].includes(String(body.avatar_id)));
+    assert.equal(body.voice_id, body.avatar_id === 'look_a' ? 'voice_a' : 'voice_main');
   } finally {
     globalThis.fetch = originalFetch;
     if (prev !== undefined) process.env.HEYGEN_API_KEY = prev;

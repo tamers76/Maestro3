@@ -13,7 +13,7 @@ export function resolveHeyGenApiKey(apiKeyRef?: string): string | null {
   return key || null;
 }
 
-export function heygenHeaders(apiKey: string): HeadersInit {
+export function heygenHeaders(apiKey: string): Record<string, string> {
   return {
     'X-Api-Key': apiKey,
     'Content-Type': 'application/json',

@@ -128,7 +128,6 @@ export interface Layer2BodyProps {
   onGenerateClo: (cloId: string) => Promise<void>
   onApproveClo: (cloId: string) => Promise<void>
   onBlueprintUpdated: (nodeId: string, blueprint: NodeEngineBlueprint) => void
-  layer2Approved: boolean
   approverLabel: string
   courseCode: string
   filters: NodeEngineFilterState
@@ -147,7 +146,6 @@ export function Layer2Body({
   onGenerateClo,
   onApproveClo,
   onBlueprintUpdated,
-  layer2Approved,
   approverLabel,
   courseCode,
   filters,

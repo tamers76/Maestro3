@@ -68,7 +68,6 @@ export async function submitHeyGenVideoAgent(
   const response = await fetch(`${HEYGEN_API_BASE}/v3/video-agents`, {
     method: 'POST',
     headers: heygenHeaders(apiKey),
-    cache: 'no-store',
     body: JSON.stringify(buildVideoAgentSubmitBody(prompt, settings)),
   });
   const payload = await response.json().catch(() => ({}));
@@ -96,7 +95,7 @@ export async function getHeyGenVideoAgentSession(
 }> {
   const response = await fetch(
     `${HEYGEN_API_BASE}/v3/video-agents/${encodeURIComponent(sessionId)}`,
-    { method: 'GET', headers: heygenHeaders(apiKey), cache: 'no-store' }
+    { method: 'GET', headers: heygenHeaders(apiKey) }
   );
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {

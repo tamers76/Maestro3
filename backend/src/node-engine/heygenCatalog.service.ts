@@ -12,7 +12,7 @@ export class HeyGenCatalogError extends Error {
   }
 }
 
-function heygenHeaders(apiKey: string): HeadersInit {
+function heygenHeaders(apiKey: string): Record<string, string> {
   return {
     'X-Api-Key': apiKey,
     Accept: 'application/json',

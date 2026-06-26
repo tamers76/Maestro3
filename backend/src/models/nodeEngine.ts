@@ -132,7 +132,7 @@ export type DiagnosticBand = (typeof DIAGNOSTIC_BANDS)[number];
 export const CAPTURE_SIGNALS = ['response', 'reasoning', 'confidence', 'process'] as const;
 export type CaptureSignal = (typeof CAPTURE_SIGNALS)[number];
 
-export const GROUNDING_STRENGTHS = ['strong', 'weak'] as const;
+export const GROUNDING_STRENGTHS = ['strong', 'moderate', 'weak'] as const;
 export type GroundingStrength = (typeof GROUNDING_STRENGTHS)[number];
 
 /** Where a node-set's grounding passages actually came from (retrieval transparency).

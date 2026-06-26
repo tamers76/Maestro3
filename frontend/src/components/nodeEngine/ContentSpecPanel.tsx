@@ -190,7 +190,6 @@ export interface Layer3BodyProps {
   onGenerateClo: (cloId: string) => Promise<void>
   onApproveClo: (cloId: string) => Promise<void>
   onContentSpecUpdated: (objectId: string, spec: NodeEngineContentSpec) => void
-  layer3Approved: boolean
   approverLabel: string
   courseCode: string
   filters: NodeEngineFilterState
@@ -210,7 +209,6 @@ export function Layer3Body({
   onGenerateClo,
   onApproveClo,
   onContentSpecUpdated,
-  layer3Approved,
   approverLabel,
   courseCode,
   filters,

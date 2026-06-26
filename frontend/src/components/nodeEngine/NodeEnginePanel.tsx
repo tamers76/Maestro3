@@ -1082,7 +1082,6 @@ export default function NodeEnginePanel({
                           onBlueprintUpdated={(nodeId, bp) =>
                             setBlueprintsByNodeId((prev) => ({ ...prev, [nodeId]: bp }))
                           }
-                          layer2Approved={layer2Approved}
                           approverLabel={approverLabel}
                           courseCode={courseCode}
                           filters={layerFilters}
@@ -1114,7 +1113,6 @@ export default function NodeEnginePanel({
                           onContentSpecUpdated={(objectId, spec) =>
                             setContentSpecsByObjectId((prev) => ({ ...prev, [objectId]: spec }))
                           }
-                          layer3Approved={layer3Approved}
                           approverLabel={approverLabel}
                           courseCode={courseCode}
                           filters={layerFilters}
