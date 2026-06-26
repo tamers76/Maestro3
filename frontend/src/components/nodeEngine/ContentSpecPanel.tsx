@@ -2,14 +2,20 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle,
   BookOpen,
+  Boxes,
   Check,
+  CheckCircle2,
   ChevronRight,
+  Clock,
   Loader2,
+  Pencil,
   Play,
   RefreshCw,
   Shield,
+  Sparkles,
+  X,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { StatTile } from '@/components/ui/StatTile'
 import { showToast } from '@/components/ui/Toaster'
 import { cn } from '@/lib/utils'
 import {
@@ -30,6 +36,19 @@ import {
   type NodeEngineFilterState,
 } from './nodeEngineFilters'
 import { MasteryNodeSummary, NodeEngineFilterBar, ObjectRowHeader } from './NodeEngineUi'
+
+/**
+ * Decision-button styles shared with the Course Architect / Node Engine layers:
+ * light tint at rest, solid on hover/selection. primary/generate = blue,
+ * approve = emerald, regenerate = neutral slate, edit/save = amber.
+ */
+const BTN_BASE =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border px-3 py-1.5 text-sm font-semibold transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const PRIMARY_BTN = `${BTN_BASE} border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300 hover:bg-blue-600 hover:text-white hover:border-transparent focus-visible:ring-blue-500/40`
+const APPROVE_BTN = `${BTN_BASE} border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500 hover:text-white hover:border-transparent focus-visible:ring-emerald-500/40`
+const REGEN_BTN = `${BTN_BASE} border-slate-400/30 bg-slate-400/10 text-slate-600 dark:text-slate-300 hover:bg-slate-600 hover:text-white hover:border-transparent focus-visible:ring-slate-400/40`
+const SAVE_BTN = `${BTN_BASE} border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500 hover:text-white hover:border-transparent focus-visible:ring-emerald-500/40`
+const CANCEL_BTN = `${BTN_BASE} border-slate-400/30 bg-slate-400/10 text-slate-600 dark:text-slate-300 hover:bg-slate-600 hover:text-white hover:border-transparent focus-visible:ring-slate-400/40`
 
 interface CloContentSpecGroup {
   clo_id: string
@@ -238,7 +257,7 @@ export function Layer3Body({
 
   if (status === 'locked') {
     return (
-      <div className="flex items-start gap-2 rounded-md bg-muted p-3 text-sm text-muted-foreground">
+      <div className="flex items-start gap-2 rounded-[4px] bg-muted p-3 text-sm text-muted-foreground">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
         Approve Layer 2 — Experience Blueprint for all nodes before content specification.
       </div>
@@ -270,7 +289,7 @@ export function Layer3Body({
         matchCount={filterActive ? matchCount : undefined}
       />
 
-      <div className="rounded-md border border-dashed border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+      <div className="rounded-[4px] border border-dashed border-border bg-muted/20 p-3 text-sm text-muted-foreground">
         <p className="font-medium text-foreground">Work subtopic by subtopic</p>
         <p className="mt-1">
           Each subtopic starts <strong className="font-medium text-foreground">collapsed</strong> — only
@@ -280,14 +299,13 @@ export function Layer3Body({
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Pill className="bg-muted text-muted-foreground">{totalObjects} learning object(s)</Pill>
-        <Pill className="bg-muted text-muted-foreground">
-          {generatedCount}/{totalObjects} generated
-        </Pill>
-        <Pill className={layer3Approved ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' : 'bg-amber-500/15 text-amber-800 dark:text-amber-400'}>
-          {approvedCount}/{totalObjects} approved
-        </Pill>
+      {/* Stat cards — course-wide content specification progress. */}
+      <div className="md-scope grid grid-cols-2 gap-3 px-4 sm:grid-cols-3 sm:px-10 xl:grid-cols-5">
+        <StatTile icon={BookOpen} label="CLOs covered" value={groups.length} color="slate" size="sm" />
+        <StatTile icon={Boxes} label="Learning objects" value={totalObjects} color="blue" size="sm" />
+        <StatTile icon={Sparkles} label="Specified" value={`${generatedCount}/${totalObjects}`} color="rose" size="sm" />
+        <StatTile icon={CheckCircle2} label="Approved" value={approvedCount} color="emerald" size="sm" />
+        <StatTile icon={Clock} label="Pending" value={totalObjects - approvedCount} color="amber" size="sm" />
       </div>
 
       {groups.map((group) => (
@@ -360,9 +378,11 @@ function CloContentSpecSection({
   const subtopicCount = subtopicGroups.length
 
   return (
-    <details className="rounded-md border border-border" open={defaultOpen}>
-      <summary className="cursor-pointer px-3 py-2 font-medium">
-        {group.clo_id}
+    <details className="rounded-[4px] border border-border" open={defaultOpen}>
+      <summary className="cursor-pointer px-3 py-2">
+        <span className="text-[11px] font-bold uppercase tracking-wider label-accent">
+          {group.clo_id}
+        </span>
         <span className="ml-2 text-sm font-normal text-muted-foreground">
           {approved}/{objectCount} specs approved
         </span>
@@ -377,23 +397,30 @@ function CloContentSpecSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="ghost" onClick={onGenerate} disabled={busy || generating}>
+          <button
+            type="button"
+            className={generated > 0 ? REGEN_BTN : PRIMARY_BTN}
+            onClick={onGenerate}
+            disabled={busy || generating}
+          >
             {generating ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : generated > 0 ? (
+              <RefreshCw className="h-4 w-4" />
             ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
+              <Play className="h-4 w-4" />
             )}
             {generated > 0 ? `Regenerate entire ${group.clo_id}` : `Generate entire ${group.clo_id}`}
-          </Button>
+          </button>
           {pendingApproval && (
-            <Button size="sm" variant="outline" onClick={onApprove} disabled={busy || approving}>
+            <button type="button" className={APPROVE_BTN} onClick={onApprove} disabled={busy || approving}>
               {approving ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <Check className="mr-2 h-4 w-4" />
+                <Check className="h-4 w-4" />
               )}
               Approve entire {group.clo_id} (optional)
-            </Button>
+            </button>
           )}
         </div>
         <p className="text-xs text-muted-foreground">
@@ -547,14 +574,16 @@ function SubtopicContentSpecSection({
   return (
     <details
       className={cn(
-        'rounded-md border bg-muted/5',
+        'rounded-[4px] border bg-muted/5',
         allApproved ? 'border-emerald-500/30' : 'border-primary/20'
       )}
       open={defaultOpen}
     >
       <summary className="cursor-pointer px-3 py-2">
-        <span className="font-mono text-xs font-semibold text-primary">{subtopic.subtopicId}</span>
-        <span className="ml-2 text-sm font-medium">
+        <span className="text-[11px] font-bold uppercase tracking-wider label-accent">
+          {subtopic.subtopicId}
+        </span>
+        <span className="ml-2 text-sm font-medium text-foreground">
           Subtopic {subtopicIndex}: {subtopic.subtopicTitle}
         </span>
         <span className="ml-2 text-xs text-muted-foreground">
@@ -569,37 +598,37 @@ function SubtopicContentSpecSection({
       </summary>
       <div className="space-y-3 border-t border-border px-3 py-3">
         <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="default"
+          <button
+            type="button"
+            className={generated > 0 ? REGEN_BTN : PRIMARY_BTN}
             onClick={() => void handleGenerateSubtopic()}
             disabled={subtopicBusy}
           >
             {generating ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" />
             ) : generated > 0 ? (
-              <RefreshCw className="mr-2 h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             ) : (
-              <Play className="mr-2 h-4 w-4" />
+              <Play className="h-4 w-4" />
             )}
             {generated > 0
               ? `Regenerate all for ${subtopic.subtopicId}`
               : `Generate all for ${subtopic.subtopicId}`}
-          </Button>
+          </button>
           {pendingApproval && (
-            <Button
-              size="sm"
-              variant="default"
+            <button
+              type="button"
+              className={APPROVE_BTN}
               onClick={() => void handleApproveSubtopic()}
               disabled={subtopicBusy}
             >
               {approving ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <Check className="mr-2 h-4 w-4" />
+                <Check className="h-4 w-4" />
               )}
               Approve all for {subtopic.subtopicId}
-            </Button>
+            </button>
           )}
         </div>
 
@@ -720,7 +749,7 @@ function NodeContentSpecCard({
   return (
     <details
       className={cn(
-        'rounded-md border bg-muted/10',
+        'rounded-[4px] border bg-muted/10',
         allApproved ? 'border-emerald-500/25' : 'border-border'
       )}
       open={forceOpen}
@@ -746,19 +775,24 @@ function NodeContentSpecCard({
       </summary>
       <div className="space-y-3 border-t border-border px-3 py-3">
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" onClick={() => void handleGenerateAll()} disabled={busy || generating}>
-            {generating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+          <button
+            type="button"
+            className={specCount > 0 ? REGEN_BTN : PRIMARY_BTN}
+            onClick={() => void handleGenerateAll()}
+            disabled={busy || generating}
+          >
+            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : specCount > 0 ? <RefreshCw className="h-4 w-4" /> : <Play className="h-4 w-4" />}
             {specCount > 0 ? 'Regenerate node specs' : 'Generate node specs'}
-          </Button>
+          </button>
           {specCount > approvedCount && (
-            <Button size="sm" variant="outline" onClick={() => void handleApproveAll()} disabled={busy || approvingId !== null}>
-              <Check className="mr-2 h-4 w-4" /> Approve node specs
-            </Button>
+            <button type="button" className={APPROVE_BTN} onClick={() => void handleApproveAll()} disabled={busy || approvingId !== null}>
+              <Check className="h-4 w-4" /> Approve node specs
+            </button>
           )}
         </div>
 
         <div className="space-y-2 border-l border-dashed border-border pl-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="text-[11px] font-bold uppercase tracking-wider field-label">
             Learning objects ({objects.length})
           </p>
         {objects.map((obj, objIndex) => (
@@ -815,10 +849,16 @@ function ObjectContentSpecRow({
   highlight?: boolean
 }) {
   const [explanation, setExplanation] = useState(spec?.required_explanation ?? '')
+  const [editing, setEditing] = useState(false)
 
   useEffect(() => {
     setExplanation(spec?.required_explanation ?? '')
   }, [spec?.object_id, spec?.updated_at, spec?.required_explanation])
+
+  function cancelEdit() {
+    setExplanation(spec?.required_explanation ?? '')
+    setEditing(false)
+  }
 
   async function handleGenerate() {
     try {
@@ -855,6 +895,7 @@ function ObjectContentSpecRow({
         { required_explanation: explanation }
       )
       onContentSpecUpdated(updated.object_id, updated)
+      setEditing(false)
       showToast({ title: 'Saved', description: obj.title, variant: 'success' })
     } catch (error) {
       showToast({
@@ -889,7 +930,7 @@ function ObjectContentSpecRow({
   }
 
   return (
-    <div className="rounded-md border border-border bg-background p-3 text-xs">
+    <div className="rounded-[4px] border border-border bg-background p-3 text-xs">
       <ObjectRowHeader
         objectIndex={objectIndex}
         objectTotal={objectTotal}
@@ -929,32 +970,62 @@ function ObjectContentSpecRow({
       </ObjectRowHeader>
 
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" onClick={() => void handleGenerate()} disabled={busy}>
-          <Play className="mr-2 h-3 w-3" />
+        <button
+          type="button"
+          className={spec ? REGEN_BTN : PRIMARY_BTN}
+          onClick={() => void handleGenerate()}
+          disabled={busy}
+        >
+          {spec ? <RefreshCw className="h-4 w-4" /> : <Play className="h-4 w-4" />}
           {spec ? 'Regenerate' : 'Generate'}
-        </Button>
-        {spec && spec.status !== 'approved' && (
-          <>
-            <Button size="sm" variant="outline" onClick={() => void handleSave()} disabled={busy || saving}>
-              {saving ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : null}
-              Save explanation
-            </Button>
-            <Button size="sm" onClick={() => void handleApprove()} disabled={busy}>
-              <Check className="mr-2 h-3 w-3" /> Approve
-            </Button>
-          </>
+        </button>
+        {spec && spec.status !== 'approved' && !editing && (
+          <button type="button" className={APPROVE_BTN} onClick={() => void handleApprove()} disabled={busy}>
+            <Check className="h-4 w-4" /> Approve
+          </button>
         )}
       </div>
 
       {spec ? (
         <div className="mt-3 space-y-2">
-          <label className="block text-muted-foreground">Required explanation</label>
-          <textarea
-            className="min-h-[80px] w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
-            value={explanation}
-            onChange={(e) => setExplanation(e.target.value)}
-            disabled={spec.status === 'approved'}
-          />
+          <div className="flex items-center justify-between gap-2">
+            <label className="block text-[11px] font-bold uppercase tracking-wider field-label">
+              Required explanation
+            </label>
+            {spec.status !== 'approved' && !editing && (
+              <button
+                type="button"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-[4px] border border-amber-500/30 bg-amber-500/10 text-amber-700 transition-colors hover:bg-amber-500 hover:text-white dark:text-amber-300"
+                onClick={() => setEditing(true)}
+                aria-label="Edit explanation"
+                title="Edit explanation"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          {editing ? (
+            <>
+              <textarea
+                className="min-h-[80px] w-full rounded-[4px] border border-border bg-background px-2 py-1.5 text-xs"
+                value={explanation}
+                onChange={(e) => setExplanation(e.target.value)}
+              />
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className={SAVE_BTN} onClick={() => void handleSave()} disabled={busy || saving}>
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                  Save
+                </button>
+                <button type="button" className={CANCEL_BTN} onClick={cancelEdit} disabled={busy || saving}>
+                  <X className="h-4 w-4" /> Cancel
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="whitespace-pre-wrap break-words text-xs text-foreground">
+              {explanation || '—'}
+            </p>
+          )}
           {spec.preservation_rules.length > 0 && (
             <div>
               <p className="mb-1 text-muted-foreground">Preservation rules</p>
@@ -964,6 +1035,18 @@ function ObjectContentSpecRow({
                 ))}
               </ul>
             </div>
+          )}
+          {spec.grounding_references.length > 0 && (
+            <details>
+              <summary className="cursor-pointer text-xs font-medium text-primary hover:underline">
+                Show citations ({spec.grounding_references.length})
+              </summary>
+              <ul className="mt-1 list-inside list-disc text-xs text-muted-foreground">
+                {spec.grounding_references.map((c, i) => (
+                  <li key={`${c.citation}-${i}`}>{c.citation || c.passage_ref}</li>
+                ))}
+              </ul>
+            </details>
           )}
           {spec.grounding_note && (
             <p className="text-amber-700 dark:text-amber-400">{spec.grounding_note}</p>
@@ -985,11 +1068,11 @@ export function Layer3ContinueCta({
 }) {
   if (!layer3Approved) return null
   return (
-    <div className="rounded-md border border-border bg-muted/20 p-4">
-      <Button size="sm" variant="default" onClick={onContinue}>
+    <div className="rounded-[4px] border border-border bg-muted/20 p-4">
+      <button type="button" className={PRIMARY_BTN} onClick={onContinue}>
         Continue to Layer 4 — Modality Production
-        <ChevronRight className="ml-2 h-4 w-4" />
-      </Button>
+        <ChevronRight className="h-4 w-4" />
+      </button>
     </div>
   )
 }

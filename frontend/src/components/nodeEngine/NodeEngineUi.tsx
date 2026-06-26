@@ -145,7 +145,7 @@ export function NodeEngineFilterBar({
   }
 
   return (
-    <div className="space-y-2 rounded-md border border-border bg-muted/20 p-3">
+    <div className="space-y-2 rounded-[4px] border border-border bg-muted/20 p-3">
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <input
@@ -153,7 +153,7 @@ export function NodeEngineFilterBar({
           value={filters.query}
           onChange={(e) => patch({ query: e.target.value })}
           placeholder="Search nodes & objects by title, code, subtopic, purpose…"
-          className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-9 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="w-full rounded-[4px] border border-input bg-background py-2 pl-9 pr-9 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
         {filters.query && (
           <button
@@ -169,7 +169,7 @@ export function NodeEngineFilterBar({
 
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <select
-          className="rounded-md border border-border bg-background px-2 py-1.5"
+          className="rounded-[4px] border border-border bg-background px-2 py-1.5"
           value={filters.vehicle}
           onChange={(e) => patch({ vehicle: e.target.value as BlueprintVehicle | 'all' })}
         >
@@ -182,7 +182,7 @@ export function NodeEngineFilterBar({
         </select>
 
         <select
-          className="rounded-md border border-border bg-background px-2 py-1.5"
+          className="rounded-[4px] border border-border bg-background px-2 py-1.5"
           value={filters.purpose}
           onChange={(e) => patch({ purpose: e.target.value })}
         >
@@ -195,7 +195,7 @@ export function NodeEngineFilterBar({
         </select>
 
         <select
-          className="rounded-md border border-border bg-background px-2 py-1.5"
+          className="rounded-[4px] border border-border bg-background px-2 py-1.5"
           value={filters.artifactStatus}
           onChange={(e) =>
             patch({ artifactStatus: e.target.value as NodeEngineFilterState['artifactStatus'] })

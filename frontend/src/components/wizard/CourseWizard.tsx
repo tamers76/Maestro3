@@ -185,10 +185,21 @@ interface EngineScreenProps {
   courseCode: string
   journey: CourseJourney
   alignmentFetchSignal: number
+  onEngineApprovalsChange: (approvals: {
+    layer1: boolean
+    layer2: boolean
+    layer3: boolean
+    layer4: boolean
+  }) => void
 }
 
 /** One Node Engine layer, rendered as a focused, route-driven step. */
-function EngineScreen({ courseCode, journey, alignmentFetchSignal }: EngineScreenProps) {
+function EngineScreen({
+  courseCode,
+  journey,
+  alignmentFetchSignal,
+  onEngineApprovalsChange,
+}: EngineScreenProps) {
   const { layerNum } = useParams<{ layerNum: string }>()
   const navigate = useNavigate()
   const base = `/courses/${encodeURIComponent(courseCode)}`
@@ -260,6 +271,7 @@ function EngineScreen({ courseCode, journey, alignmentFetchSignal }: EngineScree
           soloLayer={num}
           onNavigateLayer={goLayer}
           alignmentFetchSignal={alignmentFetchSignal}
+          onLayerApprovalsChange={onEngineApprovalsChange}
         />
       </WizardStepShell>
       <WizardActionBar
@@ -301,6 +313,16 @@ export default function CourseWizard() {
   const [alignmentFetchSignal, setAlignmentFetchSignal] = useState(0)
   const [alignmentAutoProposeSignal, setAlignmentAutoProposeSignal] = useState(0)
   const [, setArchitectAllApproved] = useState(false)
+
+  // Per-engine-layer approval state, published by the Node Engine panel so the
+  // Course Journey rail can lock each engine stage until its predecessor is
+  // approved. Defaults to all-locked until the panel reports otherwise.
+  const [engineApprovals, setEngineApprovals] = useState({
+    layer1: false,
+    layer2: false,
+    layer3: false,
+    layer4: false,
+  })
 
   const journey = useCourseJourney(code)
 
@@ -360,6 +382,25 @@ export default function CourseWizard() {
       ? architectMatch[1]
       : undefined
 
+  // Gate the rail's engine steps: once the engine phase is unlocked, each stage
+  // stays locked until the layer before it is approved; approved layers show as
+  // done. (engineSteps[i] is layer i+1, so its predecessor is index i-1.)
+  const engineApprovedByLayer = [
+    engineApprovals.layer1,
+    engineApprovals.layer2,
+    engineApprovals.layer3,
+    engineApprovals.layer4,
+  ]
+  const gatedEngineSteps = journey.engineSteps.map((step, i) => {
+    if (!engineUnlocked) return step
+    const approved = engineApprovedByLayer[i] ?? false
+    const prevApproved = i === 0 ? true : (engineApprovedByLayer[i - 1] ?? false)
+    let status = step.status
+    if (approved) status = 'done'
+    else if (!prevApproved) status = 'locked'
+    return status === step.status ? step : { ...step, status }
+  })
+
   const intake: IntakeSummaryProps = {
     title: course.title,
     code: course.course_code,
@@ -399,7 +440,7 @@ export default function CourseWizard() {
               courseCode={course.course_code}
               currentPhase={currentPhase}
               architectSteps={journey.architectSteps}
-              engineSteps={journey.engineSteps}
+              engineSteps={gatedEngineSteps}
               architectComplete={journey.architectComplete}
               engineUnlocked={engineUnlocked}
               activeStepId={activeStepId}
@@ -442,6 +483,7 @@ export default function CourseWizard() {
                     courseCode={course.course_code}
                     journey={journey}
                     alignmentFetchSignal={alignmentFetchSignal}
+                    onEngineApprovalsChange={setEngineApprovals}
                   />
                 }
               />

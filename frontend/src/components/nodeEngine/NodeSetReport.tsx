@@ -15,8 +15,8 @@ import {
   RefreshCw,
   ShieldAlert,
   Target,
+  X,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
 import { showToast } from '@/components/ui/Toaster'
 import { cn } from '@/lib/utils'
 import {
@@ -32,6 +32,19 @@ import {
 } from '@/services/api'
 
 export const EDITED_REOPEN_REASON = 'Edited — re-confirm'
+
+/**
+ * Decision-button styles shared with the Course Architect / Node Generation layers:
+ * each colored button shows a light tint at rest and turns solid on hover/selection.
+ * edit = amber, save = emerald, regenerate = magenta/pink, cancel = neutral slate.
+ */
+const BTN_BASE =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border px-3 py-1.5 text-sm font-semibold transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const EDIT_BTN = `${BTN_BASE} border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 hover:bg-amber-500 hover:text-white hover:border-transparent focus-visible:ring-amber-500/40`
+const SAVE_BTN = `${BTN_BASE} border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500 hover:text-white hover:border-transparent focus-visible:ring-emerald-500/40`
+const REGEN_BTN = `${BTN_BASE} border-pink-500/30 bg-pink-500/10 text-pink-700 dark:text-pink-300 hover:bg-pink-600 hover:text-white hover:border-transparent focus-visible:ring-pink-500/40`
+const CANCEL_BTN = `${BTN_BASE} border-slate-400/30 bg-slate-400/10 text-slate-600 dark:text-slate-300 hover:bg-slate-600 hover:text-white hover:border-transparent focus-visible:ring-slate-400/40`
+const FIELD_RADIUS = 'rounded-[4px]'
 
 /** Humanize an enum-ish token: `apply_to_case` -> `Apply to case`. */
 function humanize(value: string): string {
@@ -81,9 +94,7 @@ function Pill({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-0.5">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
+      <p className="text-[11px] font-bold uppercase tracking-wider field-label">{label}</p>
       <div className="text-sm text-foreground">{children}</div>
     </div>
   )
@@ -102,14 +113,15 @@ function EditableField({
 }) {
   return (
     <div className="space-y-0.5">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
+      <p className="text-[11px] font-bold uppercase tracking-wider field-label">{label}</p>
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
         rows={rows}
-        className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={cn(
+          'w-full border border-input bg-background px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          FIELD_RADIUS
+        )}
       />
     </div>
   )
@@ -226,6 +238,7 @@ export function NodeCard({
   const [open, setOpen] = useState(
     mustReview || index === 0 || node.sme_edited || node.status === 'needs_revision'
   )
+  const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
   const [kc, setKc] = useState(node.knowledge_component)
@@ -277,6 +290,7 @@ export function NodeCard({
       const updated = await updateNodeProse(courseCode, subtopicId, node.node_id, patch)
       onNodeSetUpdated(updated)
       setOpen(true)
+      setEditing(false)
       showToast({ title: 'Edits saved', description: 'Node re-opened for your review.', variant: 'success' })
     } catch (error) {
       showToast({
@@ -298,6 +312,7 @@ export function NodeCard({
       })
       onNodeSetUpdated(updated)
       setOpen(true)
+      setEditing(false)
       showToast({ title: 'Node regenerated', description: 'Review the updated prose.', variant: 'success' })
     } catch (error) {
       if (error instanceof NodeEditConflictError) {
@@ -317,8 +332,17 @@ export function NodeCard({
     }
   }
 
+  function cancelEdit() {
+    setKc(node.knowledge_component)
+    setMastery(node.mastery_statement)
+    setWhy(node.why_it_matters)
+    setAssessmentConn(node.assessment_connection)
+    setCandidates(node.candidate_misconceptions)
+    setEditing(false)
+  }
+
   return (
-    <div className="rounded-lg border border-border bg-card">
+    <div className="rounded-[6px] border border-border/50 bg-card">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -388,7 +412,7 @@ export function NodeCard({
       </button>
 
       {open && (
-        <div className="space-y-4 border-t border-border px-4 py-4">
+        <div className="space-y-4 border-t border-border/50 px-4 py-4">
           {mustReview && triage.reasons.length > 0 && (
             <details className="group rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-sm">
               <summary className="flex cursor-pointer list-none items-start gap-2">
@@ -410,7 +434,7 @@ export function NodeCard({
             </details>
           )}
           <div className="grid gap-4 sm:grid-cols-2">
-            {interactive ? (
+            {editing ? (
               <>
                 <EditableField label="Knowledge component" value={kc} onChange={setKc} rows={3} />
                 <Field label="Node type">{humanize(node.node_type)}</Field>
@@ -447,28 +471,51 @@ export function NodeCard({
 
           {interactive && (
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => void handleSave()} disabled={!dirty || saving}>
-                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Pencil className="mr-2 h-4 w-4" />}
-                Save edits
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
+              {editing ? (
+                <>
+                  <button
+                    type="button"
+                    className={SAVE_BTN}
+                    onClick={() => void handleSave()}
+                    disabled={!dirty || saving}
+                  >
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                    Save edits
+                  </button>
+                  <button
+                    type="button"
+                    className={CANCEL_BTN}
+                    onClick={cancelEdit}
+                    disabled={saving}
+                  >
+                    <X className="h-4 w-4" />
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button type="button" className={EDIT_BTN} onClick={() => setEditing(true)}>
+                  <Pencil className="h-4 w-4" />
+                  Edit
+                </button>
+              )}
+              <button
+                type="button"
+                className={REGEN_BTN}
                 onClick={() => void handleRegenerate()}
                 disabled={regenerating}
               >
                 {regenerating ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <RefreshCw className="mr-2 h-4 w-4" />
+                  <RefreshCw className="h-4 w-4" />
                 )}
                 Regenerate this node
-              </Button>
+              </button>
             </div>
           )}
 
           {/* Primary Evidence Check requirement */}
-          <div className="rounded-md border border-border bg-muted/30 p-3">
+          <div className="rounded-[6px] border border-border/50 bg-muted/30 p-3">
             <div className="flex items-center gap-2">
               <Target className="h-4 w-4 text-primary" />
               <span className="text-sm font-medium">Primary Evidence Check</span>
@@ -519,9 +566,9 @@ export function NodeCard({
                 {candidates.map((m, mi) => (
                   <li
                     key={m.candidate_misconception_id}
-                    className="rounded-md border border-amber-500/20 bg-amber-500/5 p-2 text-sm"
+                    className="rounded-[4px] border border-amber-500/20 bg-amber-500/5 p-2 text-sm"
                   >
-                    {interactive ? (
+                    {editing ? (
                       <div className="space-y-2">
                         <EditableField
                           label="Statement"
@@ -566,7 +613,7 @@ export function NodeCard({
                           {humanize(m.severity)}
                         </Pill>
                       )}
-                      {!interactive && m.suggested_trap && (
+                      {!editing && m.suggested_trap && (
                         <span className="text-xs text-muted-foreground">
                           Trap: {m.suggested_trap}
                         </span>

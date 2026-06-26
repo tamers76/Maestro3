@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle,
+  BookOpen,
   Boxes,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   Loader2,
@@ -10,9 +12,10 @@ import {
   Play,
   RefreshCw,
   Search,
+  Sparkles,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
+import { StatTile } from '@/components/ui/StatTile'
 import { showToast } from '@/components/ui/Toaster'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -96,6 +99,23 @@ function statusColor(status: LayerStatus): string {
   }
 }
 
+/**
+ * Decision-button styles shared with the Course Architect layers (app convention):
+ * each colored button shows a light tint at rest and turns solid on hover/selection.
+ * primary/generate = blue, approve = emerald, regenerate = neutral slate, edit/reopen = amber.
+ */
+const BTN_BASE =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border px-4 py-2 text-sm font-semibold transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const PRIMARY_BTN = `${BTN_BASE} border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300 hover:bg-blue-600 hover:text-white hover:border-transparent focus-visible:ring-blue-500/40`
+const APPROVE_BTN = `${BTN_BASE} border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500 hover:text-white hover:border-transparent focus-visible:ring-emerald-500/40`
+const REGEN_BTN = `${BTN_BASE} border-slate-400/30 bg-slate-400/10 text-slate-600 dark:text-slate-300 hover:bg-slate-600 hover:text-white hover:border-transparent focus-visible:ring-slate-400/40`
+const EDIT_BTN = `${BTN_BASE} border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 hover:bg-amber-500 hover:text-white hover:border-transparent focus-visible:ring-amber-500/40`
+
+// Edit fields use a slightly tighter corner than the card.
+const FIELD_RADIUS = 'rounded-[4px]'
+// Card / section surface shared across the Course Architect + Node Engine layers.
+const CARD_SURFACE = 'rounded-[6px] border border-border/50 bg-card'
+
 interface ApprovedSubtopic {
   subtopic_id: string
   title: string
@@ -134,6 +154,7 @@ export default function NodeEnginePanel({
   alignmentFetchSignal = 0,
   soloLayer,
   onNavigateLayer,
+  onLayerApprovalsChange,
 }: {
   courseCode: string
   alignmentFetchSignal?: number
@@ -141,6 +162,13 @@ export default function NodeEnginePanel({
   soloLayer?: number
   /** Wizard mode: forward navigation routes instead of expanding in-place. */
   onNavigateLayer?: (layer: number) => void
+  /** Publishes each engine layer's approval state so the rail can gate steps. */
+  onLayerApprovalsChange?: (approvals: {
+    layer1: boolean
+    layer2: boolean
+    layer3: boolean
+    layer4: boolean
+  }) => void
 }) {
   const { user } = useAuth()
 
@@ -314,6 +342,17 @@ export default function NodeEnginePanel({
   const layer4Complete =
     approvedSpecObjectIds.length > 0 &&
     approvedSpecObjectIds.every((id) => producedByObjectId[id])
+
+  // Publish per-layer approval state upward so the Course Journey rail can lock
+  // each engine stage until its predecessor is approved.
+  useEffect(() => {
+    onLayerApprovalsChange?.({
+      layer1: layer1Approved,
+      layer2: layer2Approved,
+      layer3: layer3Approved,
+      layer4: layer4Complete,
+    })
+  }, [layer1Approved, layer2Approved, layer3Approved, layer4Complete, onLayerApprovalsChange])
 
   // Hydrate existing M8 blueprints once Layer 1 is approved.
   useEffect(() => {
@@ -924,49 +963,54 @@ export default function NodeEnginePanel({
               <div
                 key={layer.layer}
                 className={cn(
-                  'glass-strong rounded-xl',
-                  (status === 'approved' || status === 'completed') && '!border-emerald-500/50'
+                  !solo && 'glass-strong rounded-xl',
+                  !solo && (status === 'approved' || status === 'completed') && '!border-emerald-500/50'
                 )}
               >
-                <button
-                  type="button"
-                  className="flex w-full items-start justify-between gap-3 p-4 text-left"
-                  onClick={() => {
-                    if (solo) return
-                    setExpandedLayer(open ? null : layer.layer)
-                  }}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">
-                        Layer {layer.layer} — {layer.label}
-                      </span>
-                      <span
-                        className={cn(
-                          'rounded-full px-2 py-0.5 text-xs font-medium',
-                          statusColor(status)
+                {!solo && (
+                  <button
+                    type="button"
+                    className="flex w-full items-start justify-between gap-3 p-4 text-left"
+                    onClick={() => {
+                      setExpandedLayer(open ? null : layer.layer)
+                    }}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">
+                          Layer {layer.layer} — {layer.label}
+                        </span>
+                        <span
+                          className={cn(
+                            'rounded-full px-2 py-0.5 text-xs font-medium',
+                            statusColor(status)
+                          )}
+                        >
+                          {status === 'locked' && <Lock className="mr-1 inline h-3 w-3" />}
+                          {STATUS_LABELS[status]}
+                        </span>
+                        {!layer.active && layer.layer > 3 && (
+                          <span className="text-xs text-muted-foreground">(upcoming)</span>
                         )}
-                      >
-                        {status === 'locked' && <Lock className="mr-1 inline h-3 w-3" />}
-                        {STATUS_LABELS[status]}
-                      </span>
-                      {!layer.active && layer.layer > 3 && (
-                        <span className="text-xs text-muted-foreground">(upcoming)</span>
-                      )}
+                      </div>
+                      <p className="mt-1 text-sm text-muted-foreground">{layer.job}</p>
+                      <p className="text-xs text-muted-foreground">Output: {layer.output}</p>
                     </div>
-                    <p className="mt-1 text-sm text-muted-foreground">{layer.job}</p>
-                    <p className="text-xs text-muted-foreground">Output: {layer.output}</p>
-                  </div>
-                  {!solo &&
-                    (open ? (
+                    {open ? (
                       <ChevronDown className="h-5 w-5 shrink-0" />
                     ) : (
                       <ChevronRight className="h-5 w-5 shrink-0" />
-                    ))}
-                </button>
+                    )}
+                  </button>
+                )}
 
                 {open && (
-                  <div className="space-y-4 border-t border-border px-4 pb-4 pt-4">
+                  <div
+                    className={cn(
+                      'space-y-4',
+                      !solo && 'border-t border-border px-4 pb-4 pt-4'
+                    )}
+                  >
                     {layer.layer === 1 ? (
                       <Layer1Body
                         status={status}
@@ -1222,6 +1266,25 @@ function Layer1Body({
     (sum, g) => sum + g.subtopics.filter((s) => nodeSetsBySubtopicId[s.subtopic_id]).length,
     0
   )
+  const totalApprovedSubtopics = cloGroups.reduce(
+    (sum, g) =>
+      sum +
+      g.subtopics.filter((s) => nodeSetsBySubtopicId[s.subtopic_id]?.status === 'approved').length,
+    0
+  )
+  const totalMustReview = cloGroups.reduce(
+    (sum, g) =>
+      sum +
+      g.subtopics.reduce((s2, st) => {
+        const ns = nodeSetsBySubtopicId[st.subtopic_id]
+        if (!ns) return s2
+        return (
+          s2 +
+          ns.nodes.filter((n) => isMustReviewNode(n, ns.grounding_summary?.grounding_source)).length
+        )
+      }, 0),
+    0
+  )
 
   const trimmedQuery = query.trim().toLowerCase()
   const searchMatches: FlatNodeMatch[] = trimmedQuery
@@ -1249,8 +1312,18 @@ function Layer1Body({
 
   return (
     <div className="space-y-4">
+      {/* Stat cards — course-wide node generation progress. Inset left/right so
+          the compact tiles sit within the page with breathing room. */}
+      <div className="md-scope grid grid-cols-2 gap-3 px-4 sm:grid-cols-3 sm:px-10 xl:grid-cols-5">
+        <StatTile icon={BookOpen} label="CLOs covered" value={cloGroups.length} color="slate" size="sm" />
+        <StatTile icon={Boxes} label="Subtopics" value={totalSubtopics} color="blue" size="sm" />
+        <StatTile icon={Sparkles} label="Generated" value={`${totalGenerated}/${totalSubtopics}`} color="amber" size="sm" />
+        <StatTile icon={CheckCircle2} label="Approved" value={totalApprovedSubtopics} color="emerald" size="sm" />
+        <StatTile icon={AlertTriangle} label="Need review" value={totalMustReview} color="rose" size="sm" />
+      </div>
+
       {generateBlocked && (
-        <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
+        <div className={cn('flex items-start gap-2 border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400', FIELD_RADIUS)}>
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
             {alignmentState?.pending_activation
@@ -1263,7 +1336,7 @@ function Layer1Body({
         </div>
       )}
 
-      <p className="rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">
+      <p className={cn('p-3 text-sm leading-relaxed text-muted-foreground', CARD_SURFACE)}>
         Generate all nodes for a whole CLO in one click, review the subtopics grouped below, then
         approve the CLO. Review by exception: only the nodes that need your judgment (assessment-blocking
         or high-severity misconceptions, weak/thin grounding, generator uncertainty, or summative prep)
@@ -1276,24 +1349,24 @@ function Layer1Body({
 
       {/* Whole-course generation: kick off every CLO's subtopics in one run.
           Review still happens CLO by CLO below. */}
-      <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-card p-3">
-        <Button
-          size="sm"
-          variant="default"
+      <div className={cn('flex flex-wrap items-center gap-3 p-3', CARD_SURFACE)}>
+        <button
+          type="button"
+          className={totalGenerated > 0 ? REGEN_BTN : PRIMARY_BTN}
           onClick={onGenerateAll}
           disabled={busy || totalSubtopics === 0 || generateBlocked}
         >
           {generatingAll ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            <Loader2 className="h-4 w-4 animate-spin" />
           ) : totalGenerated > 0 ? (
-            <RefreshCw className="mr-2 h-4 w-4" />
+            <RefreshCw className="h-4 w-4" />
           ) : (
-            <Play className="mr-2 h-4 w-4" />
+            <Play className="h-4 w-4" />
           )}
           {totalGenerated > 0
             ? 'Regenerate all nodes (whole course)'
             : 'Generate all nodes (whole course)'}
-        </Button>
+        </button>
         {generatingAll && courseProgress ? (
           <span className="text-xs text-muted-foreground">
             Generating {courseProgress.done}/{courseProgress.total} subtopics across the course…
@@ -1307,17 +1380,24 @@ function Layer1Body({
         )}
       </div>
 
-      {/* Spot-check search across every generated node in the course. */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => onQueryChange(e.target.value)}
-          placeholder="Spot-check: search nodes by code, title, or knowledge component…"
-          className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        />
-      </div>
+      {/* Spot-check search — compact, right-aligned, only once nodes exist. */}
+      {totalGenerated > 0 && (
+        <div className="flex justify-end pr-2">
+          <div className="relative w-full sm:w-56">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => onQueryChange(e.target.value)}
+              placeholder="Search nodes…"
+              className={cn(
+                'h-8 w-full border border-input bg-background py-1.5 pl-8 pr-3 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                FIELD_RADIUS
+              )}
+            />
+          </div>
+        </div>
+      )}
 
       {hydrating && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -1369,11 +1449,16 @@ function Layer1Body({
         ))}
 
         {!solo && (
-          <div className="rounded-md border border-border bg-muted/20 p-4">
-            <Button size="sm" variant="default" disabled={!layer1Approved} onClick={onContinueLayer2}>
+          <div className={cn('p-4', CARD_SURFACE)}>
+            <button
+              type="button"
+              className={PRIMARY_BTN}
+              disabled={!layer1Approved}
+              onClick={onContinueLayer2}
+            >
               Continue to Layer 2 — Experience Blueprint
-              <ChevronRight className="ml-2 h-4 w-4" />
-            </Button>
+              <ChevronRight className="h-4 w-4" />
+            </button>
             {!layer1Approved && cloTotalCount > 0 && (
               <p className="mt-2 text-xs text-muted-foreground">
                 {cloFullyApprovedCount} of {cloTotalCount} CLOs approved · approve all node sets to
@@ -1447,12 +1532,14 @@ function CloGroupCard({
         type="button"
         onClick={onToggleCollapsed}
         className={cn(
-          'flex w-full items-center justify-between gap-3 rounded-lg border p-4 text-left',
+          'flex w-full items-center justify-between gap-3 rounded-[6px] border p-4 text-left',
           'border-emerald-500/40 bg-emerald-500/5'
         )}
       >
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="font-semibold text-foreground">{group.clo_id}</span>
+          <span className="text-[11px] font-bold uppercase tracking-wider label-accent">
+            {group.clo_id}
+          </span>
           <Pill className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
             <Check className="h-3 w-3" /> All approved
           </Pill>
@@ -1469,17 +1556,17 @@ function CloGroupCard({
   return (
     <div
       className={cn(
-        'rounded-lg border',
-        allApproved ? 'border-emerald-500/40' : 'border-border'
+        'overflow-hidden rounded-[6px] border bg-card',
+        allApproved ? 'border-emerald-500/40' : 'border-border/50'
       )}
     >
-      <div className="space-y-3 p-4">
+      <div className="space-y-3 bg-muted/30 p-4">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <p className="text-[11px] font-bold uppercase tracking-wider label-accent">
               {group.clo_id}
             </p>
-            <p className="text-sm font-medium">{group.refined_clo}</p>
+            <p className="mt-0.5 text-sm font-medium text-foreground">{group.refined_clo}</p>
           </div>
           {generatedCount > 0 && approvedCount === group.subtopics.length && (
             <Pill className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
@@ -1513,28 +1600,33 @@ function CloGroupCard({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" onClick={onGenerate} disabled={busy || generateBlocked}>
+          <button
+            type="button"
+            className={generatedCount > 0 ? REGEN_BTN : PRIMARY_BTN}
+            onClick={onGenerate}
+            disabled={busy || generateBlocked}
+          >
             {generating ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" />
             ) : generatedCount > 0 ? (
-              <RefreshCw className="mr-2 h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             ) : (
-              <Play className="mr-2 h-4 w-4" />
+              <Play className="h-4 w-4" />
             )}
             {generatedCount > 0
               ? `Regenerate all for ${group.clo_id}`
               : `Generate all nodes for ${group.clo_id}`}
-          </Button>
+          </button>
 
           {pendingApproval && (
-            <Button size="sm" variant="default" onClick={onApprove} disabled={busy}>
+            <button type="button" className={APPROVE_BTN} onClick={onApprove} disabled={busy}>
               {approving ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <Check className="mr-2 h-4 w-4" />
+                <Check className="h-4 w-4" />
               )}
               Approve all for {group.clo_id}
-            </Button>
+            </button>
           )}
 
           {progress && (
@@ -1544,9 +1636,10 @@ function CloGroupCard({
           )}
 
           {allApproved && (
-            <Button size="sm" variant="outline" onClick={() => void onReopen()} disabled={busy}>
+            <button type="button" className={EDIT_BTN} onClick={() => void onReopen()} disabled={busy}>
+              <RefreshCw className="h-4 w-4" />
               Reopen for review
-            </Button>
+            </button>
           )}
         </div>
       </div>
@@ -1554,13 +1647,13 @@ function CloGroupCard({
       {/* Subtopic-grouped triage. Each subtopic collapses; critical nodes inside
           start expanded so they draw the eye first. */}
       {generatedCount > 0 && (
-        <div className="space-y-2 border-t border-border px-4 py-3">
+        <div className="space-y-2 border-t border-border/50 px-4 py-3">
           {entries.map(({ subtopic, nodeSet }, subIndex) => {
             const nodes = nodeSet?.nodes ?? []
             const subGroundingSource = nodeSet?.grounding_summary?.grounding_source
             const subMustReview = nodes.filter((n) => isMustReviewNode(n, subGroundingSource)).length
             return (
-              <details key={subtopic.subtopic_id} className="rounded-md border border-border">
+              <details key={subtopic.subtopic_id} className={cn('border border-border/50 bg-background', FIELD_RADIUS)}>
                 <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-sm">
                   <span className="font-medium">
                     <span className="text-muted-foreground">ST{subIndex + 1}:</span>{' '}
@@ -1610,7 +1703,7 @@ function CloGroupCard({
                   )}
                 </summary>
                 {nodeSet && (
-                  <div className="space-y-2 border-t border-border px-3 py-3">
+                  <div className="space-y-2 border-t border-border/50 px-3 py-3">
                     {nodes.map((node) => (
                       <NodeCard
                         key={node.node_id}

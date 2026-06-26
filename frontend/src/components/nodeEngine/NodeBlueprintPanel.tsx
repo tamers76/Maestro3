@@ -1,14 +1,20 @@
 import { useMemo, useState } from 'react'
 import {
   AlertTriangle,
+  BookOpen,
+  Boxes,
   Check,
+  CheckCircle2,
+  ChevronDown,
   ChevronRight,
+  Clock,
   Loader2,
   Play,
   RefreshCw,
   Shield,
+  Sparkles,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { StatTile } from '@/components/ui/StatTile'
 import { showToast } from '@/components/ui/Toaster'
 import { cn } from '@/lib/utils'
 import {
@@ -29,6 +35,17 @@ import {
   type NodeEngineFilterState,
 } from './nodeEngineFilters'
 import { EntityCodeBadge, MasteryNodeSummary, NodeEngineFilterBar } from './NodeEngineUi'
+
+/**
+ * Decision-button styles shared with the Course Architect / Node Engine layers:
+ * light tint at rest, solid on hover/selection. primary/generate = blue,
+ * approve = emerald, regenerate = neutral slate.
+ */
+const BTN_BASE =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border px-3 py-1.5 text-sm font-semibold transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const PRIMARY_BTN = `${BTN_BASE} border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300 hover:bg-blue-600 hover:text-white hover:border-transparent focus-visible:ring-blue-500/40`
+const APPROVE_BTN = `${BTN_BASE} border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500 hover:text-white hover:border-transparent focus-visible:ring-emerald-500/40`
+const REGEN_BTN = `${BTN_BASE} border-slate-400/30 bg-slate-400/10 text-slate-600 dark:text-slate-300 hover:bg-slate-600 hover:text-white hover:border-transparent focus-visible:ring-slate-400/40`
 
 interface CloBlueprintGroup {
   clo_id: string
@@ -194,27 +211,21 @@ export function Layer2Body({
 
   return (
     <div className="space-y-4">
+      {/* Stat cards — course-wide blueprint progress. */}
+      <div className="md-scope grid grid-cols-2 gap-3 px-4 sm:grid-cols-3 sm:px-10 xl:grid-cols-5">
+        <StatTile icon={BookOpen} label="CLOs covered" value={groups.length} color="slate" size="sm" />
+        <StatTile icon={Boxes} label="Mastery nodes" value={totalNodes} color="blue" size="sm" />
+        <StatTile icon={Sparkles} label="Blueprinted" value={`${generatedCount}/${totalNodes}`} color="rose" size="sm" />
+        <StatTile icon={CheckCircle2} label="Approved" value={approvedCount} color="emerald" size="sm" />
+        <StatTile icon={Clock} label="Pending" value={totalNodes - approvedCount} color="amber" size="sm" />
+      </div>
+
       <NodeEngineFilterBar
         layer="blueprint"
         filters={filters}
         onChange={onFiltersChange}
         matchCount={filterActive ? matchCount : undefined}
       />
-
-      <div className="flex flex-wrap gap-2">
-        <Pill className="bg-muted text-muted-foreground">{totalNodes} approved node(s)</Pill>
-        <Pill className="bg-blue-500/15 text-blue-600 dark:text-blue-400">
-          {generatedCount}/{totalNodes} blueprinted
-        </Pill>
-        <Pill className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-          {approvedCount}/{totalNodes} approved
-        </Pill>
-        {layer2Approved && (
-          <Pill className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-            <Check className="h-3 w-3" /> Layer 2 complete
-          </Pill>
-        )}
-      </div>
 
       {groups.map((group) => {
         const visibleNodes = filterActive
@@ -283,6 +294,7 @@ function CloBlueprintGroupCard({
   filters,
   filterActive,
 }: CloBlueprintGroupCardProps) {
+  const [collapsed, setCollapsed] = useState(true)
   const generated = group.nodes.filter((n) => blueprintsByNodeId[n.node.node_id]).length
   const approved = group.nodes.filter(
     (n) => blueprintsByNodeId[n.node.node_id]?.status === 'approved'
@@ -290,14 +302,26 @@ function CloBlueprintGroupCard({
   const pendingApproval = generated > approved
 
   return (
-    <div className="rounded-lg border border-border">
+    <div className="rounded-[4px] border border-border">
       <div className="space-y-3 p-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {group.clo_id}
-          </p>
-          <p className="text-sm font-medium">{group.refined_clo}</p>
-        </div>
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          className="flex w-full items-start justify-between gap-2 text-left"
+          aria-expanded={!collapsed}
+        >
+          <div className="min-w-0">
+            <p className="text-[11px] font-bold uppercase tracking-wider label-accent">
+              {group.clo_id}
+            </p>
+            <p className="mt-0.5 text-sm font-medium text-foreground">{group.refined_clo}</p>
+          </div>
+          {collapsed ? (
+            <ChevronRight className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+          )}
+        </button>
         <div className="flex flex-wrap gap-2">
           <Pill className="bg-blue-500/15 text-blue-600 dark:text-blue-400">
             {generated}/{group.nodes.length} generated
@@ -307,47 +331,57 @@ function CloBlueprintGroupCard({
           </Pill>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={onGenerate} disabled={busy}>
+          <button
+            type="button"
+            className={generated > 0 ? REGEN_BTN : PRIMARY_BTN}
+            onClick={() => {
+              setCollapsed(false)
+              onGenerate()
+            }}
+            disabled={busy}
+          >
             {generating ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" />
             ) : generated > 0 ? (
-              <RefreshCw className="mr-2 h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             ) : (
-              <Play className="mr-2 h-4 w-4" />
+              <Play className="h-4 w-4" />
             )}
             {generated > 0
               ? `Regenerate blueprints for ${group.clo_id}`
               : `Generate blueprints for ${group.clo_id}`}
-          </Button>
+          </button>
           {pendingApproval && (
-            <Button size="sm" variant="default" onClick={onApprove} disabled={busy}>
+            <button type="button" className={APPROVE_BTN} onClick={onApprove} disabled={busy}>
               {approving ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <Check className="mr-2 h-4 w-4" />
+                <Check className="h-4 w-4" />
               )}
               Approve all for {group.clo_id}
-            </Button>
+            </button>
           )}
         </div>
       </div>
 
-      <div className="space-y-3 border-t border-border px-4 py-3">
-        {group.nodes.map((ref, nodeIndex) => (
-          <NodeBlueprintCard
-            key={ref.node.node_id}
-            ref_={ref}
-            nodeIndex={nodeIndex + 1}
-            blueprint={blueprintsByNodeId[ref.node.node_id] ?? null}
-            busy={busy}
-            onBlueprintUpdated={onBlueprintUpdated}
-            approverLabel={approverLabel}
-            courseCode={courseCode}
-            filters={filters}
-            filterActive={filterActive}
-          />
-        ))}
-      </div>
+      {!collapsed && (
+        <div className="space-y-3 border-t border-border px-4 py-3">
+          {group.nodes.map((ref, nodeIndex) => (
+            <NodeBlueprintCard
+              key={ref.node.node_id}
+              ref_={ref}
+              nodeIndex={nodeIndex + 1}
+              blueprint={blueprintsByNodeId[ref.node.node_id] ?? null}
+              busy={busy}
+              onBlueprintUpdated={onBlueprintUpdated}
+              approverLabel={approverLabel}
+              courseCode={courseCode}
+              filters={filters}
+              filterActive={filterActive}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -452,7 +486,7 @@ function NodeBlueprintCard({
   }
 
   return (
-    <details className="rounded-md border border-border" open={forceOpen || !blueprint}>
+    <details className="rounded-[4px] border border-border" open={forceOpen || !blueprint}>
       <summary className="cursor-pointer px-3 py-2 text-sm">
         <MasteryNodeSummary
           nodeIndex={nodeIndex}
@@ -486,15 +520,20 @@ function NodeBlueprintCard({
 
       <div className="space-y-3 border-t border-border px-3 py-3">
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" onClick={() => void handleGenerate()} disabled={busy || generating}>
-            {generating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+          <button
+            type="button"
+            className={blueprint ? REGEN_BTN : PRIMARY_BTN}
+            onClick={() => void handleGenerate()}
+            disabled={busy || generating}
+          >
+            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : blueprint ? <RefreshCw className="h-4 w-4" /> : <Play className="h-4 w-4" />}
             {blueprint ? 'Regenerate' : 'Generate blueprint'}
-          </Button>
+          </button>
           {blueprint && blueprint.status !== 'approved' && (
-            <Button size="sm" onClick={() => void handleApprove()} disabled={busy || approving}>
-              {approving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+            <button type="button" className={APPROVE_BTN} onClick={() => void handleApprove()} disabled={busy || approving}>
+              {approving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
               Approve blueprint
-            </Button>
+            </button>
           )}
         </div>
 
@@ -583,11 +622,11 @@ export function Layer2ContinueCta({
 }) {
   if (!layer2Approved) return null
   return (
-    <div className="rounded-md border border-border bg-muted/20 p-4">
-      <Button size="sm" variant="default" onClick={onContinue}>
+    <div className="rounded-[4px] border border-border bg-muted/20 p-4">
+      <button type="button" className={PRIMARY_BTN} onClick={onContinue}>
         Continue to Layer 3 — Content Specification
-        <ChevronRight className="ml-2 h-4 w-4" />
-      </Button>
+        <ChevronRight className="h-4 w-4" />
+      </button>
     </div>
   )
 }

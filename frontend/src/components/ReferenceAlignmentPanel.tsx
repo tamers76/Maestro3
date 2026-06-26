@@ -518,18 +518,10 @@ export default function ReferenceAlignmentPanel({
                   </button>
                 )}
                 {state?.node_gen_ready && (
-                  <>
-                    <span className="inline-flex items-center gap-1 text-sm text-emerald-600 dark:text-emerald-400">
-                      <Check className="h-4 w-4" /> Tags active
-                      {proposal?.approved_by ? ` · ${proposal.approved_by}` : ''}
-                    </span>
-                    {onAlignmentApproved && (
-                      <button type="button" className={PREVIEW_BTN} onClick={() => onAlignmentApproved()}>
-                        Continue to Node Engine
-                        <ChevronRight className="h-4 w-4" />
-                      </button>
-                    )}
-                  </>
+                  <span className="inline-flex items-center gap-1 text-sm text-emerald-600 dark:text-emerald-400">
+                    <Check className="h-4 w-4" /> Tags active
+                    {proposal?.approved_by ? ` · ${proposal.approved_by}` : ''}
+                  </span>
                 )}
                 {state?.status === 'approved' && !state?.node_gen_ready && (
                   <span className="inline-flex items-center gap-1 text-sm text-emerald-600 dark:text-emerald-400">
