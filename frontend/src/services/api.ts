@@ -3691,7 +3691,7 @@ export interface AvatarLibraryEntry {
 export type FavoriteAvatarRef = AvatarLibraryEntry;
 
 export type VideoRenderStyle = 'studio_direct' | 'video_agent_produced';
-export type NarrationFidelity = 'strict' | 'moderate';
+export type NarrationFidelity = 'strict' | 'moderate' | 'relaxed';
 export type VideoOrientation = 'landscape' | 'portrait';
 export type RenderStyleOverride = VideoRenderStyle | 'inherit';
 
@@ -3713,6 +3713,10 @@ export interface VideoSettings {
   provider: 'heygen';
   /** Reference to the API key (env/setting NAME), never the key value. */
   apiKeyRef?: string;
+  /** Actual HeyGen key entered in the UI. Blanked on read; send a value to set/replace. */
+  apiKey?: string;
+  /** Read-only hint from the server: a key is saved (the value itself is masked). */
+  apiKeyConfigured?: boolean;
   avatar_id?: string;
   voice_id?: string;
   /** HBMSU Avatar Library entries for video renders. */
@@ -4648,6 +4652,8 @@ export interface NodeEngineStructuredVisual {
   renderer_notes?: string;
   alt_text: string;
   text_equivalent: string;
+  /** Short student-facing caption (teacher voice) shown under the visual. */
+  learner_caption?: string;
   grounding_strength: 'strong' | 'moderate' | 'weak';
   evidence_check_role?: 'not_evidence_check' | 'supporting_visual' | 'evidence_collection_visual';
   rendering_route: 'platform_native' | 'ai_infographic';
@@ -4781,8 +4787,11 @@ export async function produceStructuredVisualObject(
   code: string,
   subtopicId: string,
   nodeId: string,
-  objectId: string
+  objectId: string,
+  /** Optional SME natural-language feedback used to steer regeneration. */
+  smeFeedback?: string
 ): Promise<NodeEngineProducedObject> {
+  const trimmedFeedback = smeFeedback?.trim();
   const response = await fetch(
     `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
       subtopicId
@@ -4790,11 +4799,39 @@ export async function produceStructuredVisualObject(
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify(trimmedFeedback ? { sme_feedback: trimmedFeedback } : {}),
     }
   );
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || 'Failed to produce structured visual');
+  return data.produced;
+}
+
+/**
+ * Persist SME edits to a structured visual (governed JSON stays source of truth).
+ * The backend re-validates the schema, preserves/flags grounding, and returns the
+ * updated produced object. Set `approve` to mark the visual SME-approved on save.
+ */
+export async function saveStructuredVisualEdits(
+  code: string,
+  subtopicId: string,
+  nodeId: string,
+  objectId: string,
+  visual: NodeEngineStructuredVisual,
+  options?: { approve?: boolean }
+): Promise<NodeEngineProducedObject> {
+  const response = await fetch(
+    `${API_BASE}/node-engine/courses/${encodeURIComponent(code)}/subtopics/${encodeURIComponent(
+      subtopicId
+    )}/nodes/${encodeURIComponent(nodeId)}/objects/${encodeURIComponent(objectId)}/structured-visual`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ visual, approve: options?.approve === true }),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Failed to save structured visual edits');
   return data.produced;
 }
 

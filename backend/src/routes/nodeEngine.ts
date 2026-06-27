@@ -86,6 +86,7 @@ import {
 } from '../node-engine/videoBriefProduction.service.js';
 import {
   produceStructuredVisualObject,
+  saveStructuredVisualEdits,
   StructuredVisualProductionError,
   ContentSpecNotApprovedError as StructuredVisualContentSpecNotApprovedError,
 } from '../node-engine/structuredVisualProduction.service.js';
@@ -220,11 +221,27 @@ function hydrateTaskPrompt(config: ModalityGenerationConfig): ModalityGeneration
   return { ...config, taskPrompt: active?.task_prompt ?? config.taskPrompt };
 }
 
+/**
+ * Never ship the raw HeyGen key to the browser. Blank videoSettings.apiKey and
+ * surface a boolean hint (apiKeyConfigured) instead, so the UI can show "saved".
+ */
+function maskVideoApiKey(config: ModalityGenerationConfig): ModalityGenerationConfig {
+  const vs = config.videoSettings;
+  if (!vs) return config;
+  const hasKey = Boolean(vs.apiKey && vs.apiKey.trim());
+  return { ...config, videoSettings: { ...vs, apiKey: '', apiKeyConfigured: hasKey } };
+}
+
+/** Display-ready config for API responses (task prompt hydrated, secret masked). */
+function presentConfig(config: ModalityGenerationConfig): ModalityGenerationConfig {
+  return maskVideoApiKey(hydrateTaskPrompt(config));
+}
+
 // GET /api/node-engine/modality-config — all configs + global default + resolved per vehicle
 router.get('/modality-config', (_req: Request, res: Response) => {
   try {
     const configs = getConfigs().map((config) => ({
-      config: hydrateTaskPrompt(config),
+      config: presentConfig(config),
       resolved: resolvedModelForVehicle(config.vehicle),
     }));
     res.json({
@@ -247,7 +264,7 @@ router.get('/modality-config/:vehicle', (req: Request, res: Response) => {
     }
     res.json({
       global_default_model: getNodeEngineDefaultModel(),
-      config: hydrateTaskPrompt(config),
+      config: presentConfig(config),
       resolved: resolvedModelForVehicle(vehicle),
     });
   } catch (error) {
@@ -314,7 +331,15 @@ router.put('/modality-config/:vehicle', requireRole('admin'), async (req: Reques
     if (body.videoSettings !== undefined) {
       // Enum/shape validation (incl. style_id/brand_kit_id rejection) happens in
       // parseVideoSettings via parseModalityGenerationConfig on save.
-      update.videoSettings = parseVideoSettings(body.videoSettings);
+      const incoming = parseVideoSettings(body.videoSettings);
+      // The GET response masks the saved key (blank + apiKeyConfigured). So a
+      // blank apiKey on save means "keep the existing key", not "clear it".
+      if (!incoming.apiKey || !incoming.apiKey.trim()) {
+        const existingKey = getConfigForVehicle(vehicle)?.videoSettings?.apiKey;
+        if (existingKey) incoming.apiKey = existingKey;
+        else delete incoming.apiKey;
+      }
+      update.videoSettings = incoming;
     }
     if (body.enabled !== undefined) {
       if (typeof body.enabled !== 'boolean') {
@@ -334,7 +359,7 @@ router.put('/modality-config/:vehicle', requireRole('admin'), async (req: Reques
     });
     res.json({
       message: 'Modality config updated (no prompt-template version created)',
-      config: hydrateTaskPrompt(updated),
+      config: presentConfig(updated),
       resolved: resolvedModelForVehicle(vehicle),
     });
   } catch (error) {
@@ -1095,12 +1120,16 @@ router.post(
     try {
       const { courseCode, subtopicId, nodeId, objectId } = req.params;
       const body = (req.body ?? {}) as Record<string, unknown>;
+      const smeFeedback = typeof body.sme_feedback === 'string' ? body.sme_feedback : undefined;
       const produced = await produceStructuredVisualObject(courseCode, subtopicId, nodeId, objectId, {
         persist: body.persist !== false,
         useDeterministicProjection: body.use_deterministic_projection === true,
+        ...(smeFeedback ? { smeFeedback } : {}),
       });
       res.json({
-        message: 'Structured visual produced (recommended SME review before publish)',
+        message: smeFeedback
+          ? 'Structured visual regenerated with SME feedback (recommended SME review before publish)'
+          : 'Structured visual produced (recommended SME review before publish)',
         produced,
       });
     } catch (error) {
@@ -1113,6 +1142,43 @@ router.post(
       console.error('Error producing structured visual:', error);
       res.status(500).json({
         error: error instanceof Error ? error.message : 'Failed to produce structured visual',
+      });
+    }
+  }
+);
+
+// PUT .../structured-visual — persist SME edits to the governed structured visual JSON
+router.put(
+  '/courses/:courseCode/subtopics/:subtopicId/nodes/:nodeId/objects/:objectId/structured-visual',
+  async (req: Request, res: Response) => {
+    try {
+      const { courseCode, subtopicId, nodeId, objectId } = req.params;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      if (!body.visual || typeof body.visual !== 'object') {
+        return res.status(400).json({ error: 'Request body must include a "visual" object.' });
+      }
+      const produced = await saveStructuredVisualEdits(
+        courseCode,
+        subtopicId,
+        nodeId,
+        objectId,
+        body.visual,
+        { approve: body.approve === true }
+      );
+      res.json({
+        message: body.approve === true ? 'Structured visual approved' : 'Structured visual edits saved',
+        produced,
+      });
+    } catch (error) {
+      if (error instanceof StructuredVisualProductionError) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof NodeEngineValidationError) {
+        return res.status(422).json({ error: error.message });
+      }
+      console.error('Error saving structured visual edits:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to save structured visual edits',
       });
     }
   }

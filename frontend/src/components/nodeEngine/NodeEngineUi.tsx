@@ -69,7 +69,7 @@ export function MasteryNodeSummary({
     <div
       className={cn(
         'flex items-start gap-2',
-        highlight && 'rounded-md ring-1 ring-primary/30'
+        highlight && 'rounded-[4px] ring-1 ring-primary/30'
       )}
     >
       <div className="min-w-0 flex-1">
@@ -105,7 +105,7 @@ export function ObjectRowHeader({
     <div
       className={cn(
         'mb-2 flex items-start gap-2',
-        highlight && 'rounded-md ring-1 ring-primary/30'
+        highlight && 'rounded-[4px] ring-1 ring-primary/30'
       )}
     >
       <div className="min-w-0 flex-1">
@@ -128,7 +128,7 @@ interface NodeEngineFilterBarProps {
   layer: LayerFilterKind
   filters: NodeEngineFilterState
   onChange: (filters: NodeEngineFilterState) => void
-  matchCount?: { nodes: number; objects: number }
+  matchCount?: { nodes: number; objects: number; produced?: number; rendered?: number }
 }
 
 export function NodeEngineFilterBar({
@@ -217,15 +217,39 @@ export function NodeEngineFilterBar({
             Clear filters
           </button>
         )}
-      </div>
 
-      {active && matchCount && (
-        <p className="text-xs text-muted-foreground">
-          {matchCount.objects > 0
-            ? `${matchCount.objects} object(s) in ${matchCount.nodes} node(s) match`
-            : 'No matches — try clearing a filter or broadening your search'}
-        </p>
-      )}
+        {matchCount &&
+          (() => {
+            const noMatch = active && matchCount.objects === 0
+            const vehicleLabel =
+              active && filters.vehicle !== 'all' ? `${filters.vehicle.replace(/_/g, ' ')} ` : ''
+            const producedPart =
+              matchCount.produced != null ? ` · ${matchCount.produced} produced` : ''
+            const renderedPart =
+              filters.vehicle === 'video' && matchCount.rendered != null
+                ? ` · ${matchCount.rendered} rendered`
+                : ''
+            const text = noMatch
+              ? 'No matches'
+              : `${matchCount.objects} ${vehicleLabel}object(s)${producedPart}${renderedPart}${
+                  !active && matchCount.produced == null ? ' total' : ''
+                }`
+            return (
+              <span
+                className={cn(
+                  'ml-auto inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-medium',
+                  noMatch
+                    ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                    : active
+                      ? 'bg-primary/10 text-primary'
+                      : 'bg-muted text-muted-foreground'
+                )}
+              >
+                {text}
+              </span>
+            )
+          })()}
+      </div>
     </div>
   )
 }

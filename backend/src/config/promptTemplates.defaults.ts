@@ -167,6 +167,11 @@ ACCESSIBILITY
 - Provide alt_text AND a text_equivalent that explains the FULL ACADEMIC MEANING of the visual
   (not just its appearance). Ensure clear reading order, screen-reader-readable labels, no reliance
   on color alone, no tiny-text assumption, and bilingual/localization-ready language.
+- Also produce a learner_caption: a SHORT student-facing caption (1-3 plain sentences) written as a
+  TEACHER explaining THIS visual to a learner — where to start, how to follow it, how the parts
+  connect (the throughline), the one key takeaway, and the misconception to avoid if present. Warm,
+  plain, second person. Grounded in the visual's own elements/relationships; no invented content and
+  no fictional story/characters. This is SEPARATE from text_equivalent (the full academic equivalent).
 
 HARD CONSTRAINTS (never violate)
 - Do not invent academic content. Do not output a final image, SVG/HTML/CSS, or design code.

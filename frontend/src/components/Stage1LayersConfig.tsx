@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Input } from '@/components/ui/Input'
 import { Textarea } from '@/components/ui/Textarea'
-import { Button } from '@/components/ui/Button'
 import { showToast } from '@/components/ui/Toaster'
 import {
   fetchAvailableModels,
@@ -12,6 +11,22 @@ import {
 } from '@/services/api'
 import { ChevronDown, ChevronRight, User, Users, Plus, Trash2, RefreshCw, Loader2, Wand2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+
+/**
+ * Decision-button styles shared with the Course Architect / Node Engine layers:
+ * light tint at rest, solid on hover/selection. primary = blue, approve = emerald,
+ * neutral/regenerate = slate, edit = amber, destructive = red.
+ */
+const BTN_BASE =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] border px-3 py-1.5 text-sm font-semibold transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const PRIMARY_BTN = `${BTN_BASE} border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300 hover:bg-blue-600 hover:text-white hover:border-transparent focus-visible:ring-blue-500/40`
+const REGEN_BTN = `${BTN_BASE} border-slate-400/30 bg-slate-400/10 text-slate-600 dark:text-slate-300 hover:bg-slate-600 hover:text-white hover:border-transparent focus-visible:ring-slate-400/40`
+const EDIT_BTN = `${BTN_BASE} border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 hover:bg-amber-500 hover:text-white hover:border-transparent focus-visible:ring-amber-500/40`
+const TOGGLE_ON = `${BTN_BASE} border-transparent bg-blue-600 text-white shadow-sm focus-visible:ring-blue-500/40`
+const TOGGLE_OFF = `${BTN_BASE} border-border bg-background text-muted-foreground hover:bg-muted`
+const REMOVE_BTN =
+  'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[4px] border border-red-500/30 bg-red-500/10 text-red-600 transition-colors hover:bg-red-500 hover:text-white hover:border-transparent'
+const CARD_SURFACE = 'rounded-[6px] border border-border/50 bg-card'
 
 // The intake layer whose config is the single source of truth for course intake
 // (extraction + CLO analysis). It gets the richer model + CLO-analysis controls.
@@ -69,7 +84,7 @@ function ModelSelect({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className={cn(
-            'w-full h-10 appearance-none rounded-md border border-input bg-background pl-3 pr-10 py-2 text-sm text-foreground',
+            'w-full h-10 appearance-none rounded-[4px] border border-input bg-background pl-3 pr-10 py-2 text-sm text-foreground',
             'hover:border-primary/50 focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent cursor-pointer',
             !value && 'text-muted-foreground'
           )}
@@ -84,21 +99,16 @@ function ModelSelect({
         <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
       </div>
       {showRemove && onRemove && (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onRemove}
-          className="h-10 px-3 text-red-500 hover:text-red-600 hover:bg-red-500/10"
-        >
+        <button type="button" onClick={onRemove} className={REMOVE_BTN} aria-label="Remove model">
           <Trash2 className="h-4 w-4" />
-        </Button>
+        </button>
       )}
     </div>
   )
 }
 
 export default function Stage1LayersConfig({ layers, onChange, provider }: Stage1LayersConfigProps) {
-  const [expandedId, setExpandedId] = useState<string | null>(layers[0]?.id ?? null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [models, setModels] = useState<AIModel[]>([])
   const [hasLoaded, setHasLoaded] = useState(false)
   const [loadingModels, setLoadingModels] = useState(false)
@@ -176,17 +186,17 @@ export default function Stage1LayersConfig({ layers, onChange, provider }: Stage
         <p className="text-xs text-muted-foreground">
           Models are loaded from your active provider ({provider}).
         </p>
-        <Button variant="outline" size="sm" onClick={() => loadModels(true)} disabled={loadingModels} className="gap-2">
+        <button type="button" onClick={() => loadModels(true)} disabled={loadingModels} className={REGEN_BTN}>
           {loadingModels ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           Refresh Models
-        </Button>
+        </button>
       </div>
 
       {sorted.map((layer) => {
         const open = expandedId === layer.id
         const isIntake = layer.id === INTAKE_LAYER_ID
         return (
-          <div key={layer.id} className="rounded-lg border border-border">
+          <div key={layer.id} className={CARD_SURFACE}>
             <button
               type="button"
               className="flex w-full items-center justify-between gap-2 p-4 text-left hover:bg-muted/50"
@@ -199,15 +209,22 @@ export default function Stage1LayersConfig({ layers, onChange, provider }: Stage
                 <p className="text-sm text-muted-foreground">{layer.productOutput}</p>
               </div>
               <div className="flex items-center gap-2">
-                <span className="rounded-full bg-muted px-2 py-0.5 text-xs capitalize">
+                <span
+                  className={cn(
+                    'rounded-full px-2 py-0.5 text-xs font-medium capitalize',
+                    layer.mode === 'council'
+                      ? 'bg-blue-500/10 text-blue-700 dark:text-blue-300'
+                      : 'bg-muted text-muted-foreground'
+                  )}
+                >
                   {layer.mode === 'council' ? 'LLM Council' : 'Single Agent'}
                 </span>
-                {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                {open ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
               </div>
             </button>
 
             {open && (
-              <div className="space-y-4 border-t border-border p-4">
+              <div className="space-y-4 border-t border-border/50 p-4">
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Layer name</label>
@@ -281,25 +298,21 @@ export default function Stage1LayersConfig({ layers, onChange, provider }: Stage
                   </label>
                 </div>
 
-                <div className="flex gap-2">
-                  <Button
+                <div className="flex flex-wrap gap-2">
+                  <button
                     type="button"
-                    variant={layer.mode === 'single' ? 'default' : 'outline'}
-                    size="sm"
                     onClick={() => updateLayer(layer.id, { mode: 'single' })}
-                    className="gap-1"
+                    className={layer.mode === 'single' ? TOGGLE_ON : TOGGLE_OFF}
                   >
                     <User className="h-4 w-4" /> Single Agent
-                  </Button>
-                  <Button
+                  </button>
+                  <button
                     type="button"
-                    variant={layer.mode === 'council' ? 'default' : 'outline'}
-                    size="sm"
                     onClick={() => updateLayer(layer.id, { mode: 'council' })}
-                    className="gap-1"
+                    className={layer.mode === 'council' ? TOGGLE_ON : TOGGLE_OFF}
                   >
                     <Users className="h-4 w-4" /> LLM Council
-                  </Button>
+                  </button>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
@@ -353,14 +366,13 @@ export default function Stage1LayersConfig({ layers, onChange, provider }: Stage
                         />
                       ))}
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
+                    <button
+                      type="button"
                       onClick={() => updateLayer(layer.id, { councilModels: [...layer.councilModels, ''] })}
-                      className="gap-2"
+                      className={PRIMARY_BTN}
                     >
                       <Plus className="h-4 w-4" /> Add Member
-                    </Button>
+                    </button>
                   </div>
                 )}
 
@@ -370,16 +382,15 @@ export default function Stage1LayersConfig({ layers, onChange, provider }: Stage
                       {isIntake ? 'Extraction prompt' : 'Task prompt'}
                     </label>
                     {isIntake && (
-                      <Button
-                        variant="outline"
-                        size="sm"
+                      <button
+                        type="button"
                         onClick={() => loadRecommendedIntakePrompts(layer.id)}
                         disabled={loadingPrompts}
-                        className="gap-2 text-purple-600 hover:text-purple-700 hover:bg-purple-500/10 border-purple-500/30"
+                        className={EDIT_BTN}
                       >
                         {loadingPrompts ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
                         Load Recommended
-                      </Button>
+                      </button>
                     )}
                   </div>
                   <Textarea

@@ -29,6 +29,19 @@ export const STRICT_FRAMING_DIRECTIVE =
   'Deliver each section NARRATION verbatim. Do not rephrase, expand, summarize, or ' +
   'reorder the academic content. On-screen text must match the provided items exactly.';
 
+/** Relaxed fidelity — creative delivery with grounded, illustrative analogies. */
+export const RELAXED_FRAMING_DIRECTIVE =
+  'The section NARRATION carries approved academic content. Deliver it in an engaging, ' +
+  'conversational, story-driven way: you MAY rephrase freely and add hooks, transitions, ' +
+  'and clarifying EVERYDAY ANALOGIES or illustrations that make ideas easier to grasp. You ' +
+  'must NOT introduce new academic facts, definitions, statistics, dates, names, or ' +
+  'quotations beyond the approved content, must NOT contradict or omit any required point, ' +
+  'and any analogy must read as clearly illustrative (never as a course fact). Keep ' +
+  'everything accurate and grounded.';
+
+/** Prefix marking a non-blocking, informational fidelity note (does not force review). */
+export const INFO_NOTE_PREFIX = 'INFO: ';
+
 export const DEFAULT_STYLE_BLOCK =
   'Use vibrant, modern educational motion-design. Build full-screen animated scenes for each ' +
   'section — illustrated metaphors, split-screen comparisons, animated infographics, icon ' +
@@ -63,9 +76,14 @@ export function resolveEffectiveRenderStyle(
 function framingDirective(settings: VideoSettings): string {
   const custom = settings.agent_prompt_templates?.scriptFramingDirective?.trim();
   if (custom) return custom;
-  return settings.narration_fidelity === 'strict'
-    ? STRICT_FRAMING_DIRECTIVE
-    : MODERATE_FRAMING_DIRECTIVE;
+  switch (settings.narration_fidelity) {
+    case 'strict':
+      return STRICT_FRAMING_DIRECTIVE;
+    case 'relaxed':
+      return RELAXED_FRAMING_DIRECTIVE;
+    default:
+      return MODERATE_FRAMING_DIRECTIVE;
+  }
 }
 
 function renderSection(section: VideoAgentSection): string {
@@ -202,6 +220,8 @@ export interface ValidateAgentProductionOptions {
   enforceOnScreenTracing?: boolean;
   /** Max sections allowed (defaults to 6; raise for longer/cinematic videos). */
   maxSections?: number;
+  /** Relaxed fidelity: script-drift is expected, so report it as info, not a flag. */
+  relaxedNarration?: boolean;
 }
 
 export function validateAgentProduction(
@@ -225,7 +245,10 @@ export function validateAgentProduction(
   const scriptNorm = normalizeNarrationForCompare(fullScript);
   if (sectionsConcat !== scriptNorm) {
     notes.push(
-      'Section narrations do not match narration.full_script verbatim — review for academic drift.'
+      options.relaxedNarration
+        ? `${INFO_NOTE_PREFIX}Relaxed narration: spoken delivery differs from the approved script ` +
+          '(expected in relaxed mode — confirm any analogies stay illustrative and add no new academic facts).'
+        : 'Section narrations do not match narration.full_script verbatim — review for academic drift.'
     );
   }
 

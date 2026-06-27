@@ -101,7 +101,13 @@ export function VideoProductionStylePanel({
                 <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
                 Narration fidelity
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <StyleChoice
+                  active={fidelity === 'relaxed'}
+                  title="Relaxed"
+                  description="Conversational delivery; may add everyday analogies to clarify — no new facts. Expect SME review."
+                  onClick={() => onPatch({ narration_fidelity: 'relaxed' })}
+                />
                 <StyleChoice
                   active={fidelity === 'moderate'}
                   title="Moderate"

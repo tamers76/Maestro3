@@ -263,7 +263,7 @@ export const VIDEO_RENDER_STYLES = ['studio_direct', 'video_agent_produced'] as 
 export type VideoRenderStyle = (typeof VIDEO_RENDER_STYLES)[number];
 
 /** Narration fidelity for the Video Agent path (academic guardrails). */
-export const NARRATION_FIDELITIES = ['strict', 'moderate'] as const;
+export const NARRATION_FIDELITIES = ['strict', 'moderate', 'relaxed'] as const;
 export type NarrationFidelity = (typeof NARRATION_FIDELITIES)[number];
 
 export const VIDEO_ORIENTATIONS = ['landscape', 'portrait'] as const;
@@ -494,6 +494,14 @@ export interface VideoSettings {
   provider: 'heygen';
   /** Reference to the API key (env/setting NAME), NEVER the key value itself. */
   apiKeyRef?: string;
+  /**
+   * Actual HeyGen API key entered via the Video settings UI. Stored server-side
+   * and masked on read (the GET response blanks it and sets apiKeyConfigured).
+   * Resolution order: env var named by apiKeyRef wins; otherwise this value.
+   */
+  apiKey?: string;
+  /** Read-only UI hint: true when a key is saved (set only on GET responses). */
+  apiKeyConfigured?: boolean;
   /** From GET /v3/avatars/looks (mocked in V1). */
   avatar_id?: string;
   /** From GET /v3/voices; prefer the avatar's default_voice_id. */
@@ -706,6 +714,8 @@ export function parseVideoSettings(input: unknown): VideoSettings {
 
   const apiKeyRef = optionalString(obj, 'apiKeyRef');
   if (apiKeyRef !== undefined) settings.apiKeyRef = apiKeyRef;
+  const apiKey = optionalString(obj, 'apiKey');
+  if (apiKey !== undefined) settings.apiKey = apiKey;
   const avatarId = optionalString(obj, 'avatar_id');
   if (avatarId !== undefined) settings.avatar_id = avatarId;
   const voiceId = optionalString(obj, 'voice_id');

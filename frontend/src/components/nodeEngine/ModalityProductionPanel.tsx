@@ -1,16 +1,22 @@
 import { useMemo, useState } from 'react'
 import {
   AlertTriangle,
+  BookOpen,
+  Boxes,
   Check,
+  CheckCircle2,
   ChevronRight,
+  Clock,
   Copy,
+  Eye,
   FileText,
   Loader2,
   Play,
   RefreshCw,
+  Sparkles,
   Video,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { StatTile } from '@/components/ui/StatTile'
 import { showToast } from '@/components/ui/Toaster'
 import { cn } from '@/lib/utils'
 import {
@@ -29,7 +35,8 @@ import {
   type RenderStyleOverride,
   type VideoRenderStyle,
 } from '@/services/api'
-import { StructuredVisualRenderer } from './StructuredVisualRenderer'
+import { StructuredVisualReview } from './StructuredVisualReview'
+import { NodeExperiencePreview } from './NodeExperiencePreview'
 import {
   countLayerMatches,
   filterVisibleObjects,
@@ -39,6 +46,21 @@ import {
   type NodeEngineFilterState,
 } from './nodeEngineFilters'
 import { MasteryNodeSummary, NodeEngineFilterBar, ObjectRowHeader } from './NodeEngineUi'
+
+/**
+ * Decision-button styles shared with the Course Architect / Node Engine layers:
+ * light tint at rest, solid on hover. primary/produce = blue, render = blue,
+ * regenerate / secondary = neutral slate, view = subtle ghost.
+ */
+const BTN_BASE =
+  'inline-flex items-center justify-center rounded-[4px] border font-semibold transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const BTN_SM = `${BTN_BASE} px-3 py-1.5 text-sm`
+const BTN_XS = `${BTN_BASE} px-2 py-1 text-xs`
+const PRIMARY_BTN = `${BTN_SM} border-transparent bg-blue-600 text-white shadow-sm hover:bg-blue-700 focus-visible:ring-blue-500/40`
+const REGEN_BTN = `${BTN_SM} border-slate-400/30 bg-slate-400/10 text-slate-600 dark:text-slate-300 hover:bg-slate-600 hover:text-white hover:border-transparent focus-visible:ring-slate-400/40`
+const GHOST_BTN = `${BTN_SM} border-border bg-background text-foreground hover:bg-muted hover:text-foreground`
+const GHOST_BTN_XS = `${BTN_XS} border-border bg-background text-foreground hover:bg-muted hover:text-foreground`
+const PREVIEW_BTN = `${BTN_SM} border-transparent bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 focus-visible:ring-emerald-500/40`
 
 interface CloProductionGroup {
   clo_id: string
@@ -345,7 +367,6 @@ export function Layer4Body({
   producingCloId,
   onProduceClo,
   onProducedUpdated,
-  layer4Complete,
   courseCode,
   filters,
   onFiltersChange,
@@ -459,11 +480,44 @@ export function Layer4Body({
     [allNodes, filters, blueprintsByNodeId, contentSpecsByObjectId, producedByObjectId]
   )
 
+  // Progress within the current filter: how many filtered objects are produced,
+  // and (for video) how many have a completed HeyGen render.
+  const matchProgress = useMemo(() => {
+    const active = isFilterActive(filters)
+    let produced = 0
+    let rendered = 0
+    for (const ref of allNodes) {
+      const bp = blueprintsByNodeId[ref.node.node_id]
+      const approvedObjs =
+        bp?.objects.filter((o) => contentSpecsByObjectId[o.object_id]?.status === 'approved') ?? []
+      const objs = active
+        ? filterVisibleObjects(approvedObjs, ref, filters, {
+            layer: 'production',
+            blueprint: bp,
+            getContentSpec: (id) => contentSpecsByObjectId[id],
+            getProduced: (id) => producedByObjectId[id],
+          })
+        : approvedObjs
+      for (const o of objs) {
+        const p = producedByObjectId[o.object_id]
+        if (!p) continue
+        produced++
+        if (
+          p.produced_modality === 'video' &&
+          p.envelope?.modality_specific?.render_status === 'render_complete'
+        ) {
+          rendered++
+        }
+      }
+    }
+    return { produced, rendered }
+  }, [allNodes, filters, blueprintsByNodeId, contentSpecsByObjectId, producedByObjectId])
+
   const filterActive = isFilterActive(filters)
 
   if (status === 'locked') {
     return (
-      <div className="flex items-start gap-2 rounded-md bg-muted p-3 text-sm text-muted-foreground">
+      <div className="flex items-start gap-2 rounded-[4px] bg-muted p-3 text-sm text-muted-foreground">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
         Approve at least one content specification in Layer 3 before producing learning objects.
       </div>
@@ -487,31 +541,61 @@ export function Layer4Body({
     )
   }
 
+  const totalObjects = allApprovedObjectIds.length
+  const upToDateCount = producedCount - staleCount
+
   return (
     <div className="space-y-4">
+      {/* Stat cards — course-wide modality production progress. */}
+      <div className="md-scope grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+        <StatTile icon={BookOpen} label="CLOs covered" value={groups.length} color="slate" size="sm" />
+        <StatTile icon={Boxes} label="Learning objects" value={totalObjects} color="blue" size="sm" />
+        <StatTile
+          icon={Sparkles}
+          label="Produced"
+          value={`${producedCount}/${totalObjects}`}
+          color="rose"
+          size="sm"
+        />
+        <StatTile
+          icon={CheckCircle2}
+          label="Up to date"
+          value={upToDateCount}
+          hint={staleCount > 0 ? `${staleCount} need regeneration` : undefined}
+          color="emerald"
+          size="sm"
+        />
+        <StatTile
+          icon={Clock}
+          label="Pending"
+          value={totalObjects - producedCount}
+          color="amber"
+          size="sm"
+        />
+      </div>
+
       <NodeEngineFilterBar
         layer="production"
         filters={filters}
         onChange={onFiltersChange}
-        matchCount={filterActive ? matchCount : undefined}
+        matchCount={
+          filterActive
+            ? {
+                ...matchCount,
+                produced: matchProgress.produced,
+                rendered: matchProgress.rendered,
+              }
+            : {
+                nodes: allNodes.length,
+                objects: totalObjects,
+                produced: matchProgress.produced,
+                rendered: matchProgress.rendered,
+              }
+        }
       />
 
-      <div className="rounded-md border border-dashed border-border bg-muted/20 p-3 text-sm text-muted-foreground">
-        <p className="font-medium text-foreground">Layer 4 — modality production</p>
-        <p className="mt-1">
-          Each subtopic starts <strong className="font-medium text-foreground">collapsed</strong> —
-          only the next subtopic needing production opens automatically.{' '}
-          <strong className="font-medium text-foreground">Text</strong> objects produce structured
-          segments; <strong className="font-medium text-foreground">video</strong> objects produce a{' '}
-          <strong className="font-medium text-foreground">HeyGen-ready prompt</strong> and transcript
-          (render when the HeyGen API is connected). After Layer 2 or Layer 3 changes, use{' '}
-          <strong className="font-medium text-foreground">Regenerate</strong> at CLO, subtopic, node,
-          or object level.
-        </p>
-      </div>
-
       {staleCount > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-[4px] border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
           <div className="flex min-w-0 flex-1 items-start gap-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>
@@ -519,10 +603,9 @@ export function Layer4Body({
               {staleCount === 1 ? '' : 's'} need regeneration (newer Layer 3 specs or video brief upgrade).
             </span>
           </div>
-          <Button
-            size="sm"
-            variant="default"
-            className="shrink-0"
+          <button
+            type="button"
+            className={cn(REGEN_BTN, 'shrink-0')}
             onClick={() => void handleRegenerateStale()}
             disabled={layerBusy}
           >
@@ -532,24 +615,9 @@ export function Layer4Body({
               <RefreshCw className="mr-2 h-4 w-4" />
             )}
             Regenerate {staleCount} stale
-          </Button>
+          </button>
         </div>
       )}
-
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Pill className="bg-muted text-muted-foreground">
-          {allApprovedObjectIds.length} approved spec(s)
-        </Pill>
-        <Pill
-          className={
-            layer4Complete
-              ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
-              : 'bg-amber-500/15 text-amber-800 dark:text-amber-400'
-          }
-        >
-          {producedCount}/{allApprovedObjectIds.length} produced
-        </Pill>
-      </div>
 
       {groups.map((group) => {
         const cloApprovedIds = approvedSpecObjects(
@@ -634,13 +702,13 @@ function CloProductionSection({
   return (
     <details
       className={cn(
-        'rounded-lg border',
+        'rounded-[4px] border',
         allProduced ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-border bg-card'
       )}
       open={defaultOpen}
     >
       <summary className="cursor-pointer px-4 py-3">
-        <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+        <span className="font-mono text-xs uppercase tracking-wide text-muted-foreground">
           {group.clo_id}
         </span>
         <p className="mt-0.5 text-sm font-medium leading-snug">{group.refined_clo}</p>
@@ -655,7 +723,12 @@ function CloProductionSection({
       </summary>
       <div className="space-y-3 border-t border-border px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={onProduce} disabled={busy}>
+          <button
+            type="button"
+            className={cloProducedCount > 0 ? REGEN_BTN : PRIMARY_BTN}
+            onClick={onProduce}
+            disabled={busy}
+          >
             {producing ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : cloProducedCount > 0 ? (
@@ -666,7 +739,7 @@ function CloProductionSection({
             {cloProducedCount > 0
               ? `Regenerate entire ${group.clo_id}`
               : `Produce all for ${group.clo_id} (optional batch)`}
-          </Button>
+          </button>
           {cloStaleCount > 0 && (
             <span className="text-xs text-amber-700 dark:text-amber-400">
               {cloStaleCount} stale in this CLO — use the banner button above or expand subtopics.
@@ -851,13 +924,13 @@ function SubtopicProductionSection({
   return (
     <details
       className={cn(
-        'rounded-md border',
+        'rounded-[4px] border',
         allProduced ? 'border-emerald-500/25 bg-emerald-500/5' : 'border-border bg-muted/10'
       )}
       open={defaultOpen}
     >
       <summary className="cursor-pointer px-3 py-2 text-sm">
-        <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+        <span className="text-xs font-semibold tracking-tight text-foreground">
           Subtopic {subtopicIndex}: {subtopic.subtopicTitle}
         </span>
         <span className="ml-2 text-xs text-muted-foreground">
@@ -876,9 +949,9 @@ function SubtopicProductionSection({
       </summary>
       <div className="space-y-3 border-t border-border px-3 py-3">
         <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="default"
+          <button
+            type="button"
+            className={produced > 0 ? REGEN_BTN : PRIMARY_BTN}
             onClick={() => void handleProduceSubtopic(produced > 0)}
             disabled={subtopicBusy}
           >
@@ -892,11 +965,11 @@ function SubtopicProductionSection({
             {produced > 0
               ? `Regenerate all for ${subtopic.subtopicId}`
               : `Produce all for ${subtopic.subtopicId}`}
-          </Button>
+          </button>
           {staleCount > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
+            <button
+              type="button"
+              className={REGEN_BTN}
               onClick={() => void handleRegenerateStaleSubtopic()}
               disabled={subtopicBusy}
             >
@@ -906,7 +979,7 @@ function SubtopicProductionSection({
                 <RefreshCw className="mr-2 h-4 w-4" />
               )}
               Regenerate {staleCount} stale
-            </Button>
+            </button>
           )}
         </div>
 
@@ -956,6 +1029,16 @@ function NodeProductionCard({
   filterActive: boolean
 }) {
   const [nodeProducing, setNodeProducing] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const previewItems = useMemo(
+    () =>
+      [...blueprint.objects]
+        .filter((o) => contentSpecsByObjectId[o.object_id]?.status === 'approved')
+        .sort((a, b) => a.sequence_order - b.sequence_order)
+        .map((o) => ({ obj: o, produced: producedByObjectId[o.object_id] ?? null })),
+    [blueprint, contentSpecsByObjectId, producedByObjectId]
+  )
+  const hasAnyProduced = previewItems.some((it) => it.produced)
   const objects = useMemo(() => {
     const approved = [...blueprint.objects]
       .filter((o) => contentSpecsByObjectId[o.object_id]?.status === 'approved')
@@ -1009,19 +1092,12 @@ function NodeProductionCard({
   }
 
   return (
-    <details
-      className={cn(
-        'rounded-md border bg-muted/10',
-        allProduced ? 'border-emerald-500/25' : 'border-border'
-      )}
-      open={forceOpen}
-    >
-      <summary className="cursor-pointer px-3 py-2 text-sm">
+    <details className="group" open={forceOpen}>
+      <summary className="cursor-pointer py-2 text-sm">
         <MasteryNodeSummary
           nodeIndex={nodeIndex}
           title={ref_.node.node_title}
           nodeId={ref_.node.node_id}
-          highlight={forceOpen}
         >
           <Pill
             className={
@@ -1034,11 +1110,11 @@ function NodeProductionCard({
           </Pill>
         </MasteryNodeSummary>
       </summary>
-      <div className="space-y-2 border-t border-border px-3 py-3">
+      <div className="mt-2 space-y-2 border-t border-border pt-3">
         <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="outline"
+          <button
+            type="button"
+            className={producedCount > 0 ? REGEN_BTN : PRIMARY_BTN}
             onClick={() => void handleProduceNode(producedCount > 0)}
             disabled={nodeBusy || objects.length === 0}
           >
@@ -1050,7 +1126,21 @@ function NodeProductionCard({
               <Play className="mr-2 h-4 w-4" />
             )}
             {producedCount > 0 ? 'Regenerate node' : 'Produce node'}
-          </Button>
+          </button>
+          <button
+            type="button"
+            className={PREVIEW_BTN}
+            onClick={() => setPreviewOpen(true)}
+            disabled={!hasAnyProduced}
+            title={
+              hasAnyProduced
+                ? 'See this node as a student would'
+                : 'Produce at least one object to preview'
+            }
+          >
+            <Eye className="mr-2 h-4 w-4" />
+            Preview node experience
+          </button>
         </div>
         {objects.map((obj, objIndex) => (
           <ObjectProductionRow
@@ -1064,10 +1154,16 @@ function NodeProductionCard({
             busy={nodeBusy}
             onProducedUpdated={onProducedUpdated}
             courseCode={courseCode}
-            highlight={filterActive}
           />
         ))}
       </div>
+      <NodeExperiencePreview
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        nodeTitle={ref_.node.node_title}
+        courseCode={courseCode}
+        items={previewItems}
+      />
     </details>
   )
 }
@@ -1082,7 +1178,6 @@ function ObjectProductionRow({
   busy,
   onProducedUpdated,
   courseCode,
-  highlight,
 }: {
   ref_: ApprovedNodeRef
   obj: NodeEngineBlueprintObject
@@ -1093,7 +1188,6 @@ function ObjectProductionRow({
   busy: boolean
   onProducedUpdated: (objectId: string, produced: NodeEngineProducedObject) => void
   courseCode: string
-  highlight?: boolean
 }) {
   const [producing, setProducing] = useState(false)
   const [rendering, setRendering] = useState(false)
@@ -1290,12 +1384,12 @@ function ObjectProductionRow({
   return (
     <div
       className={cn(
-        'rounded-md border px-3 py-2 text-xs',
+        'border-t border-border/60 pt-3 text-xs',
         modalityMismatch
-          ? 'border-amber-500/35 bg-amber-500/5'
+          ? 'border-l-2 border-l-amber-500/50 pl-3'
           : produced
-            ? 'border-emerald-500/20 bg-emerald-500/5'
-            : 'border-border bg-background'
+            ? 'border-l-2 border-l-emerald-500/40 pl-3'
+            : ''
       )}
     >
       <ObjectRowHeader
@@ -1303,7 +1397,6 @@ function ObjectProductionRow({
         objectTotal={objectTotal}
         title={`${obj.sequence_order}. ${obj.title}`}
         objectId={obj.object_id}
-        highlight={highlight}
       >
         {isVideo ? (
           <Video className="h-3.5 w-3.5 text-muted-foreground" />
@@ -1415,7 +1508,7 @@ function ObjectProductionRow({
             value={renderStyleOverride}
             onChange={(e) => setRenderStyleOverride(e.target.value as RenderStyleOverride)}
             disabled={busy || producing || rendering}
-            className="h-7 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+            className="h-7 rounded-[4px] border border-border bg-background px-2 text-xs text-foreground"
           >
             <option value="inherit">Course default (Produced)</option>
             <option value="video_agent_produced">Produced (Video Agent)</option>
@@ -1430,9 +1523,9 @@ function ObjectProductionRow({
       )}
 
       <div className="mt-2 flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          variant={produced && !modalityMismatch ? 'outline' : 'default'}
+        <button
+          type="button"
+          className={produced && !modalityMismatch ? REGEN_BTN : PRIMARY_BTN}
           onClick={() => void handleProduce()}
           disabled={busy || producing || rendering}
         >
@@ -1444,32 +1537,32 @@ function ObjectProductionRow({
             <Play className="mr-2 h-3 w-3" />
           )}
           {produceLabel}
-        </Button>
+        </button>
         {isVideo && heygenPrompt && hasVideoBrief && (
-          <Button size="sm" variant="ghost" onClick={() => void handleCopyHeyGenPrompt()}>
+          <button type="button" className={GHOST_BTN} onClick={() => void handleCopyHeyGenPrompt()}>
             <Copy className="mr-2 h-3 w-3" />
             Copy HeyGen prompt
-          </Button>
+          </button>
         )}
         {!isVideo && !isStructuredVisual && segments.length > 0 && (
-          <Button size="sm" variant="ghost" onClick={() => setExpanded((v) => !v)}>
+          <button type="button" className={GHOST_BTN} onClick={() => setExpanded((v) => !v)}>
             {expanded ? 'Hide segments' : `Preview ${segments.length} segment(s)`}
-          </Button>
+          </button>
         )}
         {isStructuredVisual && structuredVisual && (
-          <Button size="sm" variant="ghost" onClick={() => setExpanded((v) => !v)}>
+          <button type="button" className={GHOST_BTN} onClick={() => setExpanded((v) => !v)}>
             {expanded ? 'Hide visual' : 'Preview visual'}
-          </Button>
+          </button>
         )}
         {isVideo && hasVideoBrief && (heygenPrompt || transcript) && (
-          <Button size="sm" variant="ghost" onClick={() => setExpanded((v) => !v)}>
+          <button type="button" className={GHOST_BTN} onClick={() => setExpanded((v) => !v)}>
             {expanded ? 'Hide brief' : 'Preview video brief'}
-          </Button>
+          </button>
         )}
         {canRender && (
-          <Button
-            size="sm"
-            variant="default"
+          <button
+            type="button"
+            className={PRIMARY_BTN}
             onClick={() => void handleRenderVideo()}
             disabled={busy || producing || rendering}
           >
@@ -1479,12 +1572,12 @@ function ObjectProductionRow({
               <Video className="mr-2 h-3 w-3" />
             )}
             Render with HeyGen
-          </Button>
+          </button>
         )}
         {renderPending && (
-          <Button
-            size="sm"
-            variant="outline"
+          <button
+            type="button"
+            className={REGEN_BTN}
             onClick={() => void handleRefreshRender()}
             disabled={busy || producing || rendering}
           >
@@ -1494,21 +1587,17 @@ function ObjectProductionRow({
               <RefreshCw className="mr-2 h-3 w-3" />
             )}
             Check render status
-          </Button>
+          </button>
         )}
         {renderStatus === 'render_complete' && maestroVideoStream && (
-          <Button size="sm" variant="outline" asChild>
-            <a href={maestroVideoStream} target="_blank" rel="noreferrer">
-              Download from Maestro
-            </a>
-          </Button>
+          <a className={REGEN_BTN} href={maestroVideoStream} target="_blank" rel="noreferrer">
+            Download from Maestro
+          </a>
         )}
         {renderStatus === 'render_complete' && heygenSourceUrl && !maestroVideoStored && (
-          <Button size="sm" variant="outline" asChild>
-            <a href={heygenSourceUrl} target="_blank" rel="noreferrer">
-              Open HeyGen source
-            </a>
-          </Button>
+          <a className={REGEN_BTN} href={heygenSourceUrl} target="_blank" rel="noreferrer">
+            Open HeyGen source
+          </a>
         )}
       </div>
 
@@ -1519,11 +1608,11 @@ function ObjectProductionRow({
       )}
 
       {renderStatus === 'render_complete' && maestroVideoStream && (
-        <div className="mt-3 w-fit max-w-full rounded-lg border border-border bg-black/90 p-2">
+        <div className="mt-3 w-fit max-w-full rounded-[4px] border border-border bg-black/90 p-2">
           <video
             controls
             preload="metadata"
-            className="block max-h-80 w-auto max-w-full rounded-md bg-black"
+            className="block max-h-80 w-auto max-w-full rounded-[4px] bg-black"
             src={maestroVideoStream}
           >
             Your browser does not support inline video playback.
@@ -1562,7 +1651,7 @@ function ObjectProductionRow({
       )}
 
       {expanded && !isVideo && !isStructuredVisual && segments.length > 0 && (
-        <div className="mt-3 max-h-64 space-y-2 overflow-y-auto rounded-md border border-border bg-muted/20 p-2">
+        <div className="mt-3 max-h-64 space-y-2 overflow-y-auto rounded-[4px] border border-border bg-muted/20 p-2">
           {segments.map((seg, i) => (
             <div key={`${seg.type}-${i}`} className="border-b border-border/50 pb-2 last:border-0">
               <span className="font-mono text-[9px] uppercase text-muted-foreground">
@@ -1574,9 +1663,18 @@ function ObjectProductionRow({
         </div>
       )}
 
-      {expanded && isStructuredVisual && structuredVisual && (
-        <div className="mt-3 max-h-[28rem] overflow-y-auto rounded-md border border-border bg-muted/10 p-3">
-          <StructuredVisualRenderer visual={structuredVisual} />
+      {expanded && isStructuredVisual && structuredVisual && produced && (
+        <div className="mt-3 rounded-[4px] border border-border bg-muted/10 p-3">
+          <StructuredVisualReview
+            visual={structuredVisual}
+            produced={produced}
+            courseCode={courseCode}
+            subtopicId={ref_.subtopicId}
+            nodeId={ref_.node.node_id}
+            objectId={obj.object_id}
+            busy={busy || producing || rendering}
+            onProducedUpdated={onProducedUpdated}
+          />
         </div>
       )}
 
@@ -1589,7 +1687,7 @@ function ObjectProductionRow({
       )}
 
       {expanded && isVideo && hasVideoBrief && agentProduction && agentProduction.sections.length > 0 && (
-        <div className="mt-3 space-y-2 rounded-md border border-violet-500/20 bg-violet-500/5 p-2">
+        <div className="mt-3 space-y-2 rounded-[4px] border border-violet-500/20 bg-violet-500/5 p-2">
           <span className="font-mono text-[9px] uppercase text-muted-foreground">
             Produced scenes ({agentProduction.sections.length})
           </span>
@@ -1620,7 +1718,7 @@ function ObjectProductionRow({
 
       {expanded && isVideo && hasVideoBrief && renderedTranscript &&
         transcriptFidelity && transcriptFidelity !== 'matched' && (
-          <div className="mt-3 grid grid-cols-1 gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 md:grid-cols-2">
+          <div className="mt-3 grid grid-cols-1 gap-2 rounded-[4px] border border-amber-500/30 bg-amber-500/5 p-2 md:grid-cols-2">
             <div>
               <span className="font-mono text-[9px] uppercase text-muted-foreground">
                 Approved transcript (canonical)
@@ -1641,17 +1739,17 @@ function ObjectProductionRow({
         )}
 
       {expanded && isVideo && hasVideoBrief && (
-        <div className="mt-3 space-y-3 rounded-md border border-border bg-muted/20 p-2">
+        <div className="mt-3 space-y-3 rounded-[4px] border border-border bg-muted/20 p-2">
           {heygenPrompt && (
             <div>
               <div className="flex items-center justify-between gap-2">
                 <span className="font-mono text-[9px] uppercase text-muted-foreground">
                   HeyGen prompt — single block with full script (paste into Video Agent; API uses script separately)
                 </span>
-                <Button size="sm" variant="ghost" className="h-6 px-2" onClick={() => void handleCopyHeyGenPrompt()}>
+                <button type="button" className={GHOST_BTN_XS} onClick={() => void handleCopyHeyGenPrompt()}>
                   <Copy className="mr-1 h-3 w-3" />
                   Copy
-                </Button>
+                </button>
               </div>
               <pre className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap rounded border border-border bg-background p-2 text-foreground">
                 {heygenPrompt}
@@ -1681,11 +1779,11 @@ export function Layer4ContinueCta({
 }) {
   if (!layer4Complete) return null
   return (
-    <div className="rounded-md border border-border bg-muted/20 p-4">
-      <Button size="sm" variant="default" onClick={onContinue}>
+    <div className="rounded-[4px] border border-border bg-muted/20 p-4">
+      <button type="button" className={PRIMARY_BTN} onClick={onContinue}>
         Continue to Layer 5 — Validation & Review
         <ChevronRight className="ml-2 h-4 w-4" />
-      </Button>
+      </button>
     </div>
   )
 }

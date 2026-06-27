@@ -10,6 +10,7 @@ import {
 import {
   compileHeyGenAgentPrompt,
   validateAgentProduction,
+  INFO_NOTE_PREFIX,
 } from './videoAgentPrompt.service.js';
 
 /** Default narration cap (~3 min at normal speaking pace) when no duration is set. */
@@ -474,6 +475,8 @@ export function finalizeVideoBrief(
           // On-screen callouts are encouraged in cinematic/moderate mode; only enforce
           // verbatim key-term tracing under strict fidelity.
           enforceOnScreenTracing: settings?.narration_fidelity === 'strict',
+          // Relaxed mode expects script-drift, so its mismatch is reported as info.
+          relaxedNarration: settings?.narration_fidelity === 'relaxed',
         })
       );
     }
@@ -484,11 +487,14 @@ export function finalizeVideoBrief(
     ...wordNotes,
     ...agentNotes,
   ];
+  // Informational notes (e.g. expected drift in relaxed narration) are surfaced
+  // but must NOT force review on their own.
+  const newNotes = mergedNotes.filter((n) => !priorNotes.includes(n));
+  const newBlockingNotes = newNotes.filter((n) => !n.startsWith(INFO_NOTE_PREFIX));
   const needsReview =
     wordCount > wordBudget ||
     brief.fidelity_check?.status === 'needs_review' ||
-    agentNotes.length > 0 ||
-    mergedNotes.length > priorNotes.length;
+    newBlockingNotes.length > 0;
 
   const withScript: VideoBriefContent = {
     ...brief,

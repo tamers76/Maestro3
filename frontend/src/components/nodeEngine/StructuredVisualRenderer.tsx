@@ -91,7 +91,7 @@ function ElementCard({
   index?: number
 }) {
   return (
-    <div className="rounded-md border border-border bg-background p-2">
+    <div className="rounded-[4px] border border-border bg-background p-2">
       <div className="flex flex-wrap items-center gap-2">
         {typeof index === 'number' && (
           <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
@@ -195,7 +195,7 @@ export function StructuredVisualRenderer({ visual }: { visual: NodeEngineStructu
       {family === 'columnar' && (
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {columns.map(([type, els]) => (
-            <div key={type} className="rounded-md border border-border bg-muted/20 p-2">
+            <div key={type} className="rounded-[4px] border border-border bg-muted/20 p-2">
               <p className="mb-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
                 {readableType(type)}
               </p>
@@ -216,7 +216,7 @@ export function StructuredVisualRenderer({ visual }: { visual: NodeEngineStructu
       {family === 'checklist' && (
         <div className="space-y-1">
           {orderedElements.map((el) => (
-            <div key={el.element_id} className="flex items-start gap-2 rounded-md border border-border bg-background p-2">
+            <div key={el.element_id} className="flex items-start gap-2 rounded-[4px] border border-border bg-background p-2">
               <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
               <div className="min-w-0 flex-1">
                 <span className="text-xs font-medium text-foreground">{el.label}</span>
@@ -245,7 +245,7 @@ export function StructuredVisualRenderer({ visual }: { visual: NodeEngineStructu
 
       {/* Relationships — shown for non-sequential families (sequential implies order). */}
       {family !== 'sequential' && visual.relationships.length > 0 && (
-        <div className="rounded-md border border-border bg-muted/20 p-2">
+        <div className="rounded-[4px] border border-border bg-muted/20 p-2">
           <p className="mb-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
             Connections ({visual.relationships.length})
           </p>

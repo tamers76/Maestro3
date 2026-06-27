@@ -4,13 +4,18 @@
  */
 import type { VideoSettings } from '../models/nodeEngine.js';
 import type { VideoRenderStatus } from './mocks/mockVideoRenderer.service.js';
+import { getConfigForVehicle } from './modalityGenerationConfig.service.js';
 
 const HEYGEN_API_BASE = 'https://api.heygen.com';
 
 export function resolveHeyGenApiKey(apiKeyRef?: string): string | null {
   const ref = apiKeyRef?.trim() || 'HEYGEN_API_KEY';
-  const key = process.env[ref]?.trim();
-  return key || null;
+  // 1) An environment variable named by apiKeyRef always wins (ops override).
+  const envKey = process.env[ref]?.trim();
+  if (envKey) return envKey;
+  // 2) Fall back to the key saved via the Video settings UI (modality config).
+  const stored = getConfigForVehicle('video')?.videoSettings?.apiKey?.trim();
+  return stored || null;
 }
 
 export function heygenHeaders(apiKey: string): Record<string, string> {

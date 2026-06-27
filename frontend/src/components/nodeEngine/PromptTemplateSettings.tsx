@@ -717,7 +717,7 @@ export default function PromptTemplateSettings({
                             />
                           </div>
                           <div className="space-y-1">
-                            <label className="text-xs font-medium text-muted-foreground">API key ref (name only)</label>
+                            <label className="text-xs font-medium text-muted-foreground">API key ref (env name, optional)</label>
                             <Input
                               value={modelDraft.videoSettings?.apiKeyRef ?? ''}
                               onChange={(e) => patchVideoSettings({ apiKeyRef: e.target.value || undefined })}
@@ -725,6 +725,31 @@ export default function PromptTemplateSettings({
                               className="bg-background/50 border-black/10 dark:border-white/10"
                             />
                           </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-muted-foreground">
+                            HeyGen API key
+                            {modelDraft.videoSettings?.apiKeyConfigured ? (
+                              <span className="ml-2 text-emerald-600 dark:text-emerald-400">saved — type to replace</span>
+                            ) : null}
+                          </label>
+                          <Input
+                            type="password"
+                            autoComplete="off"
+                            value={modelDraft.videoSettings?.apiKey ?? ''}
+                            onChange={(e) => patchVideoSettings({ apiKey: e.target.value || undefined })}
+                            placeholder={
+                              modelDraft.videoSettings?.apiKeyConfigured
+                                ? '•••••••••• (saved)'
+                                : 'Paste your HeyGen API key'
+                            }
+                            className="bg-background/50 border-black/10 dark:border-white/10"
+                          />
+                          <p className="text-[10px] text-muted-foreground">
+                            Stored on the server and masked on reload. Leave blank to keep the saved key. An
+                            environment key (named by the ref above) takes precedence when set.
+                          </p>
                         </div>
 
                         <label className="flex items-center gap-2 text-xs text-muted-foreground">

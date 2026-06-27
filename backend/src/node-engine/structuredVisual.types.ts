@@ -128,6 +128,11 @@ export interface StructuredVisualContent {
   alt_text: string;
   /** Full academic-meaning text equivalent (mandatory accessibility). */
   text_equivalent: string;
+  /**
+   * Short student-facing caption (teacher voice + throughline) shown under the
+   * visual to help a learner read and understand it. Optional for backward-compat.
+   */
+  learner_caption?: string;
   grounding_strength: GroundingStrength;
   evidence_check_role?: StructuredVisualEvidenceRole;
   /** Defaults to platform_native; ai_infographic reserved for a later export route. */
@@ -288,6 +293,7 @@ export function parseStructuredVisualContent(input: unknown): StructuredVisualCo
     text_equivalent: requireString(obj, 'text_equivalent', 'StructuredVisualContent'),
     grounding_strength,
     rendering_route,
+    ...(optionalString(obj, 'learner_caption') ? { learner_caption: optionalString(obj, 'learner_caption') } : {}),
     ...(optionalString(obj, 'renderer_notes') ? { renderer_notes: optionalString(obj, 'renderer_notes') } : {}),
     ...(evidence_check_role ? { evidence_check_role } : {}),
     ...(fidelity_check ? { fidelity_check } : {}),
@@ -386,6 +392,8 @@ export const STRUCTURED_VISUAL_OUTPUT_CONTRACT = {
     renderer_notes: 'string — optional structural priorities (no colors/fonts/decorative layout)',
     alt_text: 'string — short accessibility label',
     text_equivalent: 'string — full ACADEMIC MEANING of the visual (not just appearance)',
+    learner_caption:
+      'string — SHORT student-facing caption (1-3 plain sentences) written as a teacher explaining THIS visual to a learner: where to start and how to follow it, how the parts connect (the throughline), and the one key takeaway (plus the misconception to avoid if present). Warm, plain, second person ("Start at...", "Notice that..."). Ground every statement in the visual elements/relationships — no invented content, no fictional characters or plot. Distinct from text_equivalent.',
     grounding_strength: 'strong | moderate | weak',
     evidence_check_role: 'not_evidence_check | supporting_visual | evidence_collection_visual',
     fidelity_check: { status: 'passed | needs_review', notes: ['string'] },

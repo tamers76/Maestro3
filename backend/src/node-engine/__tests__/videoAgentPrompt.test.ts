@@ -6,6 +6,8 @@ import {
   validateAgentProduction,
   MODERATE_FRAMING_DIRECTIVE,
   STRICT_FRAMING_DIRECTIVE,
+  RELAXED_FRAMING_DIRECTIVE,
+  INFO_NOTE_PREFIX,
   DEFAULT_STYLE_BLOCK,
 } from '../videoAgentPrompt.service.js';
 import type { VideoBriefContent } from '../videoBrief.types.js';
@@ -91,11 +93,33 @@ test('compileHeyGenAgentPrompt emits structured script in reference order', () =
   assert.ok(prompt.indexOf('STRUCTURED SCRIPT') < prompt.indexOf('CRITICAL ON-SCREEN'));
 });
 
-test('compileHeyGenAgentPrompt swaps moderate vs strict directive', () => {
+test('compileHeyGenAgentPrompt swaps moderate vs strict vs relaxed directive', () => {
   const moderate = compileHeyGenAgentPrompt(sampleBrief(), { provider: 'heygen', narration_fidelity: 'moderate' });
   assert.ok(moderate.includes(MODERATE_FRAMING_DIRECTIVE));
   const strict = compileHeyGenAgentPrompt(sampleBrief(), { provider: 'heygen', narration_fidelity: 'strict' });
   assert.ok(strict.includes(STRICT_FRAMING_DIRECTIVE));
+  const relaxed = compileHeyGenAgentPrompt(sampleBrief(), { provider: 'heygen', narration_fidelity: 'relaxed' });
+  assert.ok(relaxed.includes(RELAXED_FRAMING_DIRECTIVE));
+});
+
+test('validateAgentProduction reports relaxed script-drift as an informational note', () => {
+  const brief = sampleBrief();
+  const production = brief.agent_production!;
+  // Mutate a section narration so it no longer matches full_script verbatim.
+  const drifted = {
+    ...production,
+    sections: production.sections.map((s, i) =>
+      i === 0 ? { ...s, narration: `${s.narration} Think of it like tending a garden.` } : s
+    ),
+  };
+  const relaxedNotes = validateAgentProduction(drifted, brief.narration.full_script, [], {
+    relaxedNarration: true,
+  });
+  assert.ok(relaxedNotes.some((n) => n.startsWith(INFO_NOTE_PREFIX)));
+  assert.ok(!relaxedNotes.some((n) => n.includes('review for academic drift')));
+
+  const strictNotes = validateAgentProduction(drifted, brief.narration.full_script, []);
+  assert.ok(strictNotes.some((n) => n.includes('review for academic drift')));
 });
 
 test('compileHeyGenAgentPrompt includes default style block only without style_id', () => {

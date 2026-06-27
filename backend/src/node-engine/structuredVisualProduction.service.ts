@@ -62,12 +62,17 @@ function defaultVisualType(pattern: ContentPattern): StructuredVisualType {
 
 function buildStructuredVisualMessages(
   spec: LearningObjectContentSpec,
-  taskPrompt: string
+  taskPrompt: string,
+  smeFeedback?: string
 ): AIMessage[] {
   const userPayload = {
     content_spec: spec,
     output_contract: STRUCTURED_VISUAL_OUTPUT_CONTRACT,
   };
+  const feedback = smeFeedback?.trim();
+  const feedbackBlock = feedback
+    ? `\n\nSME REVIEW FEEDBACK — regenerate the visual addressing this guidance while staying faithful to the approved content (do NOT invent academic content; keep citations on grounded elements):\n"""${feedback}"""`
+    : '';
   return [
     { role: 'system', content: taskPrompt },
     {
@@ -76,7 +81,7 @@ function buildStructuredVisualMessages(
         userPayload,
         null,
         2
-      )}`,
+      )}${feedbackBlock}`,
     },
   ];
 }
@@ -135,6 +140,7 @@ export function projectStructuredVisualFromContentSpec(
     reading_order: elements.map((e) => e.element_id),
     alt_text: `Structured visual for ${spec.title}`,
     text_equivalent: spec.required_explanation,
+    learner_caption: `Start with ${spec.title}, then follow each example to see how it applies in practice.`,
     grounding_strength: spec.grounding_strength,
     rendering_route: 'platform_native',
   };
@@ -190,6 +196,7 @@ function buildStructuredVisualEnvelope(
       structured_visual: content,
       visual_type: content.visual_type,
       text_equivalent: content.text_equivalent,
+      ...(content.learner_caption ? { learner_caption: content.learner_caption } : {}),
       rendering_route: content.rendering_route,
       fidelity_check: content.fidelity_check,
       content_spec_id: spec.content_spec_id,
@@ -247,6 +254,8 @@ export interface ProduceStructuredVisualOptions {
   executor?: TextProductionExecutor;
   useDeterministicProjection?: boolean;
   maxTokens?: number;
+  /** Natural-language SME feedback that steers regeneration. */
+  smeFeedback?: string;
 }
 
 export async function produceStructuredVisualObject(
@@ -294,7 +303,7 @@ export async function produceStructuredVisualObject(
       ? { executor: options.executor, audit: buildStructuredVisualExecutor(maxTokens).audit }
       : buildStructuredVisualExecutor(maxTokens);
     audit = built.audit;
-    const messages = buildStructuredVisualMessages(spec, template.task_prompt);
+    const messages = buildStructuredVisualMessages(spec, template.task_prompt, options.smeFeedback);
     const raw = await built.executor(messages);
     const parsed = parseAIJson<unknown>(raw);
     content = finalizeStructuredVisual(extractStructuredVisualFromLlmPayload(parsed));
@@ -334,4 +343,70 @@ export async function getProducedStructuredVisual(
   const raw = await getProducedObjectArtifact(courseCode, objectId);
   if (!raw) return null;
   return parseProducedObjectRecord(raw);
+}
+
+export interface SaveStructuredVisualEditsOptions {
+  /** Mark the visual SME-approved on save (otherwise it stays in review). */
+  approve?: boolean;
+  persist?: boolean;
+}
+
+/**
+ * Persist SME edits to a produced structured visual. The edited visual is
+ * re-parsed and re-finalized (schema re-validated, reading_order rebuilt,
+ * citation coverage + grounding re-flagged) so the governed JSON stays the
+ * source of truth. Existing envelope metadata is preserved; only the visual
+ * content, derived fields, and governance_status change.
+ */
+export async function saveStructuredVisualEdits(
+  courseCode: string,
+  subtopicId: string,
+  nodeId: string,
+  objectId: string,
+  editedVisual: unknown,
+  options: SaveStructuredVisualEditsOptions = {}
+): Promise<ProducedObjectRecord> {
+  const { approve = false, persist = true } = options;
+
+  const existing = await getProducedStructuredVisual(courseCode, subtopicId, nodeId, objectId);
+  if (!existing) {
+    throw new StructuredVisualProductionError(
+      `No produced structured visual for object "${objectId}" — produce it before editing.`
+    );
+  }
+  if (existing.produced_modality !== 'structured_visual') {
+    throw new StructuredVisualProductionError(
+      `Object "${objectId}" was not produced as a structured visual.`
+    );
+  }
+
+  // Re-validate the SME-edited content against the schema, then finalize so
+  // reading_order is complete and missing citations / weak grounding are flagged.
+  const content = finalizeStructuredVisual(parseStructuredVisualContent(editedVisual));
+
+  const envelope: GeneratedObjectEnvelope = {
+    ...existing.envelope,
+    governance_status: approve ? 'sme_approved' : 'recommended_sme_review',
+    modality_specific: {
+      ...existing.envelope.modality_specific,
+      structured_visual: content,
+      visual_type: content.visual_type,
+      text_equivalent: content.text_equivalent,
+      learner_caption: content.learner_caption,
+      rendering_route: content.rendering_route,
+      fidelity_check: content.fidelity_check,
+    },
+  };
+  const validatedEnvelope = parseGeneratedObjectEnvelope(JSON.parse(JSON.stringify(envelope)));
+
+  const record: ProducedObjectRecord = {
+    ...existing,
+    envelope: validatedEnvelope,
+    produced_at: new Date().toISOString(),
+  };
+  const validated = parseProducedObjectRecord(JSON.parse(JSON.stringify(record)));
+  if (persist) {
+    await saveProducedObjectArtifact(courseCode, objectId, validated);
+  }
+  return validated;
 }
