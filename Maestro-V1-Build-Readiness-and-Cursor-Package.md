@@ -1,6 +1,6 @@
 # Maestro V1 — Build-Readiness Review & Cursor Implementation Package
 
-*Companion to **Maestro-Node-Engine-Build-Spec.md** (Steps 1–9). This document turns the specification into a phased, buildable V1. It does not restate the spec; it references it. Section numbers like "§8.14" point into the Build Spec.*
+*Companion to **Maestro-Node-Engine-Build-Spec.md** (Steps 1–9). That companion spec is referenced by this planning package but is not currently present in this repository. This document turns the specification into a phased, buildable V1 and now reflects the implemented Postgres-first Course Architect + Maestro Node Engine application. Section numbers like "§8.14" point into the Build Spec.*
 
 ---
 
@@ -15,13 +15,13 @@ The "golden path" V1 must prove:
 ```
 upload syllabus → extract & refine CLOs → review/redesign assessments → generate subtopics
 → generate a node → node experience blueprint → Level 2 content spec → produce a TEXT object
-via the text prompt template → wrap in the generated-object envelope → run Step 9 validation
-→ surface in the SME review queue → approve / regenerate → render a learner preview
+via the text prompt template → wrap in the generated-object envelope
+→ surface for SME/admin review → approve / regenerate → render a learner preview
 ```
 
 Everything else (more modalities, more screens, more autonomy) is **widening** an already-working spine. The build order in §6 and the phases in §9 enforce this.
 
-A note on honesty about scope: much of Maestro V1 is **net-new application code** (intake, generation orchestration, the envelope store, the Step 9 validator, the review workflow, the preview). The parts that already exist in the codebase (per prior sessions) are the **reference-grounding retrieval layer** (RAG / reference-chunk retrieval) and the chat executor — V1 should reuse these, not rebuild them. Anything touching HeyGen, image generation, interactive rendering, LMS/SCORM, or the runtime learner model is **mocked** in V1 (§7).
+A note on implementation status: V1 now has a working **Course Architect → Node Engine** spine. Stage 1 layers, reference ingestion/retrieval, node sets, node editing, blueprints, content specs, text production, structured visual production/editing, video briefs, and optional HeyGen render submission are implemented. Postgres/pgvector is the source of truth; Neo4j is an optional projection. LMS/SCORM, runtime learner-model writes, simulation, and full learner routing remain deferred (§7).
 
 ---
 
@@ -38,9 +38,9 @@ A note on honesty about scope: much of Maestro V1 is **net-new application code*
 | 5 | Node generation (node-set from a subtopic) | Step 2, Step 1 object |
 | 6 | Node Experience Blueprint (Level 1) | §8.0 |
 | 7 | Learning Object **Content Specification** (Level 2) | §8.1 |
-| 8 | **Modality production** via prompt templates (Level 3) — **text first**, then structured_visual + interactive | §8.2–§8.14 |
+| 8 | **Modality production** via prompt templates (Level 3) — text, structured_visual, and video production are implemented; interactive remains JSON/placeholder-first | §8.2–§8.14 |
 | 9 | Generated-object **envelope** | §8.6 |
-| 10 | **Step 9 validation** output (object-level; deterministic + retrieval-backed grounding) | §9.1–§9.16 |
+| 10 | **Step 9 validation** contracts are implemented; full object-level validator service remains to complete | §9.1–§9.16 |
 | 11 | SME / admin **review workflow** | §9.8–§9.9, §8.11.1 governance |
 | 12 | Prompt-template **registry & settings** (editable, versioned) | §8.14 |
 | 13 | Evidence Map + Milestone Assessment Pack **as stored contracts** (read for validation; full runtime readiness deferred) | Step 4, Step 7 |
@@ -54,8 +54,9 @@ A note on honesty about scope: much of Maestro V1 is **net-new application code*
 | Advanced / progressive autonomy (Levels 2–4 auto-proceed) | Earned over time; V1 stays at Level 0–1 (review-heavy) | §9.10 |
 | Full Live AI Companion runtime behaviour | Runtime governed separately; V1 only stores the *handoff template* | §6.6–§6.7, §8.14.6 |
 | Full interactive template **promotion lifecycle** (program→org→global) | V1 supports `course_only` + candidate creation only | §8.11.1 |
-| HeyGen video render, real image gen, interactive rendering | Mocked in V1 | §7 |
-| LMS / SCORM export | Mocked in V1 | §9.15 |
+| Real image generation and full interactive runtime rendering | Mocked/deferred in V1 | §7 |
+| LMS / SCORM export | Mocked/deferred in V1 | §9.15 |
+| Runtime learner-model writes and routing execution | Stored/validated only; no adaptive runtime execution yet | §9.14–§9.15 |
 | Tier-3 automated judgment checks | Route to SME-by-exception in V1 | §9.1 |
 
 **V1 autonomy posture:** Level 0–1 only. Generation always produces a candidate; a human approves before publish/route. This is the spec's "conservative default — review more rather than less."
@@ -84,7 +85,7 @@ Each module below is a buildable unit. *Acceptance criteria are the contract for
 
 ### M3 — Course Intake & Academic Contract
 - **Purpose:** Upload a syllabus, extract structure, store the `CourseAcademicContract`.
-- **Components:** `SyllabusExtractionService` (LLM + parser), `AcademicContractStore`, intake UI hook.
+- **Components:** `SyllabusExtractionService` (LLM + parser), Postgres-backed course/artifact stores, intake UI hook.
 - **Schemas:** `CourseAcademicContract`, `CLO`, `Assessment`.
 - **APIs/actions:** `uploadSyllabus(file)`, `extractContract(docRef)`, `getContract(courseId)`, `updateContract`.
 - **Dependencies:** M1; reuse existing document parsing where present.
@@ -139,12 +140,12 @@ Each module below is a buildable unit. *Acceptance criteria are the contract for
 - **Acceptance:** blueprint object → grounded Level 2 spec; `grounding_strength` computed; weak grounding flagged; spec approvable.
 
 ### M10 — Modality Production (Level 3)
-- **Purpose:** Transform an **approved** Level 2 spec into a produced object via the matching prompt template (§8.14). **Text first.**
-- **Components:** `ModalityProductionService` (orchestrator), per-vehicle adapters (text → structured_visual → interactive), reuse the existing **chat executor**.
+- **Purpose:** Transform an **approved** Level 2 spec into a produced object via the matching prompt template (§8.14). Implemented vehicles include text, structured visual, and video brief/render flow.
+- **Components:** `ModalityProductionService` (orchestrator), per-vehicle adapters (text, structured_visual, video), structured visual renderer/editor, optional HeyGen renderer with mock fallback, reuse the existing **chat executor**.
 - **Schemas:** `GeneratedObjectEnvelope` (§8.6), text segment model (§8.8), structured-visual `modality_specific` (§8.9), `InteractiveInstance`/`NewTemplateCandidate` (§8.11.1).
 - **APIs/actions:** `produceObject(contentSpecId, vehicle)`, `regenerate(objectId, reason)`.
 - **Dependencies:** M2 (templates), M9 (approved spec), chat executor.
-- **Acceptance:** approved text spec → valid envelope with `content.segments`, audit fields (`prompt_template_id/version`, `generation_mode`), `fidelity_check`; then the same for structured_visual and one interactive instance.
+- **Acceptance:** approved text spec → valid envelope with `content.segments`, audit fields (`prompt_template_id/version`, `generation_mode`), `fidelity_check`; structured_visual produces governed semantic visual JSON that can be rendered and edited; video brief produces HeyGen-ready data and can render through HeyGen when configured or a mock when not.
 
 ### M11 — Step 9 Validator (object-level)
 - **Purpose:** Independently validate a produced envelope; emit `ValidationResult` and a governance decision — §9.
@@ -302,7 +303,7 @@ Each module below is a buildable unit. *Acceptance criteria are the contract for
 | Blueprint | `generateBlueprint`, `approveBlueprint` | net-new |
 | Content Spec | `generateContentSpec`, `groundContentSpec` | **reuse RAG**; net-new spec logic |
 | Modality Production | `produceObject`, `regenerate` | **reuse chat executor**; net-new orchestration + adapters |
-| Prompt Template Registry | `getActiveVersion`, `updateTemplate` | net-new |
+| Prompt Template Registry | `getActiveVersion`, `updateTemplate` | implemented with immutable version append |
 | Validation (Step 9) | `validateObject`, `revalidate` | **reuse RAG** for Tier 2; net-new Tier 1 + decision rule |
 | Review Workflow | `listReviewQueue`, `submitReviewDecision`, `routeToOwner` | net-new |
 | Asset / Versioning | `storeAsset`, `bumpVersion`, `getLineage` | net-new |
@@ -319,10 +320,10 @@ Each module below is a buildable unit. *Acceptance criteria are the contract for
 6. **M7 — Node object generation** (reproduce the worked node).
 7. **M8 + M9 — Blueprint (Level 1) → Content Specification (Level 2)** with grounding.
 8. **M10 (text only)** — produce the **text** object into the envelope. *This is the moment the spine is "alive."*
-9. **M11 — Step 9 validation** on the text object (Tier 1 + Tier 2 + decision rule).
+9. **M11 — Step 9 validation** contracts are present; complete the validator service/route before treating validation as an automated gate.
 10. **M12 — SME review queue** (approve / regenerate).
 11. **M13 — Learner preview** (text renders; rest placeholder).
-12. **Widen M10** — add **structured_visual**, then **one interactive instance** (+ template profile + `course_only` candidate path), re-running M11–M13 for each.
+12. **Widen M10** — structured_visual and video production are implemented; full interactive instances remain JSON/placeholder-first until the runtime widget layer exists.
 
 *Checkpoint after step 11: the full golden path works on text. Only then widen modalities.*
 
@@ -333,9 +334,9 @@ Each module below is a buildable unit. *Acceptance criteria are the contract for
 | Mock | V1 stand-in |
 |---|---|
 | LMS integration | `MockLmsExporter` — logs the high-level payload (completion/status/readiness/credit) that *would* be sent; no real connection (§9.15). |
-| HeyGen video generation | `MockVideoRenderer` — accepts the brief, returns a fake `video_url` + the transcript as text-equivalent. |
+| HeyGen video generation | Optional live HeyGen render when `HEYGEN_API_KEY` and avatar/voice settings are configured; otherwise the renderer falls back to a contract-shaped mock. |
 | Full image generation | `MockImageRenderer` — returns a placeholder image ref + the alt_text/text_equivalent. |
-| Interactive rendering | Render the **instance JSON** + a static placeholder; no live widget. |
+| Interactive rendering | Render the **instance JSON** + a static placeholder; no full adaptive widget runtime. |
 | Runtime learner model | `MockLearnerModel` — stores nothing diagnostic; preview only. |
 | Live AI Companion runtime handoff | Store the **handoff template**; do not execute it. |
 | Analytics / runtime monitoring | None in V1; manual SME loop only. |
@@ -355,8 +356,8 @@ V1 is working when, on a real syllabus, a user can:
 4. **Generate subtopics → nodes**, reproducing the worked node with its primary EC requirement.
 5. **Generate a Node Blueprint (Level 1)** and an approved **Content Spec (Level 2)** with grounding + `grounding_strength`.
 6. **Produce a TEXT object** via the text prompt template into a valid **envelope** (audit fields, `fidelity_check`).
-7. **Produce a structured_visual** and **one interactive instance** JSON the same way.
-8. **Run Step 9 validation** — clean object passes (held at Level 0–1); seeded-bad object correctly fails; milestone-linked object never auto-proceeds.
+7. **Produce a structured_visual** and video brief/render object the same way; interactive remains a placeholder/runtime-deferred path.
+8. **Run Step 9 validation** once the validator service is complete — clean object passes (held at Level 0–1); seeded-bad object correctly fails; milestone-linked object never auto-proceeds.
 9. **Show the SME review queue** with priority + reasons + correct visibility.
 10. **Approve / regenerate** an object, with lineage recorded.
 11. **Render a learner preview** of the node (text real; others placeholder).
@@ -370,14 +371,14 @@ V1 is working when, on a real syllabus, a user can:
 > **Paste-ready brief for Cursor. Build in phases; do not skip the schema phase; keep every mock contract-shaped.**
 
 ### Objective
-Build the Maestro V1 "golden path": **syllabus → contract → CLOs → assessments/milestone packs → subtopics → nodes → blueprint → content spec → text object → envelope → Step 9 validation → SME review → learner preview**, then widen to structured_visual and one interactive instance. V1 stays at autonomy **Level 0–1** (human approves before publish). Reuse the existing **reference-grounding retrieval** and **chat executor**; mock everything in the "do-not-build-yet" list.
+Build and maintain the Maestro V1 "golden path": **syllabus → Course Architect Stage 1 layers → approved subtopic architecture → node set → blueprint → content spec → produced object envelope → SME review / iteration**, widening across text, structured visuals, and video production. V1 stays at autonomy **Level 0–1** (human approves before publish). Reuse the existing **reference-grounding retrieval** and **chat executor**; keep runtime learner routing, LMS/SCORM, simulation, and full interactive execution deferred.
 
 ### Build phases
-- **Phase 0 — Foundations:** M1 schemas/enums; M2 prompt registry (seed 7 templates).
-- **Phase 1 — Intake→Structure:** M3 intake; M4 CLOs; M5 assessments+milestone packs; M6 subtopics.
-- **Phase 2 — Nodes→Spec:** M7 nodes; M8 blueprint; M9 content spec + grounding.
-- **Phase 3 — Produce→Validate→Review (TEXT):** M10 text; M11 Step 9; M12 review queue; M13 preview.
-- **Phase 4 — Widen:** structured_visual, then one interactive instance (+ profile + course_only candidate), re-running Phase 3 checks.
+- **Phase 0 — Foundations:** schemas/enums, Postgres/pgvector persistence, RBAC, prompt registry, modality config.
+- **Phase 1 — Intake→Structure:** syllabus/form intake, Stage 1 layer review, CLO refinement, assessment redesign, rubric/integrity review, approved subtopic architecture.
+- **Phase 2 — Nodes→Spec:** node sets, node editing/reopen/regenerate, blueprint generation/approval, content specs + grounding.
+- **Phase 3 — Produce→Review:** text objects, structured visuals, video briefs, optional video render, SME edits/approval and audit.
+- **Phase 4 — Deferred runtime:** full interactive execution, learner model writes/routing, LMS/SCORM, simulation.
 
 ### Modules
 M1 Schema Core · M2 Prompt Registry · M3 Intake/Contract · M4 CLO Refinement · M5 Assessment/Milestone · M6 Subtopics · M7 Nodes · M8 Blueprint · M9 Content Spec · M10 Modality Production · M11 Step 9 Validator · M12 Review Workflow · M13 Learner Preview. *(Details in §2.)*
@@ -404,7 +405,7 @@ S1 Intake · S2 Contract Dashboard · S3 CLO Review · S4 Assessment Review · S
 4. Subtopic → node-set; worked node reproducible; `ec_node_<id>_primary` present.
 5. Blueprint → content spec; weak grounding flagged.
 6. Approved text spec → valid envelope (audit + fidelity_check).
-7. structured_visual + interactive instance produced as valid envelopes.
+7. structured_visual + video brief/render objects produced as valid envelopes; interactive remains placeholder/runtime-deferred.
 8. **Bad-object tests:** invented claim → grounding fail; missing citation → Tier-1 fail; EC reveals answer → fail; pictorial carrying academic text → fail/reroute.
 9. Milestone-linked object → never `auto_proceed`.
 10. Review queue ordering by priority; approve + regenerate both work with lineage.
@@ -412,10 +413,11 @@ S1 Intake · S2 Contract Dashboard · S3 CLO Review · S4 Assessment Review · S
 12. Edit a prompt template → new version; previously generated objects keep old version.
 
 ### Deferred items
-Simulation engine · runtime analytics/monitoring automation · advanced autonomy (Levels 2–4) · full Live AI Companion runtime · interactive template promotion (program/org/global) · real HeyGen/image/interactive rendering · LMS/SCORM export · automated Tier-3 judgment.
+Simulation engine · runtime analytics/monitoring automation · advanced autonomy (Levels 2–4) · full Live AI Companion runtime · interactive template promotion (program/org/global) · real image generation · full interactive runtime rendering · LMS/SCORM export · runtime learner-model writes/routing execution · automated Tier-3 judgment.
 
 ### Do-not-build-yet list (guard rails)
-- Do **not** wire real HeyGen, image gen, or interactive rendering — use the mocks.
+- Do **not** wire real image generation or full interactive rendering — use contract-shaped mocks/placeholders.
+- Do **not** require HeyGen for local development — live video rendering remains optional and must fall back to the mock path when not configured.
 - Do **not** build runtime learner-model writes or routing **execution** — V1 stores/validates, it does not run the adaptive engine at runtime.
 - Do **not** implement auto-proceed-without-human — V1 is Level 0–1.
 - Do **not** export anything to an LMS.

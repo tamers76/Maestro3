@@ -1,31 +1,29 @@
 # Maestro V1 — Phase 0 Decisions Sheet
 
-*Resolve these **before** writing M1 (Schema/Enum Core) and M2 (Prompt-Template Registry). Each item gives a recommended default + rationale. Items marked **[CONFIRM IN REPO]** must be checked against the live codebase, not chosen on paper — Claude can't see the repo, so these need you or Cursor to verify against actual code rather than the spec's described intent.*
+*Historical Phase 0 decision record for M1 (Schema/Enum Core) and M2 (Prompt-Template Registry). This file now records the decisions reflected in the live codebase, including the Postgres/pgvector primary store, optional Neo4j projection, RBAC, and Node Engine prompt/config persistence.*
 
 *Pairs with: Maestro-V1-Build-Readiness-and-Cursor-Package.md and Maestro-Node-Engine-Build-Spec.md.*
 
 ---
 
-## D1 — Storage substrate: what is a graph node vs a document?
+## D1 — Storage substrate: Postgres primary, Neo4j projection
 
-The spec uses Neo4j + file/JSON. V1 needs an explicit mapping so Cursor doesn't pick one substrate for everything and redo migrations later.
+The implemented decision is **Postgres/pgvector first**. All authoritative entities, settings, auth/RBAC data, audit events, pipeline artifacts, Node Engine objects, reference chunks, and embeddings live in Postgres. JSON-shaped artifacts are stored as JSONB where appropriate, and vectors live in pgvector columns.
 
-**Recommended split:**
+**Postgres — source of truth:**
+- Course and Stage 1 artifacts, CLO refinements, assessment redesigns, weighting rubrics, integrity review, subtopic architecture.
+- Node Engine objects: node sets, node edits, blueprints, content specs, prompt templates, modality config, produced objects, reference coverage config, and node-generation prompt versions.
+- Auth/RBAC, course ownership, reviewers/students, review requests, audit events, settings, digital library metadata, references, and RAG chunks.
 
-**Graph (Neo4j) — the relational web (things connected by edges, traversed by routing/pathway logic):**
-- `CourseAcademicContract`, `CLO`, `Assessment`, `Subtopic`, `Node`, `KnowledgeComponent`, `EvidenceMap`, `MilestoneAssessmentPack`
-- Edges: `Course-[:HAS_CLO]->CLO`, `Course-[:HAS_ASSESSMENT]->Assessment`, `Subtopic-[:HAS_NODE]->Node`, `Node-[:TARGETS_KC]->KC`, `Node-[:HAS_EVIDENCE_MAP]->EvidenceMap`, `Node-[:PREPARES_FOR]->Assessment`, `Assessment-[:HAS_MILESTONE_PACK]->MilestoneAssessmentPack`, `CLO-[:ALIGNS_WITH]->Assessment`.
-- *Why graph:* these are exactly the relationships §9.18 pathway validation traverses (sequence, routing targets, readiness-signal wiring, milestone evidence sources). Putting them in the graph makes that pass natural later.
+**Neo4j — optional graph projection:**
+- Used for traversal/DAG/visualization and graph-oriented compatibility.
+- Startup does not require Neo4j. The server starts in degraded graph mode when Neo4j is unavailable.
+- Entity reads/writes do not depend on Neo4j.
 
-**Document/JSON store — the produced artifacts and their audit (read/written as whole blobs, versioned, rarely traversed):**
-- `GeneratedObjectEnvelope` (the produced learning/support objects), `ValidationResult`, `PromptTemplate` (+ versions), `ModalityGenerationConfig`, `InteractiveTemplateProfile`, `InteractiveInstance`, `NewTemplateCandidate`, Level 2 content specs, Level 1 blueprints.
-- Each carries the **foreign keys** back to the graph (`parent_node_id`, `parent_milestone_pack_id`, `kc_ids[]`, `content_spec_id`) so the two stores join cleanly.
+**Filesystem — binary storage:**
+- Uploaded syllabi, reference/library files, covers, avatars, compiled exports, and rendered/stored videos live on disk with metadata in Postgres.
 
-**The bridge:** an envelope is a document, but it has a lightweight graph stub `(:LearningObject {object_id})-[:BELONGS_TO]->(:Node)` so pathway validation can see object→node membership without loading every blob.
-
-**[CONFIRM IN REPO]** What's already wired — is Neo4j live and connected? Is there an existing JSON/file store pattern (paths, naming)? Match the existing convention rather than introducing a second one.
-
-> **Decision to record:** ____ (accept split as above / adjust which schemas go where)
+> **Decision recorded:** Postgres/pgvector is authoritative; Neo4j is optional projection only.
 
 ---
 
@@ -33,15 +31,15 @@ The spec uses Neo4j + file/JSON. V1 needs an explicit mapping so Cursor doesn't 
 
 `ec_node_<node_id>_primary` is fixed by the spec. Everything else needs a convention so references resolve across modules.
 
-**Recommended:** human-readable **prefixed slugs** for graph entities, UUIDs for high-volume artifacts.
-- Graph entities: `course_<slug>`, `clo_<course>_<n>`, `assess_<course>_<A1..A4>`, `subtopic_<course>_<n>`, `node_<subtopic>_<n>`, `kc_<n>`, `emap_<node_id>`, `mpack_<assessment_id>`.
+**Recorded default:** human-readable **prefixed slugs** for course-structure entities, UUIDs for high-volume artifacts.
+- Course-structure entities: `course_<slug>`, `clo_<course>_<n>`, `assess_<course>_<A1..A4>`, `subtopic_<course>_<n>`, `node_<subtopic>_<n>`, `kc_<n>`, `emap_<node_id>`, `mpack_<assessment_id>`.
 - Evidence Check (fixed by spec): `ec_node_<node_id>_primary`.
 - Artifacts: `obj_<uuid>` (envelopes), `val_<uuid>` (validation results), `tmplcand_<uuid>` (candidates).
 - Prompt templates: keep the spec's literal IDs (`text_generation_prompt`, etc.) — they are stable names, with version carried separately (see D3).
 
-*Why mixed:* slugs make the graph and logs readable while debugging V1; UUIDs avoid collision for the many generated objects/validations.
+*Why mixed:* slugs make course structure, optional graph projection, and audit logs readable while debugging V1; UUIDs avoid collision for the many generated objects/validations.
 
-> **Decision to record:** ____ (accept / all-UUID / all-slug)
+> **Decision recorded:** mixed slugs + UUIDs.
 
 ---
 
@@ -49,7 +47,7 @@ The spec uses Neo4j + file/JSON. V1 needs an explicit mapping so Cursor doesn't 
 
 "Edit → new version; published versions immutable; objects keep their original `prompt_version`" is the rule. M2 can't be built without the mechanism.
 
-**Recommended:**
+**Recorded default:**
 - **Version identifier:** monotonic **integer per template** (`v1`, `v2`, …), plus an optional human `change_note`. Avoid semver in V1 — there's no public contract to communicate breaking-vs-minor; integers are simpler and unambiguous.
 - **History storage:** each version is a **separate immutable record** keyed `(prompt_template_id, version)`; the registry tracks a pointer `active_version` per template. Never mutate a published version in place.
 - **Resolution at generation time:** `getActiveVersion(vehicle)` returns `(prompt_template_id, version, taskPrompt)`; the produced object's envelope stores **that exact `prompt_version`**. Regeneration may use a newer active version → new object version (§9.13).
@@ -57,7 +55,7 @@ The spec uses Neo4j + file/JSON. V1 needs an explicit mapping so Cursor doesn't 
 
 **The same mechanism applies to Step 9 itself** (`validation_version`) — when validator rules/thresholds change, that's a versioned change and existing passed objects aren't silently re-judged (§9.13). Build the version primitive once, reuse it for both.
 
-> **Decision to record:** ____ (integer + pointer as above / alternative)
+> **Decision recorded:** monotonic integer versions plus active pointers; published versions are immutable.
 
 ---
 
@@ -84,37 +82,34 @@ Several enums recur across schemas. They must live **only** in the enum core; ev
 
 **Rule for Cursor:** no string literal for any of the above anywhere except the enum core. A schema field types against the enum, never a raw string.
 
-> **Decision to record:** ____ (accept list / additions)
+> **Decision recorded:** centralize these enum vocabularies in the Node Engine/schema core and keep object governance status separate from validator governance decision.
 
 ---
 
-## D5 — Council executor & RAG interface **[CONFIRM IN REPO]**
+## D5 — Council executor & RAG interface
 
-M2 wires templates into the existing **council/chat executor**, and M9/M11 call the existing **RAG retrieval**. The spec *describes* these; the live code is the authority. Confirm before building the adapters.
+The live code confirms both reuse points.
 
-**Confirm for the executor:**
-- Exact function/method signature and module path.
-- Input shape: how does it take a system/task prompt, `mode: single | council`, and member/chairman prompts? Does it already support council, or is that net-new?
-- Output shape: does it return raw text, a structured object, tool-call blocks? (M10 must parse the produced JSON out of it.)
-- How are model selection / params passed?
+**Executor:**
+- `backend/src/services/council.service.ts` provides the AI execution layer used by legacy stages and Node Engine services.
+- Settings support single/council execution, council members, chairman model, member/chairman prompts, model selection, temperatures, and provider configuration.
+- Node Engine modality config resolves the model per vehicle and stores prompt-template versions separately from model settings.
 
-**Confirm for RAG retrieval:**
-- The retrieval entry point(s) and their signature (the spec references a `buildGroundedContext` / `retrieveReferenceChunks`-style layer — verify the real names).
-- What it returns per chunk (text, source ref, score) — M9 needs source refs for citations; M11 Tier-2 needs them for claim-to-passage matching.
-- Embedding default and whether it's already configured (the spec notes an Ollama `nomic-embed-text` default — confirm).
+**RAG retrieval:**
+- `backend/src/services/referenceRetrieval.service.ts` exposes reference retrieval for course-scoped grounding.
+- Course references are ingested through `backend/src/services/referenceIngestion.service.ts` and related services for chunking, dedupe, contextual embedding, alignment, coverage, quality, and source suggestions.
+- Retrieval uses Postgres/pgvector, with embedding provider/model/dimensions configured through environment/settings.
 
-**Why this matters:** these are the two reuse points that prevent rebuilding. If the executor doesn't yet support council mode, that's a scope flag for Phase 0 (V1 can ship `single` mode and defer council — the prompt templates already say council is optional).
-
-> **Decision to record:** executor signature ____ · council supported now? ____ · RAG entry point ____ · returns source refs? ____ · embedding default confirmed? ____
+> **Decision recorded:** reuse the implemented council/chat executor and pgvector RAG services; do not introduce a second executor or vector backend.
 
 ---
 
 ## D6 — Two small consistency confirmations (cheap, prevents rework)
 
 - **`governance_status` vs `governance_decision`:** as noted in D4, Step 8 objects carry `governance_status` (no `reject`); Step 9 emits `governance_decision` (adds `reject`). Decide the mapping: a Step 9 `reject` sets the object's `governance_status` to `needs_revision` or a new terminal `rejected` value. *Recommended:* add `rejected` to `governance_status` so the object can hold a terminal state; document that only Step 9 can set it.
-- **Pre-existing build state:** the spec flagged **two pre-existing tsc errors** and an Ollama embedding default as housekeeping. **[CONFIRM IN REPO]** — clear or knowingly defer these before layering M1/M2 on top, so new code isn't built on a red build.
+- **Pre-existing build state:** the repo now carries Node Engine, auth/RBAC, library, audit, and pgvector tests. Keep `npm run build`, `npm --prefix frontend run build`, and `npm --prefix backend test` as the current verification commands. DB-backed tests remain opt-in through `RUN_DB_TESTS=1`.
 
-> **Decisions to record:** reject→status mapping ____ · tsc errors cleared/deferred ____
+> **Decisions recorded:** use separate `governance_status` and `governance_decision` enums; keep build/test status verified through the current scripts.
 
 ---
 
@@ -122,13 +117,13 @@ M2 wires templates into the existing **council/chat executor**, and M9/M11 call 
 
 | # | Decision | Type |
 |---|---|---|
-| D1 | Graph vs document storage split | choose + **[CONFIRM IN REPO]** |
-| D2 | ID convention | choose |
-| D3 | Version mechanics (integer + active-pointer, immutable versions) | choose |
-| D4 | Enum single-source list | accept/extend |
-| D5 | Council executor + RAG interface | **[CONFIRM IN REPO]** |
-| D6 | status/decision mapping + clear pre-existing tsc errors | choose + **[CONFIRM IN REPO]** |
+| D1 | Postgres/pgvector primary store + optional Neo4j projection | recorded |
+| D2 | ID convention | recorded |
+| D3 | Version mechanics (integer + active-pointer, immutable versions) | recorded |
+| D4 | Enum single-source list | recorded |
+| D5 | Council executor + RAG interface | recorded |
+| D6 | status/decision mapping + build/test verification | recorded |
 
-Once D1–D6 are recorded, Cursor has an unambiguous foundation for M1 (schema/enum core) and M2 (prompt-template registry), and the rest of the package's modules inherit consistent IDs, enums, storage, and versioning.
+With D1–D6 recorded, the implemented M1/M2 foundation is unambiguous: Postgres/pgvector owns state, Neo4j is projection-only, enums are centralized, prompt versions are immutable, and Node Engine generation reuses the existing executor/RAG services.
 
 *End of Phase 0 Decisions Sheet.*
